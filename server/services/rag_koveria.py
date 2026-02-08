@@ -1,4 +1,4 @@
-# server/services/rag_service.py (im Agent-Projekt)
+# server/services/rag_koveria.py (im Agent-Projekt)
 from typing import Any, Dict, Optional
 import requests
 

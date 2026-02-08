@@ -1,6 +1,8 @@
 from __future__ import annotations
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field
+
 
 
 class RagQueryRequest(BaseModel):
@@ -69,3 +71,15 @@ class AgentRunRequest(BaseModel):
 class AgentRunResponse(BaseModel):
     ok: bool
     outputs: List[Dict[str, Any]] = Field(default_factory=list)
+
+class AgentAskRequest(BaseModel):
+    goal: str = Field(..., min_length=1)
+    top_k: int = Field(5, ge=1, le=50)
+    classification: Optional[str] = None  # optional
+
+class AgentAskResponse(BaseModel):
+    ok: bool
+    goal: str
+    steps: List[Dict[str, Any]] = Field(default_factory=list)
+    tool_outputs: List[Dict[str, Any]] = Field(default_factory=list)
+    answer: str

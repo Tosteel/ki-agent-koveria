@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, Depends, Response
+from fastapi.security import HTTPAuthorizationCredentials
 from typing import Any, Dict
 
 from .core.logging import setup_logging
@@ -16,7 +17,7 @@ from .core.models import (
 )
 from .deps import get_current_user, settings as dep_settings
 
-from .services.rag_service import RagService
+from .services.rag_koveria import RagService
 from .tools.filesystem import read_text, write_text
 from .tools.pdf import export_text_pdf
 
@@ -28,6 +29,11 @@ security = HTTPBearer(auto_error=False)
 
 app = FastAPI(title="ki-agent-koveria", version="0.1.0")
 
+from .core.models import AgentAskRequest, AgentAskResponse
+from .services.llm_openai import LlmRuntime
+from server.services.llm_ionos import IonosLLM
+
+from .agent.planner import Planner
 
 @app.on_event("startup")
 def _startup() -> None:
@@ -132,7 +138,7 @@ def _build_registry() -> ToolRegistry:
 
     def tool_query_rag(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = RagQueryRequest(**args)
-        service = RagService(base_url=ctx.settings.rag_base_url, api_key=ctx.api_key)
+        service = RagService(ctx.settings.rag_base_url, ctx.api_key)
         return service.query(query=req.query, top_k=req.top_k)
 
     def tool_pdf_export(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -201,3 +207,79 @@ def agent_run(
 
     ok = all(o.get("ok") for o in outputs) if outputs else True
     return AgentRunResponse(ok=ok, outputs=outputs)
+
+@app.post("/agent/askOpenAI", response_model=AgentAskResponse)
+def agent_askOpenAI(
+    req: AgentAskRequest,
+    user_id: str = Depends(get_current_user),
+    s: Settings = Depends(dep_settings),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> AgentAskResponse:
+    _ensure_user_dirs(s, user_id)
+
+    api_key = credentials.credentials
+    registry = _build_registry()           # existiert bei dir bereits
+    orch = Orchestrator(registry)          # existiert bei dir bereits
+    ctx = ToolContext(user_id=user_id, settings=s, api_key=api_key)
+
+    llm = LlmRuntime()
+    planner = Planner(llm)
+
+    steps = planner.create_steps(req.goal)
+
+    # Optional: top_k/classification in query_rag step injizieren
+    for st in steps:
+        if st.get("tool") == "query_rag":
+            st.setdefault("args", {})
+            st["args"]["top_k"] = req.top_k
+            if req.classification is not None:
+                st["args"]["classification"] = req.classification
+
+    tool_outputs = orch.run_steps(ctx, steps)
+
+    if llm.enabled():
+        answer = llm.final_answer(goal=req.goal, tool_outputs=tool_outputs)
+    else:
+        # Fallback: sehr kurze Antwort aus Outputs
+        answer = str(tool_outputs)
+
+    ok = all(o.get("ok") for o in tool_outputs) if tool_outputs else True
+    return AgentAskResponse(ok=ok, goal=req.goal, steps=steps, tool_outputs=tool_outputs, answer=answer)
+
+@app.post("/agent/askIonos", response_model=AgentAskResponse)
+def agent_askIonos(
+    req: AgentAskRequest,
+    user_id: str = Depends(get_current_user),
+    s: Settings = Depends(dep_settings),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> AgentAskResponse:
+    _ensure_user_dirs(s, user_id)
+
+    api_key = credentials.credentials
+    registry = _build_registry()           # existiert bei dir bereits
+    orch = Orchestrator(registry)          # existiert bei dir bereits
+    ctx = ToolContext(user_id=user_id, settings=s, api_key=api_key)
+
+    llm = IonosLLM()
+    planner = Planner(llm)
+
+    steps = planner.create_steps(req.goal)
+
+    # Optional: top_k/classification in query_rag step injizieren
+    for st in steps:
+        if st.get("tool") == "query_rag":
+            st.setdefault("args", {})
+            st["args"]["top_k"] = req.top_k
+            if req.classification is not None:
+                st["args"]["classification"] = req.classification
+
+    tool_outputs = orch.run_steps(ctx, steps)
+
+    if llm.enabled():
+        answer = llm.final_answer(goal=req.goal, tool_outputs=tool_outputs)
+    else:
+        # Fallback: sehr kurze Antwort aus Outputs
+        answer = str(tool_outputs)
+
+    ok = all(o.get("ok") for o in tool_outputs) if tool_outputs else True
+    return AgentAskResponse(ok=ok, goal=req.goal, steps=steps, tool_outputs=tool_outputs, answer=answer)
