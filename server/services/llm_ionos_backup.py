@@ -4,7 +4,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -69,6 +69,7 @@ class IonosLLM:
         self.cfg = cfg
 
         self.session = requests.Session()
+        # Header wird pro Request ergänzt; aber Session-Defaults helfen.
         if self.cfg.api_key:
             self.session.headers.update({"Authorization": f"Bearer {self.cfg.api_key}"})
         self.session.headers.update({"Content-Type": "application/json"})
@@ -77,15 +78,15 @@ class IonosLLM:
         return bool(self.cfg.api_key and self.cfg.api_base and self.cfg.model)
 
     def chat_completions(
-        self,
-        messages: List[Dict[str, str]],
-        *,
-        max_tokens: Optional[int] = None,
-        temperature: Optional[float] = None,
-        top_p: Optional[float] = None,
-        timeout_s: Optional[int] = None,
-        retries: Optional[int] = None,
-        response_format: Optional[Dict[str, Any]] = None,
+            self,
+            messages: List[Dict[str, str]],
+            *,
+            max_tokens: Optional[int] = None,
+            temperature: Optional[float] = None,
+            top_p: Optional[float] = None,
+            timeout_s: Optional[int] = None,
+            retries: Optional[int] = None,
+            response_format: Optional[Dict[str, Any]] = None,  # <-- NEU
     ) -> Dict[str, Any]:
         if not self.enabled():
             raise RuntimeError("IONOS is not configured (missing IONOS_API_KEY / IONOS_API_BASE / IONOS_MODEL).")
@@ -99,9 +100,9 @@ class IonosLLM:
             "top_p": float(top_p if top_p is not None else self.cfg.top_p),
         }
 
-        # IONOS: response_format unterstützt json_object und json_schema (Structured Outputs)
         if response_format is not None:
-            payload["response_format"] = response_format
+            payload[
+                "response_format"] = response_format  # <-- NEU (IONOS unterstützt das) :contentReference[oaicite:1]{index=1}
 
         timeout = int(timeout_s if timeout_s is not None else self.cfg.timeout_s)
         n_retries = int(retries if retries is not None else self.cfg.retries)
@@ -114,6 +115,7 @@ class IonosLLM:
                 return resp.json()
             except Exception as e:
                 last_err = e
+                # einfacher Backoff
                 time.sleep(0.8 * (attempt + 1))
 
         raise RuntimeError(f"IONOS chat request failed: {last_err}")
@@ -133,35 +135,22 @@ class IonosLLM:
             return None
 
     # ---------------------------------------------------------------------
-    # Agent runtime: plan_steps + final_answer
+    # "Agent runtime"-nahe Hilfsfunktionen: plan_steps + final_answer
     # ---------------------------------------------------------------------
 
     def plan_steps(self, *, goal: str, tool_schema: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Structured Output via response_format=json_schema.
-        tool_schema erwartet Format:
-          {"name": "...", "schema": {...}}  oder direkt {"schema": {...}}.
-        """
-        schema_obj = tool_schema.get("schema", tool_schema)
-        schema_name = tool_schema.get("name", "tool_plan")
-
         response_format = {
             "type": "json_schema",
             "json_schema": {
-                "name": schema_name,
-                "schema": schema_obj,
+                "name": tool_schema.get("name", "tool_plan"),
+                "schema": tool_schema.get("schema", tool_schema),
                 "strict": True,
             },
         }
 
-        # Primär: json_schema erzwingen
         completion = self.chat_completions(
             messages=[
-                {"role": "system",
-                 "content": "You are a planner. Output ONLY valid JSON with a top-level key 'steps'.\n"
-                            "read_file ist verboten, wenn der Nutzer keine Datei benennt. In diesem Fall MUSS query_rag genutzt werden.\n"
-                            "Formuliere für query_rag-Queries die Suchbegriffe (keine SQL).\n"
-                 },
+                {"role": "system", "content": "You are a planner. Output ONLY JSON that matches the schema."},
                 {"role": "user", "content": f"Goal: {goal}"},
             ],
             response_format=response_format,
@@ -170,27 +159,79 @@ class IonosLLM:
         text = self.extract_text(completion)
         parsed = _parse_json_strictish(text)
         steps = parsed.get("steps") or []
-        if isinstance(steps, list) and steps:
-            return {"steps": steps}
+        if not isinstance(steps, list):
+            steps = []
 
-        # Fallback: wenigstens JSON erzwingen (falls json_schema/oneOf nicht sauber unterstützt wird)
-        completion2 = self.chat_completions(
-            messages=[
-                {"role": "system",
-                 "content": "You are a planner. Output ONLY valid JSON with a top-level key 'steps'.\n"
-                            "read_file ist verboten, wenn der Nutzer keine Datei benennt. In diesem Fall MUSS query_rag genutzt werden.\n"
-                            "Formuliere für query_rag-Queries die Suchbegriffe (keine SQL).\n"
-                 },
-                {"role": "user", "content": f"Goal: {goal}"},
-            ],
-            response_format={"type": "json_object"},
+        return {"steps": steps}
+
+    def _plan_steps_with_allowed_tools(
+            self,
+            *,
+            goal: str,
+            allowed_tools: List[str],
+    ) -> List[Dict[str, Any]]:
+        system = (
+            "Du bist ein Planner.\n"
+            "Erzeuge einen Ausführungsplan als reines JSON und nichts anderes.\n\n"
+
+            "Allgemeine Regeln:\n"
+            "- Antworte AUSSCHLIESSLICH mit gültigem JSON.\n"
+            "- Halte dich strikt an die vorgegebenen Tool-Namen.\n"
+            "- Verwende keine zusätzlichen Felder.\n\n"
+
+            "Tool-Struktur:\n"
+            '{ "steps": [ { "tool": "<tool-name>", "args": { ... } } ] }\n\n'
+
+            "Tool-Auswahl-Regeln:\n"
+            "- Wenn Fakten/Informationen gesucht werden (z.B. Preise, Definitionen, Inhalte aus Dokumenten): nutze zuerst query_rag.\n"
+            "- Nutze read_file nur, wenn der Nutzer explizit eine konkrete Datei genannt hat ODER wenn ein vorheriger Schritt den Dateinamen geliefert hat.\n"
+            "- Wenn query_rag Ergebnisse liefert: nutze die Snippets für die Antwort oder schreibe eine Zusammenfassung in eine Datei.\n"
+            "- Wenn der Nutzer keine konkrete Datei nennt: verwende KEIN read_file. In diesem Fall MUSS query_rag genutzt werden.\n"
+            "- Formuliere query_rag-Queries als Suchanfrage (keine SQL). Beispiel: 'Deckenabhängung Preis €/m²'.\n"
+            "- Für Export: nutze pdf_export.\n"
+
+
+            "Pfad-Regeln (sehr wichtig):\n"
+            "- Alle Pfade sind RELATIV zum Work-Verzeichnis des Nutzers.\n"
+            "- Verwende KEIN Präfix wie 'user/work', 'work/' oder '/'.\n"
+            "- Beispiel korrekt: 'decke.txt', 'exports/plan.pdf'\n"
+            "- Beispiel falsch: 'user/work/decke.txt'\n\n"
+
+            f"Erlaubte Tools: {', '.join(allowed_tools)}\n"
         )
-        text2 = self.extract_text(completion2)
-        parsed2 = _parse_json_strictish(text2)
-        steps2 = parsed2.get("steps") or []
-        return {"steps": steps2 if isinstance(steps2, list) else []}
+
+        user = f"Ziel: {goal}"
+
+        completion = self.chat_completions(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ]
+        )
+
+        text = self.extract_text(completion)
+        parsed = _parse_json_strictish(text)
+
+        steps = parsed.get("steps", [])
+        if not isinstance(steps, list):
+            return []
+
+        # Sicherheitsfilter
+        cleaned = []
+        for s in steps:
+            if (
+                    isinstance(s, dict)
+                    and s.get("tool") in allowed_tools
+                    and isinstance(s.get("args", {}), dict)
+            ):
+                cleaned.append(s)
+
+        return cleaned
 
     def final_answer(self, *, goal: str, tool_outputs: List[Dict[str, Any]]) -> str:
+        """
+        Erzeugt eine finale Antwort auf Basis der Tool-Outputs.
+        """
         system = (
             "Du bist ein Assistent. Antworte sachlich und knapp.\n"
             "Nutze ausschließlich die Tool-Outputs. Erfinde nichts.\n"
@@ -219,27 +260,30 @@ def _parse_json_strictish(text: str) -> Dict[str, Any]:
 
     t = text.strip()
 
-    # Codeblock entfernen
+    # Entferne ```...``` falls vorhanden
     if t.startswith("```"):
-        t = t.strip("`").strip()
-        # oft steht 'json' in der ersten Zeile
-        if "\n" in t:
-            first, rest = t.split("\n", 1)
-            if first.strip().lower() in ("json", "javascript"):
-                t = rest.strip()
+        # entferne erste Zeile ``` oder ```json
+        lines = t.splitlines()
+        if len(lines) >= 2:
+            # drop first and last fence if present
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip().startswith("```"):
+                lines = lines[:-1]
+            t = "\n".join(lines).strip()
 
-    # Direkt versuchen
+    # Versuch 1: direkt
     try:
         obj = json.loads(t)
         return obj if isinstance(obj, dict) else {}
     except Exception:
         pass
 
-    # Fallback: erstes {...} herausschneiden
+    # Versuch 2: erstes {...} extrahieren
     start = t.find("{")
     end = t.rfind("}")
-    if start >= 0 and end > start:
-        snippet = t[start : end + 1]
+    if start != -1 and end != -1 and end > start:
+        snippet = t[start: end + 1]
         try:
             obj = json.loads(snippet)
             return obj if isinstance(obj, dict) else {}

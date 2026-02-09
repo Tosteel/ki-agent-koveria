@@ -1,5 +1,4 @@
 # uvicorn server.main:app --host 0.0.0.0 --port 8012 --reload
-
 from __future__ import annotations
 
 from fastapi import FastAPI, Depends, Response
@@ -35,16 +34,17 @@ from server.services.llm_ionos import IonosLLM
 
 from .agent.planner import Planner
 
+from dotenv import load_dotenv
+load_dotenv()
+
 @app.on_event("startup")
 def _startup() -> None:
     setup_logging()
-
 
 def _ensure_user_dirs(s: Settings, user_id: str) -> None:
     s.user_work_dir(user_id).mkdir(parents=True, exist_ok=True)
     s.user_rag_dir(user_id).mkdir(parents=True, exist_ok=True)
     s.user_logs_dir(user_id).mkdir(parents=True, exist_ok=True)
-
 
 # ----------------------------- Health / User -----------------------------
 @app.get("/health")
@@ -139,19 +139,37 @@ def _build_registry() -> ToolRegistry:
     def tool_query_rag(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = RagQueryRequest(**args)
         service = RagService(ctx.settings.rag_base_url, ctx.api_key)
-        return service.query(query=req.query, top_k=req.top_k)
+        return service.query(query=req.query, top_k=req.top_k, classification=req.classification)
 
     def tool_pdf_export(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = PdfExportRequest(**args)
-        out = (ctx.settings.user_work_dir(ctx.user_id) / req.output_path.strip().lstrip("/")).resolve()
+        out = (ctx.settings.user_work_dir(ctx.user_id) / req.output_path).resolve()
         size = export_text_pdf(out, title=req.title, text=req.text)
         return PdfExportResponse(output_path=req.output_path, bytes_written=size).model_dump()
 
-    registry.register("read_file", tool_read_file)
-    registry.register("write_file", tool_write_file)
-    registry.register("query_rag", tool_query_rag)
-    registry.register("pdf_export", tool_pdf_export)
+    registry.register(
+        "read_file",
+        tool_read_file,
+        request_model=FileReadRequest,
+    )
+    registry.register(
+        "write_file",
+        tool_write_file,
+        request_model=FileWriteRequest,
+    )
+    registry.register(
+        "query_rag",
+        tool_query_rag,
+        request_model=RagQueryRequest,
+    )
+    registry.register(
+        "pdf_export",
+        tool_pdf_export,
+        request_model=PdfExportRequest,
+    )
+
     return registry
+
 
 
 @app.post("/agent/run", response_model=AgentRunResponse)
@@ -223,7 +241,9 @@ def agent_askOpenAI(
     ctx = ToolContext(user_id=user_id, settings=s, api_key=api_key)
 
     llm = LlmRuntime()
-    planner = Planner(llm)
+    registry = _build_registry()
+    planner = Planner(llm, registry)
+    steps = planner.create_steps(goal=req.goal)
 
     steps = planner.create_steps(req.goal)
 
@@ -261,9 +281,14 @@ def agent_askIonos(
     ctx = ToolContext(user_id=user_id, settings=s, api_key=api_key)
 
     llm = IonosLLM()
-    planner = Planner(llm)
+    registry = _build_registry()
+    planner = Planner(llm, registry)
+    steps = planner.create_steps(goal=req.goal)
 
-    steps = planner.create_steps(req.goal)
+    print("\n===== PLANNED STEPS =====")
+    for i, s in enumerate(steps, 1):
+        print(f"{i}. tool={s.get('tool')} args={s.get('args')}")
+    print("=========================\n")
 
     # Optional: top_k/classification in query_rag step injizieren
     for st in steps:
@@ -281,5 +306,10 @@ def agent_askIonos(
         # Fallback: sehr kurze Antwort aus Outputs
         answer = str(tool_outputs)
 
+    print("\n===== FINAL ANSWER =====")
+    print(answer)
+    print("========================\n")
+
     ok = all(o.get("ok") for o in tool_outputs) if tool_outputs else True
+
     return AgentAskResponse(ok=ok, goal=req.goal, steps=steps, tool_outputs=tool_outputs, answer=answer)

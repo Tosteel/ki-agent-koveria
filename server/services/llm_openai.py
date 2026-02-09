@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+import json
 import requests
 from typing import Any, Dict, List, Optional
 
 OPENAI_URL = "https://api.openai.com/v1/responses"
+
 
 class LlmRuntime:
     def __init__(self):
@@ -14,14 +16,39 @@ class LlmRuntime:
     def enabled(self) -> bool:
         return bool(self.api_key)
 
-    def _call(self, input_messages: List[Dict[str, Any]], text_format: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    @staticmethod
+    def _to_responses_input(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Convert simple {role, content:str} messages into Responses API input items with content parts.
+        """
+        out: List[Dict[str, Any]] = []
+        for m in messages:
+            role = m.get("role", "user")
+            content = m.get("content", "")
+            if content is None:
+                content = ""
+            # Responses API: content as array of parts
+            out.append(
+                {
+                    "role": role,
+                    "content": [{"type": "input_text", "text": str(content)}],
+                }
+            )
+        return out
+
+    def _call(
+        self,
+        input_messages: List[Dict[str, Any]],
+        text_format: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         if not self.api_key:
             raise RuntimeError("OPENAI_API_KEY not set")
 
         payload: Dict[str, Any] = {
             "model": self.model,
-            "input": input_messages,
+            "input": self._to_responses_input(input_messages),
         }
+
         if text_format is not None:
             payload["text"] = {"format": text_format}
 
@@ -34,42 +61,71 @@ class LlmRuntime:
             json=payload,
             timeout=60,
         )
+
+        if r.status_code >= 400:
+            # Body im Exception-Text – den siehst du dann sicher im uvicorn Trace
+            raise RuntimeError(f"OpenAI HTTP {r.status_code}: {r.text}")
+
+        return r.json()
+
+        # Hilft massiv beim Debuggen von 400ern
+        if r.status_code >= 400:
+            print("OPENAI ERROR STATUS:", r.status_code)
+            print("OPENAI ERROR BODY:", r.text)
+
         r.raise_for_status()
         return r.json()
 
     def plan_steps(self, *, goal: str, tool_schema: Dict[str, Any]) -> Dict[str, Any]:
-        # Structured Output (json_schema strict). :contentReference[oaicite:2]{index=2}
+        """
+        tool_schema kommt bei dir als:
+          {"name": "tool_plan", "schema": {...}}
+        und muss für OpenAI json_schema so gemappt werden:
+          {"type":"json_schema","name": "...","schema": {...},"strict": True}
+        """
+        json_schema_format = {
+            "type": "json_schema",
+            "name": tool_schema.get("name", "tool_plan"),
+            "schema": tool_schema.get("schema", tool_schema),  # fallback
+            "strict": False,
+        }
+
         resp = self._call(
             input_messages=[
-                {"role": "system", "content": "You are a planner. Produce ONLY JSON matching the schema."},
-                {"role": "user", "content": f"Goal: {goal}\nCreate an execution plan using the available tools."},
+                {
+                    "role": "system",
+                    "content": "You are a planner. Produce ONLY JSON matching the schema.",
+                },
+                {
+                    "role": "user",
+                    "content": f"Goal: {goal}\nCreate an execution plan using the available tools.",
+                },
             ],
-            text_format={
-                "type": "json_schema",
-                "strict": True,
-                "schema": tool_schema,
-            },
+            text_format=json_schema_format,
         )
 
-        # Responses API gibt die strukturierte Ausgabe in output_text / output ab; pragmatisch:
-        # Wir lesen das JSON aus resp["output"][...]["content"][...]["text"].
-        # (SDK würde das schöner machen, aber hier ohne SDK.)
+        # output_text extrahieren
         out = ""
         for item in resp.get("output", []):
             for c in item.get("content", []):
                 if c.get("type") == "output_text":
                     out += c.get("text", "")
-        import json
         return json.loads(out)
 
     def final_answer(self, *, goal: str, tool_outputs: List[Dict[str, Any]]) -> str:
         resp = self._call(
             input_messages=[
-                {"role": "system", "content": "You are an assistant. Use the tool outputs to answer the goal succinctly."},
-                {"role": "user", "content": f"Goal: {goal}\nTool outputs:\n{tool_outputs}"},
+                {
+                    "role": "system",
+                    "content": "You are an assistant. Use the tool outputs to answer the goal succinctly.",
+                },
+                {
+                    "role": "user",
+                    "content": f"Goal: {goal}\nTool outputs:\n{tool_outputs}",
+                },
             ],
         )
-        # output_text extrahieren
+
         out = ""
         for item in resp.get("output", []):
             for c in item.get("content", []):

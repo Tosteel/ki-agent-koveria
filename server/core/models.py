@@ -15,49 +15,40 @@ class RagHit(BaseModel):
     score: float
     text: str
 
-
 class RagQueryResponse(BaseModel):
     query: str
     hits: List[RagHit]
 
-
 class FileReadRequest(BaseModel):
-    path: str = Field(..., description="Relativer Pfad innerhalb user/work")
+    path: str = Field(..., description="") #Relativer Pfad innerhalb user/work"
     encoding: str = Field("utf-8")
-
 
 class FileReadResponse(BaseModel):
     path: str
     content: str
 
-
 class FileWriteRequest(BaseModel):
-    path: str = Field(..., description="Relativer Pfad innerhalb user/work")
+    path: str = Field(..., description="") #Relativer Pfad innerhalb user/work
     content: str
     encoding: str = Field("utf-8")
     overwrite: bool = True
-
 
 class FileWriteResponse(BaseModel):
     path: str
     bytes_written: int
 
-
 class PdfExportRequest(BaseModel):
-    output_path: str = Field(..., description="Relativer Pfad innerhalb user/work")
+    output_path: str = Field(..., description="") #Relativer Pfad innerhalb user/work
     title: str = "Export"
     text: str
-
 
 class PdfExportResponse(BaseModel):
     output_path: str
     bytes_written: int
 
-
 class ToolStep(BaseModel):
     tool: str
     args: Dict[str, Any] = Field(default_factory=dict)
-
 
 class AgentRunRequest(BaseModel):
     steps: List[ToolStep] = Field(default_factory=list, description="Explizite Tool-Schritte. Wenn leer: default flow.")
@@ -66,7 +57,6 @@ class AgentRunRequest(BaseModel):
     write_path: str = "result.txt"
     pdf_path: str = "result.pdf"
     pdf_title: str = "Ergebnis"
-
 
 class AgentRunResponse(BaseModel):
     ok: bool
