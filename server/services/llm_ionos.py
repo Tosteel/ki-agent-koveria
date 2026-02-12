@@ -161,6 +161,8 @@ class IonosLLM:
                  "content": "You are a planner. Output ONLY valid JSON with a top-level key 'steps'.\n"
                             "read_file ist verboten, wenn der Nutzer keine Datei benennt. In diesem Fall MUSS query_rag genutzt werden.\n"
                             "Formuliere für query_rag-Queries die Suchbegriffe (keine SQL).\n"
+                            "Wenn spätere Tools Daten aus früheren Schritten brauchen, nutze Platzhalter im Format {{steps.<n>.result.<path>}} oder {{last.result.<path>}}.\n"
+                            "Beispiel für PDF-Text mit Preis aus RAG: 'Preis: {{steps.1.result.hits.0.text}}'.\n"
                  },
                 {"role": "user", "content": f"Goal: {goal}"},
             ],
@@ -180,6 +182,8 @@ class IonosLLM:
                  "content": "You are a planner. Output ONLY valid JSON with a top-level key 'steps'.\n"
                             "read_file ist verboten, wenn der Nutzer keine Datei benennt. In diesem Fall MUSS query_rag genutzt werden.\n"
                             "Formuliere für query_rag-Queries die Suchbegriffe (keine SQL).\n"
+                            "Wenn spätere Tools Daten aus früheren Schritten brauchen, nutze Platzhalter im Format {{steps.<n>.result.<path>}} oder {{last.result.<path>}}.\n"
+                            "Beispiel für PDF-Text mit Preis aus RAG: 'Preis: {{steps.1.result.hits.0.text}}'.\n"
                  },
                 {"role": "user", "content": f"Goal: {goal}"},
             ],
