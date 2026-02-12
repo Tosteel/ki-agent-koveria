@@ -94,7 +94,7 @@ class LlmRuntime:
             input_messages=[
                 {
                     "role": "system",
-                    "content": "You are a planner. Produce ONLY JSON matching the schema.",
+                    "content": "You are a planner. Produce ONLY JSON matching the schema. Later steps automatically receive the payload/result fields from the previous step as additional arguments.",
                 },
                 {
                     "role": "user",
