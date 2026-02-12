@@ -1,22 +1,20 @@
 # uvicorn server.main:app --host 0.0.0.0 --port 8012 --reload
 from __future__ import annotations
 
-from fastapi import FastAPI, Depends, Response
-from fastapi.security import HTTPAuthorizationCredentials
-from typing import Any, Dict
+from fastapi import FastAPI, Depends
+from typing import Dict
 
 from .core.logging import setup_logging
 from .core.settings import Settings
 from .core.models import (
-    RagQueryRequest, RagQueryResponse,
-    FileReadRequest, FileReadResponse,
+    RagQueryRequest, FileReadRequest, FileReadResponse,
     FileWriteRequest, FileWriteResponse,
     PdfExportRequest, PdfExportResponse,
     AgentRunRequest, AgentRunResponse,
 )
 from .deps import get_current_user, settings as dep_settings
 
-from .services.rag_koveria import RagService
+from .tools.rag_koveria import RagService
 from .tools.filesystem import read_text, write_text
 from .tools.pdf import export_text_pdf
 
@@ -241,11 +239,9 @@ def agent_askOpenAI(
     ctx = ToolContext(user_id=user_id, settings=s, api_key=api_key)
 
     llm = LlmRuntime()
-    registry = _build_registry()
     planner = Planner(llm, registry)
     steps = planner.create_steps(goal=req.goal)
-
-    steps = planner.create_steps(req.goal)
+    #steps = planner.create_steps(req.goal)
 
     # Optional: top_k/classification in query_rag step injizieren
     for st in steps:
@@ -281,7 +277,6 @@ def agent_askIonos(
     ctx = ToolContext(user_id=user_id, settings=s, api_key=api_key)
 
     llm = IonosLLM()
-    registry = _build_registry()
     planner = Planner(llm, registry)
     steps = planner.create_steps(goal=req.goal)
 
