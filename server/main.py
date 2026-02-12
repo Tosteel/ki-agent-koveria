@@ -26,6 +26,15 @@ security = HTTPBearer(auto_error=False)
 
 app = FastAPI(title="ki-agent-koveria", version="0.1.0")
 
+
+def _rag_result_to_text(query: str, rag_result: Dict[str, Any]) -> str:
+    lines = [f"RAG Query: {query}", ""]
+    for i, h in enumerate(rag_result.get("hits", []), start=1):
+        lines.append(f"[{i}] source={h.get('source')} score={h.get('score')}")
+        lines.append(h.get("text", ""))
+        lines.append("")
+    return "\n".join(lines).strip() or "Kein Inhalt."
+
 from .core.models import AgentAskRequest, AgentAskResponse
 from .services.llm_openai import LlmRuntime
 from server.services.llm_ionos import IonosLLM
@@ -137,7 +146,10 @@ def _build_registry() -> ToolRegistry:
     def tool_query_rag(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = RagQueryRequest(**args)
         service = RagService(ctx.settings.rag_base_url, ctx.api_key)
-        return service.query(query=req.query, top_k=req.top_k, classification=req.classification)
+        result = service.query(query=req.query, top_k=req.top_k, classification=req.classification)
+        # payload-freundlich: nachfolgende Schritte (z.B. pdf_export) können direkt "text" verwenden
+        result["text"] = _rag_result_to_text(req.query, result)
+        return result
 
     def tool_pdf_export(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = PdfExportRequest(**args)
@@ -206,17 +218,7 @@ def agent_run(
         if o and o[0].get("ok"):
             rag_result = o[0]["result"]
 
-    # Ergebnistext zusammensetzen
-    lines = []
-    if req.rag_query:
-        lines.append(f"RAG Query: {req.rag_query}")
-        lines.append("")
-        for i, h in enumerate(rag_result.get("hits", []), start=1):
-            lines.append(f"[{i}] source={h.get('source')} score={h.get('score')}")
-            lines.append(h.get("text", ""))
-            lines.append("")
-
-    text_out = "\n".join(lines).strip() or "Kein Inhalt."
+    text_out = _rag_result_to_text(req.rag_query or "", rag_result) if req.rag_query else "Kein Inhalt."
 
     outputs.extend(orch.run_steps(ctx, [{"tool": "write_file", "args": {"path": req.write_path, "content": text_out, "overwrite": True}}]))
     outputs.extend(orch.run_steps(ctx, [{"tool": "pdf_export", "args": {"output_path": req.pdf_path, "title": req.pdf_title, "text": text_out}}]))
