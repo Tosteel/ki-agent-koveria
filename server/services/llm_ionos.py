@@ -161,8 +161,10 @@ class IonosLLM:
                  "content": "You are a planner. Output ONLY valid JSON with a top-level key 'steps'.\n"
                             "read_file ist verboten, wenn der Nutzer keine Datei benennt. In diesem Fall MUSS query_rag genutzt werden.\n"
                             "Formuliere für query_rag-Queries die Suchbegriffe (keine SQL).\n"
+                            "Wenn der Nutzer eine Zusammenfassung/kompakte Ausgabe verlangt, nutze llm_summarize nach query_rag und vor pdf_export.\n"
                             "Nachfolgende Schritte erhalten automatisch den Payload des vorherigen Schritts als zusätzliche Args.\n"
                             "Plane daher so, dass Ergebnisfelder (z.B. text) von Schritt N direkt von Schritt N+1 genutzt werden können.\n"
+                            "Platzhalter nur als {steps[0].text}, {{steps.1.result.text}} oder {last.text}; niemals mit führendem $.\n"
                  },
                 {"role": "user", "content": f"Goal: {goal}"},
             ],
@@ -182,8 +184,10 @@ class IonosLLM:
                  "content": "You are a planner. Output ONLY valid JSON with a top-level key 'steps'.\n"
                             "read_file ist verboten, wenn der Nutzer keine Datei benennt. In diesem Fall MUSS query_rag genutzt werden.\n"
                             "Formuliere für query_rag-Queries die Suchbegriffe (keine SQL).\n"
+                            "Wenn der Nutzer eine Zusammenfassung/kompakte Ausgabe verlangt, nutze llm_summarize nach query_rag und vor pdf_export.\n"
                             "Nachfolgende Schritte erhalten automatisch den Payload des vorherigen Schritts als zusätzliche Args.\n"
                             "Plane daher so, dass Ergebnisfelder (z.B. text) von Schritt N direkt von Schritt N+1 genutzt werden können.\n"
+                            "Platzhalter nur als {steps[0].text}, {{steps.1.result.text}} oder {last.text}; niemals mit führendem $.\n"
                  },
                 {"role": "user", "content": f"Goal: {goal}"},
             ],

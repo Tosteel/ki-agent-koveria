@@ -14,6 +14,7 @@ class ToolContext:
     user_id: str
     settings: Any
     api_key: str
+    goal: str = ""
 
 
 ToolHandler = Callable[[ToolContext, Dict[str, Any]], Dict[str, Any]]

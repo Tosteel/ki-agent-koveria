@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, Depends
-from typing import Dict
+from typing import Any, Dict
 
 from .core.logging import setup_logging
 from .core.settings import Settings
@@ -10,6 +10,7 @@ from .core.models import (
     RagQueryRequest, FileReadRequest, FileReadResponse,
     FileWriteRequest, FileWriteResponse,
     PdfExportRequest, PdfExportResponse,
+    LlmSummaryRequest, LlmSummaryResponse,
     AgentRunRequest, AgentRunResponse,
 )
 from .deps import get_current_user, settings as dep_settings
@@ -17,6 +18,7 @@ from .deps import get_current_user, settings as dep_settings
 from .tools.rag_koveria import RagService
 from .tools.filesystem import read_text, write_text
 from .tools.pdf import export_text_pdf
+from .tools.llm_summary import llm_summarize_text
 
 from .agent.tool_registry import ToolRegistry, ToolContext
 from .agent.orchestrator import Orchestrator
@@ -27,13 +29,236 @@ security = HTTPBearer(auto_error=False)
 app = FastAPI(title="ki-agent-koveria", version="0.1.0")
 
 
+def _first_nonempty_str(*values: Any) -> str:
+    for v in values:
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return ""
+
+
+def _extract_hit_source(hit: Dict[str, Any]) -> str:
+    document_raw = hit.get("document")
+    document_str = document_raw.strip() if isinstance(document_raw, str) else ""
+    src = _first_nonempty_str(
+        hit.get("source"),
+        hit.get("file"),
+        hit.get("file_name"),
+        hit.get("filename"),
+        hit.get("document"),
+        hit.get("document_name"),
+        hit.get("document_title"),
+        hit.get("uri"),
+        hit.get("path"),
+        hit.get("link_source"),
+        hit.get("link_server"),
+        hit.get("source_url"),
+        hit.get("url"),
+        hit.get("document_id"),
+        hit.get("id"),
+    )
+    if src:
+        return src
+    if document_str:
+        return document_str
+
+    for key in ("metadata", "meta", "payload", "document", "_source"):
+        nested = hit.get(key)
+        if isinstance(nested, str) and nested.strip():
+            return nested.strip()
+        if isinstance(nested, dict):
+            src = _first_nonempty_str(
+                nested.get("source"),
+                nested.get("file"),
+                nested.get("file_name"),
+                nested.get("filename"),
+                nested.get("document"),
+                nested.get("document_name"),
+                nested.get("document_title"),
+                nested.get("uri"),
+                nested.get("path"),
+                nested.get("link_source"),
+                nested.get("link_server"),
+                nested.get("source_url"),
+                nested.get("url"),
+                nested.get("document_id"),
+                nested.get("id"),
+            )
+            if src:
+                return src
+    return "unknown"
+
+
+def _extract_hit_link(hit: Dict[str, Any]) -> str:
+    link = _first_nonempty_str(
+        hit.get("link_source"),
+        hit.get("link_server"),
+        hit.get("source_url"),
+        hit.get("url"),
+        hit.get("link"),
+    )
+    if link:
+        return link
+
+    for key in ("metadata", "meta", "payload", "document", "_source"):
+        nested = hit.get(key)
+        if isinstance(nested, dict):
+            link = _first_nonempty_str(
+                nested.get("link_source"),
+                nested.get("link_server"),
+                nested.get("source_url"),
+                nested.get("url"),
+                nested.get("link"),
+            )
+            if link:
+                return link
+    return ""
+
+
+def _extract_hit_text(hit: Dict[str, Any]) -> str:
+    txt = _first_nonempty_str(
+        hit.get("text"),
+        hit.get("snippet"),
+        hit.get("content"),
+        hit.get("chunk"),
+        hit.get("page_content"),
+        hit.get("body"),
+    )
+    if txt:
+        return txt
+
+    for key in ("metadata", "meta", "payload", "document", "_source"):
+        nested = hit.get(key)
+        if isinstance(nested, dict):
+            txt = _first_nonempty_str(
+                nested.get("text"),
+                nested.get("snippet"),
+                nested.get("content"),
+                nested.get("chunk"),
+                nested.get("page_content"),
+                nested.get("body"),
+            )
+            if txt:
+                return txt
+
+    return ""
+
+
 def _rag_result_to_text(query: str, rag_result: Dict[str, Any]) -> str:
     lines = [f"RAG Query: {query}", ""]
     for i, h in enumerate(rag_result.get("hits", []), start=1):
-        lines.append(f"[{i}] source={h.get('source')} score={h.get('score')}")
-        lines.append(h.get("text", ""))
+        source = _extract_hit_source(h if isinstance(h, dict) else {})
+        link = _extract_hit_link(h if isinstance(h, dict) else {})
+        score = h.get("score") if isinstance(h, dict) else None
+        snippet = _extract_hit_text(h if isinstance(h, dict) else {})
+        lines.append(f"[{i}] source={source} score={score}")
+        if link and link != source:
+            lines.append(f"link={link}")
+        if snippet:
+            lines.append(snippet)
+        else:
+            lines.append("(kein Textausschnitt im Treffer enthalten)")
         lines.append("")
     return "\n".join(lines).strip() or "Kein Inhalt."
+
+
+def _wants_summary(goal: str) -> bool:
+    g = (goal or "").lower()
+    return any(k in g for k in ("zusammenfass", "fasse", "summary", "kurz"))
+
+
+def _inject_llm_summary_before_pdf(steps: list[Dict[str, Any]], goal: str) -> list[Dict[str, Any]]:
+    if not _wants_summary(goal):
+        return steps
+    if any((s.get("tool") or "").strip() == "llm_summarize" for s in steps):
+        return steps
+
+    out: list[Dict[str, Any]] = []
+    for st in steps:
+        if (st.get("tool") or "").strip() == "pdf_export":
+            args = dict(st.get("args") or {})
+            source_text = args.get("text") or "{last.text}"
+            out.append(
+                {
+                    "tool": "llm_summarize",
+                    "args": {
+                        "text": source_text,
+                        "goal": goal,
+                        "instruction": f"Fasse nur die relevanten Ergebnisse für dieses Ziel zusammen: {goal}",
+                        "max_chars": 1800,
+                    },
+                }
+            )
+            args["text"] = "{last.text}"
+            out.append({"tool": "pdf_export", "args": args})
+        else:
+            out.append(st)
+    return out
+
+
+def _compact_tool_outputs(tool_outputs: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    compact: list[Dict[str, Any]] = []
+    for o in tool_outputs:
+        item: Dict[str, Any] = {
+            "step": o.get("step"),
+            "tool": o.get("tool"),
+            "ok": o.get("ok"),
+        }
+        payload = o.get("payload")
+        if isinstance(payload, dict):
+            payload = dict(payload)
+            # query_rag liefert sowohl hits als auch text. Für API-Responses reichen hits;
+            # text bleibt intern in tool_outputs_full für nachfolgende Steps verfügbar.
+            if item["tool"] == "query_rag" and isinstance(payload.get("hits"), list):
+                payload.pop("text", None)
+            # llm_summarize liefert summary und text mit gleichem Inhalt.
+            # Für API-Responses reicht summary; text bleibt intern verfügbar.
+            if item["tool"] == "llm_summarize" and isinstance(payload.get("summary"), str):
+                payload.pop("text", None)
+        if o.get("ok"):
+            # Response kompakt halten: nur payload zurückgeben (enthält bereits die result-Felder).
+            item["payload"] = payload
+        else:
+            item["error"] = o.get("error")
+            item["payload"] = payload
+        compact.append(item)
+    return compact
+
+
+def _outputs_for_final_answer(tool_outputs: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    """
+    Build a token-lean view for final_answer prompts.
+    Keeps execution status + essential fields, drops verbose blobs.
+    """
+    compact = _compact_tool_outputs(tool_outputs)
+    lean: list[Dict[str, Any]] = []
+    for o in compact:
+        item: Dict[str, Any] = {
+            "step": o.get("step"),
+            "tool": o.get("tool"),
+            "ok": o.get("ok"),
+        }
+        payload = o.get("payload")
+        if not isinstance(payload, dict):
+            lean.append(item)
+            continue
+
+        p = dict(payload)
+        tool = item["tool"]
+        if tool == "query_rag":
+            # Large snippets are expensive in prompt tokens.
+            p.pop("hits", None)
+            if isinstance(payload.get("hits"), list):
+                p["hit_count"] = len(payload["hits"])
+        elif tool == "llm_summarize":
+            # summary is enough for downstream natural-language answer.
+            p.pop("usage", None)
+            p.pop("model", None)
+
+        item["payload"] = p
+        if not o.get("ok"):
+            item["error"] = o.get("error")
+        lean.append(item)
+    return lean
 
 from .core.models import AgentAskRequest, AgentAskResponse
 from .services.llm_openai import LlmRuntime
@@ -65,8 +290,6 @@ def user(user_id: str = Depends(get_current_user)) -> Dict[str, str]:
 
 
 # ----------------------------- Phase 1: Direct APIs -----------------------------
-from typing import Any, Dict
-
 @app.post("/rag/query")
 def rag_query(
     req: RagQueryRequest,
@@ -157,6 +380,16 @@ def _build_registry() -> ToolRegistry:
         size = export_text_pdf(out, title=req.title, text=req.text)
         return PdfExportResponse(output_path=req.output_path, bytes_written=size).model_dump()
 
+    def tool_llm_summarize(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+        req = LlmSummaryRequest(**args)
+        result = llm_summarize_text(
+            text=req.text,
+            goal=req.goal,
+            instruction=req.instruction,
+            max_chars=req.max_chars,
+        )
+        return LlmSummaryResponse(**result).model_dump()
+
     registry.register(
         "read_file",
         tool_read_file,
@@ -171,6 +404,11 @@ def _build_registry() -> ToolRegistry:
         "query_rag",
         tool_query_rag,
         request_model=RagQueryRequest,
+    )
+    registry.register(
+        "llm_summarize",
+        tool_llm_summarize,
+        request_model=LlmSummaryRequest,
     )
     registry.register(
         "pdf_export",
@@ -197,34 +435,35 @@ def agent_run(
         user_id=user_id,
         settings=s,
         api_key=credentials.credentials,  # ← wichtig
+        goal=req.rag_query or "",
     )
 
     # Wenn steps explizit: ausführen
     if req.steps:
-        outputs = orch.run_steps(ctx, [step.model_dump() for step in req.steps])
-        ok = all(o.get("ok") for o in outputs) if outputs else True
-        return AgentRunResponse(ok=ok, outputs=outputs)
+        tool_outputs = orch.run_steps(ctx, [step.model_dump() for step in req.steps])
+        ok = all(o.get("ok") for o in tool_outputs) if tool_outputs else True
+        return AgentRunResponse(ok=ok, outputs=_compact_tool_outputs(tool_outputs))
 
     # Default Flow (Phase 1):
     # 1) query_rag (wenn rag_query gesetzt)
     # 2) write_file
     # 3) pdf_export
-    outputs = []
+    tool_outputs = []
 
     rag_result = {"query": "", "hits": []}
     if req.rag_query:
         o = orch.run_steps(ctx, [{"tool": "query_rag", "args": {"query": req.rag_query, "top_k": req.top_k}}])
-        outputs.extend(o)
+        tool_outputs.extend(o)
         if o and o[0].get("ok"):
             rag_result = o[0]["result"]
 
     text_out = _rag_result_to_text(req.rag_query or "", rag_result) if req.rag_query else "Kein Inhalt."
 
-    outputs.extend(orch.run_steps(ctx, [{"tool": "write_file", "args": {"path": req.write_path, "content": text_out, "overwrite": True}}]))
-    outputs.extend(orch.run_steps(ctx, [{"tool": "pdf_export", "args": {"output_path": req.pdf_path, "title": req.pdf_title, "text": text_out}}]))
+    tool_outputs.extend(orch.run_steps(ctx, [{"tool": "write_file", "args": {"path": req.write_path, "content": text_out, "overwrite": True}}]))
+    tool_outputs.extend(orch.run_steps(ctx, [{"tool": "pdf_export", "args": {"output_path": req.pdf_path, "title": req.pdf_title, "text": text_out}}]))
 
-    ok = all(o.get("ok") for o in outputs) if outputs else True
-    return AgentRunResponse(ok=ok, outputs=outputs)
+    ok = all(o.get("ok") for o in tool_outputs) if tool_outputs else True
+    return AgentRunResponse(ok=ok, outputs=_compact_tool_outputs(tool_outputs))
 
 @app.post("/agent/askOpenAI", response_model=AgentAskResponse)
 def agent_askOpenAI(
@@ -238,11 +477,12 @@ def agent_askOpenAI(
     api_key = credentials.credentials
     registry = _build_registry()           # existiert bei dir bereits
     orch = Orchestrator(registry)          # existiert bei dir bereits
-    ctx = ToolContext(user_id=user_id, settings=s, api_key=api_key)
+    ctx = ToolContext(user_id=user_id, settings=s, api_key=api_key, goal=req.goal)
 
     llm = LlmRuntime()
     planner = Planner(llm, registry)
     steps = planner.create_steps(goal=req.goal)
+    steps = _inject_llm_summary_before_pdf(steps, req.goal)
     #steps = planner.create_steps(req.goal)
 
     # Optional: top_k/classification in query_rag step injizieren
@@ -253,15 +493,17 @@ def agent_askOpenAI(
             if req.classification is not None:
                 st["args"]["classification"] = req.classification
 
-    tool_outputs = orch.run_steps(ctx, steps)
+    tool_outputs_full = orch.run_steps(ctx, steps)
+    tool_outputs = _compact_tool_outputs(tool_outputs_full)
 
+    llm_view = _outputs_for_final_answer(tool_outputs_full)
     if llm.enabled():
-        answer = llm.final_answer(goal=req.goal, tool_outputs=tool_outputs)
+        answer = llm.final_answer(goal=req.goal, tool_outputs=llm_view)
     else:
         # Fallback: sehr kurze Antwort aus Outputs
-        answer = str(tool_outputs)
+        answer = str(llm_view)
 
-    ok = all(o.get("ok") for o in tool_outputs) if tool_outputs else True
+    ok = all(o.get("ok") for o in tool_outputs_full) if tool_outputs_full else True
     return AgentAskResponse(ok=ok, goal=req.goal, steps=steps, tool_outputs=tool_outputs, answer=answer)
 
 @app.post("/agent/askIonos", response_model=AgentAskResponse)
@@ -276,11 +518,12 @@ def agent_askIonos(
     api_key = credentials.credentials
     registry = _build_registry()           # existiert bei dir bereits
     orch = Orchestrator(registry)          # existiert bei dir bereits
-    ctx = ToolContext(user_id=user_id, settings=s, api_key=api_key)
+    ctx = ToolContext(user_id=user_id, settings=s, api_key=api_key, goal=req.goal)
 
     llm = IonosLLM()
     planner = Planner(llm, registry)
     steps = planner.create_steps(goal=req.goal)
+    steps = _inject_llm_summary_before_pdf(steps, req.goal)
 
     print("\n===== PLANNED STEPS =====")
     for i, s in enumerate(steps, 1):
@@ -295,18 +538,20 @@ def agent_askIonos(
             if req.classification is not None:
                 st["args"]["classification"] = req.classification
 
-    tool_outputs = orch.run_steps(ctx, steps)
+    tool_outputs_full = orch.run_steps(ctx, steps)
+    tool_outputs = _compact_tool_outputs(tool_outputs_full)
 
+    llm_view = _outputs_for_final_answer(tool_outputs_full)
     if llm.enabled():
-        answer = llm.final_answer(goal=req.goal, tool_outputs=tool_outputs)
+        answer = llm.final_answer(goal=req.goal, tool_outputs=llm_view)
     else:
         # Fallback: sehr kurze Antwort aus Outputs
-        answer = str(tool_outputs)
+        answer = str(llm_view)
 
     print("\n===== FINAL ANSWER =====")
     print(answer)
     print("========================\n")
 
-    ok = all(o.get("ok") for o in tool_outputs) if tool_outputs else True
+    ok = all(o.get("ok") for o in tool_outputs_full) if tool_outputs_full else True
 
     return AgentAskResponse(ok=ok, goal=req.goal, steps=steps, tool_outputs=tool_outputs, answer=answer)
