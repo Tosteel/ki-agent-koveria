@@ -115,6 +115,7 @@
       display: grid;
       grid-template-rows: 70px 1fr 84px;
       min-width: 0;
+      min-height: 0;
     }
 
     .topbar {
@@ -160,12 +161,28 @@
     }
 
     .messages {
-      overflow: auto;
+      overflow-y: auto;
+      overflow-x: hidden;
+      min-height: 0;
       padding: 20px 24px;
       display: grid;
       gap: 14px;
       align-content: start;
       background: #fbfcff;
+    }
+
+    .messages::-webkit-scrollbar {
+      width: 10px;
+    }
+
+    .messages::-webkit-scrollbar-thumb {
+      background: #c7d6f5;
+      border-radius: 10px;
+      border: 2px solid #fbfcff;
+    }
+
+    .messages::-webkit-scrollbar-track {
+      background: #eef3ff;
     }
 
     .row {
@@ -378,6 +395,7 @@
     const settingsStatus = document.getElementById('settingsStatus');
 
     const BOT_WELCOME = 'Hallo! Wie kann ich Ihnen heute helfen?';
+    const MAX_CONTEXT_MESSAGES = 12;
     let nextChatId = 1;
     const chats = [];
     let activeChatId = null;
@@ -533,6 +551,11 @@
       const message = inputEl.value.trim();
       if (!message) return;
 
+      const chat = getActiveChat();
+      const history = (chat?.messages || [])
+        .slice(-MAX_CONTEXT_MESSAGES)
+        .map((msg) => ({ role: msg.role, text: msg.text }));
+
       addMessage('user', message);
       inputEl.value = '';
       setSending(true);
@@ -541,7 +564,7 @@
         const resp = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message })
+          body: JSON.stringify({ message, history })
         });
         const data = await resp.json();
         if (!resp.ok) {

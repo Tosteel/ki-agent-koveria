@@ -1,62 +1,25 @@
-Was du jetzt tatsächlich hast (klar eingeordnet)
-Architektur-Status
+# Ideenspeicher
 
-RAG: eigenständiger, produktionsfähiger Dienst (8005)
+## Idee: Gedächtnis verbessern
 
-Agent-Server: Orchestrator + Tool-Layer (8012)
+Guter nächster Schritt. In eurem Stand gibt es schon die Basis: Die Chat-Historie liegt im Browser (`chats[]` in `client/gui_web.html`), wird aber noch nicht an den Bot übergeben.
 
-query_rag: echtes Tool → HTTP → RAG
+Ein pragmatischer Weg in 3 Stufen:
 
-Contract sauber: Agent kennt nur Tool-Signaturen, nicht RAG-Interna
+1. Kurzzeit-Gedächtnis (sofort)
+- Bei `sendMessage()` die letzten z. B. 8-12 Messages des aktiven Chats mitschicken.
+- In `client/gui_web.py` daraus einen `context`-Text bauen und vor die neue Frage setzen.
 
-Das ist exakt die richtige Trennung.
+2. Längere Sessions stabil halten
+- Wenn Verlauf zu lang wird: ältere Nachrichten in eine kurze Zusammenfassung verdichten (Rolling Summary).
+- Dann nur `summary + letzte N Nachrichten + neue Frage` senden.
 
-Sinnvolle nächste Schritte (in richtiger Reihenfolge)
-1️⃣ Agent „sichtbar intelligent“ machen
+3. Persistenz (echtes Gedächtnis über Neustarts)
+- `chats` in Datei speichern (z. B. `client/chat_memory.json`) und beim Start laden.
+- Optional pro Chat eine ID und Timestamp.
 
-Aktuell rufst du Tools explizit auf. Nächster Schritt:
+Warum das bei euch passt:
+- Frontend hat bereits echte Chats/Verläufe in `client/gui_web.html`.
+- Backend sendet aktuell nur `{"goal": req.message}` in `client/gui_web.py`, dort fehlt der Kontext-Teil.
 
-Ein Endpoint wie:
-
-POST /agent/ask
-{
-  "goal": "Finde alle Rechnungen zu Dachausbau und fasse sie zusammen"
-}
-
-
-Intern:
-
-LLM erzeugt steps
-
-Orchestrator führt sie aus
-
-Ergebnis kommt zurück
-
-👉 Das ist der Moment, wo es sich wie ein Agent anfühlt.
-
-2️⃣ Tool-Output normalisieren
-
-Jetzt sinnvoll:
-
-query_rag → internes, einheitliches Hit-Schema
-
-Agent arbeitet nur mit:
-
-{ "source", "score", "text" }
-
-
-So bleibt der Agent stabil, auch wenn du das RAG später änderst.
-
-3️⃣ Weitere Phase-1-Tools ergänzen
-
-Sehr naheliegend bei dir:
-
-list_files
-
-download_file
-
-open_document
-
-summarize_hits
-
-Alles trivial, jetzt wo das Fundament steht.
+Wenn du willst, setze ich dir jetzt direkt Stufe 1 sauber um (inkl. Limitierung, damit Requests nicht zu groß werden).
