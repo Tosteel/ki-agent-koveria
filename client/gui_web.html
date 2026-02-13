@@ -220,6 +220,18 @@
       overflow-wrap: anywhere;
     }
 
+    .download-link {
+      display: inline-block;
+      margin-top: 8px;
+      color: #2f6de0;
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .download-link:hover {
+      text-decoration: underline;
+    }
+
     .user .bubble {
       background: #eef3fd;
       border-color: #e0e8fb;
@@ -400,7 +412,7 @@
     const chats = [];
     let activeChatId = null;
 
-    function createMessageElement(role, text) {
+    function createMessageElement(role, text, meta = {}) {
       const row = document.createElement('div');
       row.className = `row ${role}`;
 
@@ -417,7 +429,17 @@
 
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
-      bubble.textContent = text;
+      const textNode = document.createElement('div');
+      textNode.textContent = text;
+      bubble.appendChild(textNode);
+      if (meta.downloadUrl) {
+        const link = document.createElement('a');
+        link.className = 'download-link';
+        link.href = meta.downloadUrl;
+        link.textContent = meta.downloadLabel || 'Datei herunterladen';
+        link.setAttribute('download', '');
+        bubble.appendChild(link);
+      }
 
       if (role === 'user') {
         row.appendChild(bubble);
@@ -476,21 +498,48 @@
       chatTitleEl.textContent = chat.title;
       messagesEl.innerHTML = '';
       chat.messages.forEach((msg) => {
-        messagesEl.appendChild(createMessageElement(msg.role, msg.text));
+        messagesEl.appendChild(createMessageElement(msg.role, msg.text, msg));
       });
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
 
-    function addMessage(role, text) {
+    function addMessage(role, text, meta = {}) {
       const chat = getActiveChat();
       if (!chat) return;
 
-      chat.messages.push({ role, text });
+      chat.messages.push({
+        role,
+        text,
+        downloadUrl: meta.downloadUrl || '',
+        downloadLabel: meta.downloadLabel || ''
+      });
       if (role === 'user' && chat.title === 'Neuer Chat') {
         chat.title = truncateTitle(text);
       }
       renderChatList();
       renderActiveChat();
+    }
+
+    function extractDownloadPath(raw) {
+      const outputs = Array.isArray(raw?.tool_outputs) ? raw.tool_outputs : [];
+      for (let i = outputs.length - 1; i >= 0; i -= 1) {
+        const out = outputs[i];
+        if (!out || out.ok !== true) continue;
+        const payload = out.payload;
+        const outputPath = typeof payload?.output_path === 'string' ? payload.output_path.trim() : '';
+        if (!outputPath) continue;
+        const lower = outputPath.toLowerCase();
+        if (lower.endsWith('.pdf') || lower.endsWith('.pptx')) return outputPath;
+      }
+      return '';
+    }
+
+    function fileNameFromPath(path) {
+      const clean = String(path || '').trim();
+      if (!clean) return 'Datei';
+      const normalized = clean.replace(/\\/g, '/');
+      const parts = normalized.split('/');
+      return parts[parts.length - 1] || clean;
     }
 
     function startNewChat() {
@@ -571,7 +620,17 @@
           addMessage('bot', `Fehler: ${data.detail || 'Unbekannter Fehler'}`);
           return;
         }
-        addMessage('bot', data.answer || 'Keine Antwort erhalten.');
+        const outputPath = extractDownloadPath(data.raw);
+        if (outputPath) {
+          const fileName = fileNameFromPath(outputPath);
+          const downloadUrl = `/api/download?path=${encodeURIComponent(outputPath)}`;
+          addMessage('bot', data.answer || 'Keine Antwort erhalten.', {
+            downloadUrl,
+            downloadLabel: `Download: ${fileName}`
+          });
+        } else {
+          addMessage('bot', data.answer || 'Keine Antwort erhalten.');
+        }
       } catch (err) {
         addMessage('bot', 'Verbindung zur API fehlgeschlagen.');
       } finally {

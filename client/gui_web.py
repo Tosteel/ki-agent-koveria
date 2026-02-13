@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
@@ -8,7 +9,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import requests
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
@@ -20,6 +21,7 @@ LEGACY_SETTINGS_PATH = APP_DIR / "gui_web_config.json"
 USER_DATA_DIR = APP_DIR / "data" / "users"
 ACTIVE_USER_PATH = APP_DIR / "data" / "active_user.txt"
 DEFAULT_USER_ID = "user1"
+SERVER_DATA_DIR = APP_DIR.parent / "server" / "data"
 
 DEFAULT_SETTINGS: Dict[str, str] = {
     "ask_ionos_url": "http://127.0.0.1:8012/agent/askIonos",
@@ -150,6 +152,10 @@ def _save_settings_for_user(user_id: str, settings: Dict[str, str]) -> None:
     path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _user_work_dir(user_id: str) -> Path:
+    return SERVER_DATA_DIR / "users" / _sanitize_user_id(user_id) / "work"
+
+
 app = FastAPI(title="Koveria Web GUI", version="0.1.0")
 MAX_HISTORY_ITEMS = 12
 
@@ -195,6 +201,21 @@ def bot_avatar() -> FileResponse:
     if not BOT_AVATAR_PATH.exists():
         raise HTTPException(status_code=404, detail="Bot avatar not found")
     return FileResponse(BOT_AVATAR_PATH, media_type="image/png")
+
+
+@app.get("/api/download")
+def download(path: str = Query(..., min_length=1)) -> FileResponse:
+    user_id = _get_active_user_id()
+    user_work = _user_work_dir(user_id).resolve()
+    rel = path.strip().lstrip("/")
+    candidate = (user_work / rel).resolve()
+    if user_work not in candidate.parents and candidate != user_work:
+        raise HTTPException(status_code=400, detail="Invalid path")
+    if not candidate.exists() or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    media_type, _ = mimetypes.guess_type(candidate.name)
+    return FileResponse(candidate, filename=candidate.name, media_type=media_type or "application/octet-stream")
 
 
 @app.get("/api/settings")
