@@ -1,6 +1,7 @@
 # uvicorn server.main:app --host 0.0.0.0 --port 8012 --reload
 from __future__ import annotations
 
+import json
 from fastapi import FastAPI, Depends
 from typing import Any, Dict
 
@@ -165,6 +166,29 @@ def _rag_result_to_text(query: str, rag_result: Dict[str, Any]) -> str:
             lines.append("(kein Textausschnitt im Treffer enthalten)")
         lines.append("")
     return "\n".join(lines).strip() or "Kein Inhalt."
+
+
+def _search_result_to_text(user_prompt: str, result: Dict[str, Any]) -> str:
+    if not isinstance(result, dict):
+        return str(result or "")
+
+    for key in ("text", "answer", "summary", "content", "markdown"):
+        val = result.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+
+    for key in ("rows", "results", "items", "data"):
+        val = result.get(key)
+        if isinstance(val, list) and val:
+            lines = [f"Search Prompt: {user_prompt}", ""]
+            for i, item in enumerate(val, start=1):
+                if isinstance(item, dict):
+                    lines.append(f"[{i}] " + ", ".join(f"{k}={v}" for k, v in item.items()))
+                else:
+                    lines.append(f"[{i}] {item}")
+            return "\n".join(lines).strip()
+
+    return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 def _wants_summary(goal: str) -> bool:
@@ -486,7 +510,10 @@ def _build_registry() -> ToolRegistry:
     def tool_search_web(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = SearchGenerateJsonRequest(**args)
         service = SearchService(ctx.settings.search_base_url, ctx.api_key)
-        return service.search_generate_json(user_prompt=req.user_prompt)
+        result = service.search_generate_json(user_prompt=req.user_prompt)
+        # payload-friendly: Folgeschritte wie pdf_export können {last.text} verwenden.
+        result["text"] = _search_result_to_text(req.user_prompt, result)
+        return result
 
     registry.register(
         "read_file",
