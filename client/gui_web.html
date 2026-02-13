@@ -1,0 +1,587 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Koveria Chat</title>
+  <style>
+    :root {
+      --bg: #f1f4fb;
+      --panel: #ffffff;
+      --line: #dce3f4;
+      --primary: #2f6de0;
+      --primary-deep: #1b3ea8;
+      --primary-soft: #6ea7ff;
+      --text: #2b416b;
+      --muted: #8296bf;
+      --bubble: #edf2fc;
+      --shadow: 0 18px 42px rgba(40, 76, 158, 0.20);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at 15% 10%, #f7f9ff 0%, #edf2fb 35%, #e9eef8 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .app {
+      width: min(1100px, 100%);
+      height: min(760px, calc(100vh - 48px));
+      background: var(--panel);
+      border: 1px solid #e2e8f7;
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: 220px 1fr;
+    }
+
+    .sidebar {
+      background: #fff;
+      color: #2b416b;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--line);
+    }
+
+    .brand {
+      display: block;
+      padding: 18px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand img {
+      width: min(180px, 100%);
+      height: auto;
+      display: block;
+    }
+
+    .sidebar .search {
+      margin: 14px 12px;
+      background: #f7faff;
+      border: 1px solid #d7e2f9;
+      border-radius: 8px;
+      height: 34px;
+      color: #38527f;
+      padding: 0 10px;
+    }
+
+    .sidebar .search::placeholder { color: #8ba0c7; }
+
+    .menu {
+      padding: 2px 8px 12px;
+      overflow: auto;
+      display: grid;
+      gap: 6px;
+    }
+
+    .item {
+      padding: 8px 8px;
+      border-radius: 8px;
+      font-size: 14px;
+      color: #38527f;
+      background: #fff;
+      border: 1px solid #d9e4fb;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .item.active {
+      background: #edf3ff;
+      border-color: #b5cbf5;
+    }
+
+    .new-chat {
+      margin: auto 12px 14px;
+      background: linear-gradient(90deg, rgba(57, 135, 255, 0.9), rgba(113, 169, 255, 0.95));
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      border-radius: 9px;
+      height: 42px;
+      font-size: 24px;
+      line-height: 0;
+      cursor: pointer;
+    }
+
+    .chat {
+      display: grid;
+      grid-template-rows: 70px 1fr 84px;
+      min-width: 0;
+    }
+
+    .topbar {
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px 0 24px;
+      background: linear-gradient(180deg, #fcfdff 0%, #f9fbff 100%);
+    }
+
+    .topbar h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 700;
+      color: #223f71;
+      letter-spacing: 0.3px;
+    }
+
+    .actions button {
+      border: 0;
+      background: transparent;
+      font-size: 26px;
+      cursor: pointer;
+      color: #7f98bf;
+      padding: 4px 8px;
+      border-radius: 8px;
+    }
+
+    .actions button:hover { background: #eef3fe; color: #567cbf; }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .topbar-logo {
+      width: 34px;
+      height: 34px;
+      object-fit: cover;
+      border-radius: 8px;
+    }
+
+    .messages {
+      overflow: auto;
+      padding: 20px 24px;
+      display: grid;
+      gap: 14px;
+      align-content: start;
+      background: #fbfcff;
+    }
+
+    .row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      max-width: 100%;
+    }
+
+    .row.user { justify-content: flex-end; }
+
+    .avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #d9e6ff;
+      flex: 0 0 32px;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+
+    .avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+    .bubble {
+      max-width: min(760px, 88%);
+      padding: 14px 16px;
+      border-radius: 12px;
+      background: var(--bubble);
+      color: #2a4371;
+      font-size: 16px;
+      line-height: 1.38;
+      border: 1px solid #e4ebfb;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .user .bubble {
+      background: #eef3fd;
+      border-color: #e0e8fb;
+    }
+
+    .composer {
+      border-top: 1px solid var(--line);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: linear-gradient(180deg, #f8faff 0%, #f3f6fd 100%);
+    }
+
+    .composer input {
+      flex: 1;
+      border: 1px solid #d8e1f6;
+      background: #fff;
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 16px;
+      outline: none;
+      color: #2f4876;
+    }
+
+    .composer input:focus { border-color: #8ab0f8; box-shadow: 0 0 0 3px rgba(87, 139, 241, 0.16); }
+
+    .send {
+      width: 50px;
+      height: 50px;
+      border: 0;
+      border-radius: 11px;
+      background: linear-gradient(145deg, #4b88ef, #2f6de0);
+      color: white;
+      font-size: 26px;
+      cursor: pointer;
+      box-shadow: 0 8px 18px rgba(51, 111, 231, 0.35);
+    }
+
+    .send:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(27, 45, 87, 0.34);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 15;
+      padding: 20px;
+    }
+
+    .overlay.open { display: flex; }
+
+    .modal {
+      width: min(580px, 100%);
+      background: #fff;
+      border: 1px solid #d6e0f6;
+      border-radius: 12px;
+      box-shadow: 0 22px 52px rgba(20, 45, 92, 0.30);
+      padding: 18px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .modal h2 { margin: 0 0 2px; font-size: 22px; color: #203d70; }
+    .modal label { font-size: 14px; color: #5b7198; }
+    .modal input {
+      width: 100%;
+      border: 1px solid #d5e0f8;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 15px;
+    }
+
+    .modal .row-buttons {
+      margin-top: 8px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .btn {
+      border: 1px solid #cdd9f3;
+      background: #f5f8ff;
+      color: #335384;
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+
+    .btn.primary {
+      border: 1px solid #2f6de0;
+      background: linear-gradient(145deg, #4b88ef, #2f6de0);
+      color: #fff;
+    }
+
+    .status {
+      font-size: 13px;
+      color: #6484ba;
+      min-height: 18px;
+    }
+
+    @media (max-width: 960px) {
+      .app { grid-template-columns: 1fr; height: calc(100vh - 20px); }
+      .sidebar { display: none; }
+      body { padding: 10px; }
+      .topbar h1 { font-size: 30px; }
+      .bubble { font-size: 16px; }
+      .composer input { font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <img src="/assets/logo.png" alt="Koveria" />
+      </div>
+      <input class="search" placeholder="Search" />
+      <div class="menu" id="chatList"></div>
+      <button class="new-chat" id="newChat" title="Neuer Chat">+</button>
+    </aside>
+
+    <section class="chat">
+      <header class="topbar">
+        <h1 id="chatTitle">Neuer Chat</h1>
+        <div class="actions">
+          <button id="menuBtn" title="Einstellungen">☰</button>
+        </div>
+      </header>
+
+      <main id="messages" class="messages"></main>
+
+      <footer class="composer">
+        <input id="messageInput" type="text" placeholder="Nachricht eingeben..." />
+        <button class="send" id="sendBtn" title="Senden">➤</button>
+      </footer>
+    </section>
+  </div>
+
+  <div class="overlay" id="settingsOverlay">
+    <div class="modal">
+      <h2>API Einstellungen</h2>
+      <label for="apiUrl">askIonos Endpoint URL</label>
+      <input id="apiUrl" type="text" placeholder="http://127.0.0.1:8012/agent/askIonos" />
+
+      <label for="apiKey">API Key (Bearer, optional)</label>
+      <input id="apiKey" type="password" placeholder="Token" />
+
+      <div class="status" id="settingsStatus"></div>
+      <div class="row-buttons">
+        <button class="btn" id="cancelSettings">Abbrechen</button>
+        <button class="btn primary" id="saveSettings">Speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const messagesEl = document.getElementById('messages');
+    const inputEl = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const newChatBtn = document.getElementById('newChat');
+    const chatListEl = document.getElementById('chatList');
+    const chatTitleEl = document.getElementById('chatTitle');
+
+    const overlay = document.getElementById('settingsOverlay');
+    const menuBtn = document.getElementById('menuBtn');
+    const cancelSettings = document.getElementById('cancelSettings');
+    const saveSettings = document.getElementById('saveSettings');
+    const apiUrlEl = document.getElementById('apiUrl');
+    const apiKeyEl = document.getElementById('apiKey');
+    const settingsStatus = document.getElementById('settingsStatus');
+
+    const BOT_WELCOME = 'Hallo! Wie kann ich Ihnen heute helfen?';
+    let nextChatId = 1;
+    const chats = [];
+    let activeChatId = null;
+
+    function createMessageElement(role, text) {
+      const row = document.createElement('div');
+      row.className = `row ${role}`;
+
+      const avatar = document.createElement('div');
+      avatar.className = 'avatar';
+      if (role === 'bot') {
+        const img = document.createElement('img');
+        img.src = '/assets/bot-avatar.png';
+        img.alt = 'bot';
+        avatar.appendChild(img);
+      } else {
+        avatar.textContent = '👤';
+      }
+
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      bubble.textContent = text;
+
+      if (role === 'user') {
+        row.appendChild(bubble);
+        row.appendChild(avatar);
+      } else {
+        row.appendChild(avatar);
+        row.appendChild(bubble);
+      }
+
+      return row;
+    }
+
+    function truncateTitle(value) {
+      const text = (value || '').trim();
+      if (!text) return 'Neuer Chat';
+      return text.length > 36 ? `${text.slice(0, 36)}...` : text;
+    }
+
+    function getActiveChat() {
+      return chats.find((chat) => chat.id === activeChatId) || null;
+    }
+
+    function renameChat(chatId) {
+      const chat = chats.find((entry) => entry.id === chatId);
+      if (!chat) return;
+      const input = window.prompt('Chat umbenennen', chat.title);
+      if (input === null) return;
+      chat.title = truncateTitle(input);
+      renderChatList();
+      renderActiveChat();
+    }
+
+    function renderChatList() {
+      chatListEl.innerHTML = '';
+      chats.forEach((chat) => {
+        const item = document.createElement('div');
+        item.className = `item${chat.id === activeChatId ? ' active' : ''}`;
+        item.textContent = chat.title;
+        item.title = 'Doppelklick zum Umbenennen';
+        item.addEventListener('click', () => {
+          activeChatId = chat.id;
+          renderChatList();
+          renderActiveChat();
+        });
+        item.addEventListener('dblclick', () => {
+          renameChat(chat.id);
+        });
+        chatListEl.appendChild(item);
+      });
+    }
+
+    function renderActiveChat() {
+      const chat = getActiveChat();
+      if (!chat) return;
+
+      chatTitleEl.textContent = chat.title;
+      messagesEl.innerHTML = '';
+      chat.messages.forEach((msg) => {
+        messagesEl.appendChild(createMessageElement(msg.role, msg.text));
+      });
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function addMessage(role, text) {
+      const chat = getActiveChat();
+      if (!chat) return;
+
+      chat.messages.push({ role, text });
+      if (role === 'user' && chat.title === 'Neuer Chat') {
+        chat.title = truncateTitle(text);
+      }
+      renderChatList();
+      renderActiveChat();
+    }
+
+    function startNewChat() {
+      const chat = {
+        id: nextChatId++,
+        title: 'Neuer Chat',
+        messages: [{ role: 'bot', text: BOT_WELCOME }],
+      };
+      chats.unshift(chat);
+      activeChatId = chat.id;
+      renderChatList();
+      renderActiveChat();
+    }
+
+    function setSending(isSending) {
+      sendBtn.disabled = isSending;
+      inputEl.disabled = isSending;
+      if (!isSending) inputEl.focus();
+    }
+
+    async function loadSettings() {
+      settingsStatus.textContent = '';
+      try {
+        const resp = await fetch('/api/settings');
+        const data = await resp.json();
+        apiUrlEl.value = data.ask_ionos_url || '';
+        apiKeyEl.value = data.api_key || '';
+      } catch (err) {
+        settingsStatus.textContent = 'Einstellungen konnten nicht geladen werden.';
+      }
+    }
+
+    async function saveSettingsNow() {
+      settingsStatus.textContent = 'Speichere...';
+      try {
+        const payload = {
+          ask_ionos_url: apiUrlEl.value.trim(),
+          api_key: apiKeyEl.value.trim()
+        };
+        const resp = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          settingsStatus.textContent = data.detail || 'Speichern fehlgeschlagen.';
+          return;
+        }
+        settingsStatus.textContent = 'Gespeichert.';
+        setTimeout(() => { overlay.classList.remove('open'); }, 350);
+      } catch (err) {
+        settingsStatus.textContent = 'Speichern fehlgeschlagen.';
+      }
+    }
+
+    async function sendMessage() {
+      const message = inputEl.value.trim();
+      if (!message) return;
+
+      addMessage('user', message);
+      inputEl.value = '';
+      setSending(true);
+
+      try {
+        const resp = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message })
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          addMessage('bot', `Fehler: ${data.detail || 'Unbekannter Fehler'}`);
+          return;
+        }
+        addMessage('bot', data.answer || 'Keine Antwort erhalten.');
+      } catch (err) {
+        addMessage('bot', 'Verbindung zur API fehlgeschlagen.');
+      } finally {
+        setSending(false);
+      }
+    }
+
+    menuBtn.addEventListener('click', async () => {
+      overlay.classList.add('open');
+      await loadSettings();
+      apiUrlEl.focus();
+    });
+
+    cancelSettings.addEventListener('click', () => overlay.classList.remove('open'));
+    saveSettings.addEventListener('click', saveSettingsNow);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.classList.remove('open');
+    });
+
+    sendBtn.addEventListener('click', sendMessage);
+    inputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    newChatBtn.addEventListener('click', () => {
+      startNewChat();
+    });
+
+    startNewChat();
+    loadSettings();
+  </script>
+</body>
+</html>
