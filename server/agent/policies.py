@@ -3,5 +3,6 @@ PHASE1_ALLOWED_TOOLS = {
     "write_file",
     "query_rag",
     "llm_summarize",
+    "llm_compose",
     "pdf_export",
 }

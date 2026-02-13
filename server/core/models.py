@@ -59,6 +59,19 @@ class LlmSummaryResponse(BaseModel):
     model: str = ""
     usage: Optional[Dict[str, Any]] = None
 
+class LlmComposeRequest(BaseModel):
+    text: str
+    instruction: str = ""
+    goal: str = ""
+    max_chars: int = Field(3000, ge=200, le=20000)
+
+class LlmComposeResponse(BaseModel):
+    composed_text: str
+    text: str
+    fallback_used: bool = False
+    model: str = ""
+    usage: Optional[Dict[str, Any]] = None
+
 class ToolStep(BaseModel):
     tool: str
     args: Dict[str, Any] = Field(default_factory=dict)

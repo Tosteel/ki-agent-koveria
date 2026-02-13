@@ -11,6 +11,7 @@ from .core.models import (
     FileWriteRequest, FileWriteResponse,
     PdfExportRequest, PdfExportResponse,
     LlmSummaryRequest, LlmSummaryResponse,
+    LlmComposeRequest, LlmComposeResponse,
     AgentRunRequest, AgentRunResponse,
 )
 from .deps import get_current_user, settings as dep_settings
@@ -19,6 +20,7 @@ from .tools.rag_koveria import RagService
 from .tools.filesystem import read_text, write_text
 from .tools.pdf import export_text_pdf
 from .tools.llm_summary import llm_summarize_text
+from .tools.llm_compose import llm_compose_text
 
 from .agent.tool_registry import ToolRegistry, ToolContext
 from .agent.orchestrator import Orchestrator
@@ -166,10 +168,23 @@ def _wants_summary(goal: str) -> bool:
     return any(k in g for k in ("zusammenfass", "fasse", "summary", "kurz"))
 
 
+def _rewrite_summarize_to_compose(steps: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    out: list[Dict[str, Any]] = []
+    for st in steps:
+        tool = (st.get("tool") or "").strip()
+        if tool == "llm_summarize":
+            out.append({"tool": "llm_compose", "args": dict(st.get("args") or {})})
+        else:
+            out.append(st)
+    return out
+
+
 def _inject_llm_summary_before_pdf(steps: list[Dict[str, Any]], goal: str) -> list[Dict[str, Any]]:
+    # Planner kann noch llm_summarize erzeugen; wir erzwingen llm_compose.
+    steps = _rewrite_summarize_to_compose(steps)
     if not _wants_summary(goal):
         return steps
-    if any((s.get("tool") or "").strip() == "llm_summarize" for s in steps):
+    if any((s.get("tool") or "").strip() == "llm_compose" for s in steps):
         return steps
 
     out: list[Dict[str, Any]] = []
@@ -179,11 +194,11 @@ def _inject_llm_summary_before_pdf(steps: list[Dict[str, Any]], goal: str) -> li
             source_text = args.get("text") or "{last.text}"
             out.append(
                 {
-                    "tool": "llm_summarize",
+                    "tool": "llm_compose",
                     "args": {
                         "text": source_text,
                         "goal": goal,
-                        "instruction": f"Fasse nur die relevanten Ergebnisse für dieses Ziel zusammen: {goal}",
+                        "instruction": f"Formuliere die relevanten Ergebnisse als kohärenten, gut lesbaren Text: {goal}",
                         "max_chars": 1800,
                     },
                 }
@@ -213,6 +228,8 @@ def _compact_tool_outputs(tool_outputs: list[Dict[str, Any]]) -> list[Dict[str, 
             # llm_summarize liefert summary und text mit gleichem Inhalt.
             # Für API-Responses reicht summary; text bleibt intern verfügbar.
             if item["tool"] == "llm_summarize" and isinstance(payload.get("summary"), str):
+                payload.pop("text", None)
+            if item["tool"] == "llm_compose" and isinstance(payload.get("composed_text"), str):
                 payload.pop("text", None)
         if o.get("ok"):
             # Response kompakt halten: nur payload zurückgeben (enthält bereits die result-Felder).
@@ -251,6 +268,10 @@ def _outputs_for_final_answer(tool_outputs: list[Dict[str, Any]]) -> list[Dict[s
                 p["hit_count"] = len(payload["hits"])
         elif tool == "llm_summarize":
             # summary is enough for downstream natural-language answer.
+            p.pop("usage", None)
+            p.pop("model", None)
+        elif tool == "llm_compose":
+            # composed_text is enough for final answer.
             p.pop("usage", None)
             p.pop("model", None)
 
@@ -390,6 +411,16 @@ def _build_registry() -> ToolRegistry:
         )
         return LlmSummaryResponse(**result).model_dump()
 
+    def tool_llm_compose(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+        req = LlmComposeRequest(**args)
+        result = llm_compose_text(
+            text=req.text,
+            goal=req.goal,
+            instruction=req.instruction,
+            max_chars=req.max_chars,
+        )
+        return LlmComposeResponse(**result).model_dump()
+
     registry.register(
         "read_file",
         tool_read_file,
@@ -409,6 +440,11 @@ def _build_registry() -> ToolRegistry:
         "llm_summarize",
         tool_llm_summarize,
         request_model=LlmSummaryRequest,
+    )
+    registry.register(
+        "llm_compose",
+        tool_llm_compose,
+        request_model=LlmComposeRequest,
     )
     registry.register(
         "pdf_export",
