@@ -9,6 +9,7 @@ class Settings:
     base_dir: Path
     data_dir: Path
     rag_base_url: str = "http://localhost:8005"  # optional, falls du es nutzt
+    search_base_url: str = "http://localhost:8002"
 
     def user_dir(self, user_id: str) -> Path:
         return self.data_dir / "users" / user_id
@@ -33,6 +34,12 @@ def get_settings() -> Settings:
     base_dir = Path(os.getenv("KOVERIA_BASE_DIR", Path(__file__).resolve().parents[1]))
     data_dir = Path(os.getenv("KOVERIA_DATA_DIR", base_dir / "data"))
     rag_base_url = os.getenv("RAG_BASE_URL", "http://localhost:8005").rstrip("/")
+    search_base_url = os.getenv("SEARCH_BASE_URL", "http://localhost:8002").rstrip("/")
 
-    _settings = Settings(base_dir=base_dir, data_dir=data_dir, rag_base_url=rag_base_url)
+    _settings = Settings(
+        base_dir=base_dir,
+        data_dir=data_dir,
+        rag_base_url=rag_base_url,
+        search_base_url=search_base_url,
+    )
     return _settings

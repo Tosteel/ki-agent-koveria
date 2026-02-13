@@ -5,4 +5,6 @@ PHASE1_ALLOWED_TOOLS = {
     "llm_summarize",
     "llm_compose",
     "pdf_export",
+    "ppt_export",
+    "search_web",
 }

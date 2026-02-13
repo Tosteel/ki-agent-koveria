@@ -10,6 +10,8 @@ from .core.models import (
     RagQueryRequest, FileReadRequest, FileReadResponse,
     FileWriteRequest, FileWriteResponse,
     PdfExportRequest, PdfExportResponse,
+    PptExportRequest, PptExportResponse,
+    SearchGenerateJsonRequest,
     LlmSummaryRequest, LlmSummaryResponse,
     LlmComposeRequest, LlmComposeResponse,
     AgentRunRequest, AgentRunResponse,
@@ -17,8 +19,10 @@ from .core.models import (
 from .deps import get_current_user, settings as dep_settings
 
 from .tools.rag_koveria import RagService
+from .tools.search_koveria import SearchService
 from .tools.filesystem import read_text, write_text
 from .tools.pdf import export_text_pdf
+from .tools.powerpoint import export_text_pptx
 from .tools.llm_summary import llm_summarize_text
 from .tools.llm_compose import llm_compose_text
 
@@ -327,6 +331,18 @@ def rag_query(
     return data
 
 
+@app.post("/search/generate_json")
+def search_generate_json(
+    req: SearchGenerateJsonRequest,
+    user_id: str = Depends(get_current_user),
+    s: Settings = Depends(dep_settings),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> Dict[str, Any]:
+    _ensure_user_dirs(s, user_id)
+    service = SearchService(s.search_base_url, credentials.credentials)
+    return service.search_generate_json(user_prompt=req.user_prompt)
+
+
 @app.post("/files/read", response_model=FileReadResponse)
 def files_read(
     req: FileReadRequest,
@@ -367,6 +383,32 @@ def pdf_export(
     return PdfExportResponse(output_path=req.output_path, bytes_written=size)
 
 
+@app.post("/ppt/export", response_model=PptExportResponse)
+def ppt_export(
+    req: PptExportRequest,
+    user_id: str = Depends(get_current_user),
+    s: Settings = Depends(dep_settings),
+) -> PptExportResponse:
+    _ensure_user_dirs(s, user_id)
+    out = (s.user_work_dir(user_id) / req.output_path.strip().lstrip("/")).resolve()
+    result = export_text_pptx(
+        out,
+        title=req.title,
+        text=req.text,
+        use_llm_layout=req.use_llm_layout,
+        allow_heuristic_fallback=req.allow_heuristic_fallback,
+        goal=req.goal,
+        instruction=req.instruction,
+        max_slides=req.max_slides,
+        max_boxes_per_slide=req.max_boxes_per_slide,
+    )
+    return PptExportResponse(
+        output_path=req.output_path,
+        bytes_written=int(result.get("bytes_written") or 0),
+        layout_mode=str(result.get("layout_mode") or "heuristic"),
+    )
+
+
 # ----------------------------- Phase 1: Agent (Tool Registry + Orchestrator) -----------------------------
 def _build_registry() -> ToolRegistry:
     registry = ToolRegistry()
@@ -401,6 +443,26 @@ def _build_registry() -> ToolRegistry:
         size = export_text_pdf(out, title=req.title, text=req.text)
         return PdfExportResponse(output_path=req.output_path, bytes_written=size).model_dump()
 
+    def tool_ppt_export(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+        req = PptExportRequest(**args)
+        out = (ctx.settings.user_work_dir(ctx.user_id) / req.output_path).resolve()
+        result = export_text_pptx(
+            out,
+            title=req.title,
+            text=req.text,
+            use_llm_layout=req.use_llm_layout,
+            allow_heuristic_fallback=req.allow_heuristic_fallback,
+            goal=req.goal or ctx.goal,
+            instruction=req.instruction,
+            max_slides=req.max_slides,
+            max_boxes_per_slide=req.max_boxes_per_slide,
+        )
+        return PptExportResponse(
+            output_path=req.output_path,
+            bytes_written=int(result.get("bytes_written") or 0),
+            layout_mode=str(result.get("layout_mode") or "heuristic"),
+        ).model_dump()
+
     def tool_llm_summarize(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = LlmSummaryRequest(**args)
         result = llm_summarize_text(
@@ -420,6 +482,11 @@ def _build_registry() -> ToolRegistry:
             max_chars=req.max_chars,
         )
         return LlmComposeResponse(**result).model_dump()
+
+    def tool_search_web(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+        req = SearchGenerateJsonRequest(**args)
+        service = SearchService(ctx.settings.search_base_url, ctx.api_key)
+        return service.search_generate_json(user_prompt=req.user_prompt)
 
     registry.register(
         "read_file",
@@ -450,6 +517,16 @@ def _build_registry() -> ToolRegistry:
         "pdf_export",
         tool_pdf_export,
         request_model=PdfExportRequest,
+    )
+    registry.register(
+        "ppt_export",
+        tool_ppt_export,
+        request_model=PptExportRequest,
+    )
+    registry.register(
+        "search_web",
+        tool_search_web,
+        request_model=SearchGenerateJsonRequest,
     )
 
     return registry
