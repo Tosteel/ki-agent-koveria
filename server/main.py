@@ -625,14 +625,6 @@ def agent_askOpenAI(
     steps = _inject_llm_summary_before_pdf(steps, req.goal)
     #steps = planner.create_steps(req.goal)
 
-    # Optional: top_k/classification in query_rag step injizieren
-    for st in steps:
-        if st.get("tool") == "query_rag":
-            st.setdefault("args", {})
-            st["args"]["top_k"] = req.top_k
-            if req.classification is not None:
-                st["args"]["classification"] = req.classification
-
     tool_outputs_full = orch.run_steps(ctx, steps)
     tool_outputs = _compact_tool_outputs(tool_outputs_full)
 
@@ -669,14 +661,6 @@ def agent_askIonos(
     for i, s in enumerate(steps, 1):
         print(f"{i}. tool={s.get('tool')} args={s.get('args')}")
     print("=========================\n")
-
-    # Optional: top_k/classification in query_rag step injizieren
-    for st in steps:
-        if st.get("tool") == "query_rag":
-            st.setdefault("args", {})
-            st["args"]["top_k"] = req.top_k
-            if req.classification is not None:
-                st["args"]["classification"] = req.classification
 
     tool_outputs_full = orch.run_steps(ctx, steps)
     tool_outputs = _compact_tool_outputs(tool_outputs_full)

@@ -130,8 +130,6 @@ class AgentRunResponse(BaseModel):
 
 class AgentAskRequest(BaseModel):
     goal: str = Field(..., min_length=1)
-    top_k: int = Field(5, ge=1, le=50)
-    classification: Optional[str] = None  # optional
 
 class AgentAskResponse(BaseModel):
     ok: bool
