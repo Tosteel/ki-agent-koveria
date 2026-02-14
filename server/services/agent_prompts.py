@@ -15,6 +15,7 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
                 "Wenn der Nutzer einen kohärenten, gut lesbaren Fließtext aus Bausteinen verlangt, nutze llm_compose nach rag_knowledgebase und vor pdf_export.\n"
                 "Für Präsentations-Export nutze ppt_export (statt pdf_export).\n"
                 "Für Websuche/Internet-Recherche aus einem User-Prompt nutze search_multitable.\n"
+                "Für Produktsuche auf eBay nutze search_ebay.\n"
                 "Nachfolgende Schritte erhalten automatisch den Payload des vorherigen Schritts als zusätzliche Args.\n"
                 "Plane daher so, dass Ergebnisfelder (z.B. text) von Schritt N direkt von Schritt N+1 genutzt werden können.\n"
                 "Platzhalter nur als {steps[0].text}, {{steps.1.result.text}} oder {last.text}; niemals mit führendem $.\n"
@@ -29,7 +30,8 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
             "planner_system": (
                 "You are a planner. Produce ONLY JSON matching the schema. "
                 "Later steps automatically receive the payload/result fields from the previous step as additional arguments. "
-                "Use search_multitable for internet/web research from a user prompt."
+                "Use search_multitable for internet/web research from a user prompt. "
+                "Use search_ebay for product search on eBay."
             ),
             "final_system": "You are an assistant. Use the tool outputs to answer the goal succinctly.",
         },
