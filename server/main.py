@@ -8,26 +8,23 @@ from typing import Any, Dict
 from .core.logging import setup_logging
 from .core.settings import Settings
 from .core.models import (
-    RagQueryRequest, FileReadRequest, FileReadResponse,
-    FileWriteRequest, FileWriteResponse,
-    PdfExportRequest, PdfExportResponse,
-    PptExportRequest, PptExportResponse,
-    MailSendRequest, MailSendResponse,
-    SearchGenerateJsonRequest,
-    LlmSummaryRequest, LlmSummaryResponse,
-    LlmComposeRequest, LlmComposeResponse,
     AgentRunRequest, AgentRunResponse,
+    AgentAskRequest, AgentAskResponse,
 )
 from .deps import get_current_user, settings as dep_settings
 
-from .tools.rag_koveria import RagService
-from .tools.search_koveria import SearchService
+from .tools.rag_knowledgebase.models import RagQueryRequest
+from .tools.filesystem.models import FileReadRequest, FileReadResponse, FileWriteRequest, FileWriteResponse
+from .tools.pdf.models import PdfExportRequest, PdfExportResponse
+from .tools.powerpoint.models import PptExportRequest, PptExportResponse
+from .tools.mail.models import MailSendRequest, MailSendResponse
+from .tools.search_multitable.models import SearchGenerateJsonRequest
+from .tools.rag_knowledgebase import RagService
+from .tools.search_multitable import SearchService
 from .tools.filesystem import read_text, write_text
 from .tools.pdf import export_text_pdf
 from .tools.powerpoint import export_text_pptx
 from .tools.mail import send_mail
-from .tools.llm_summary import llm_summarize_text
-from .tools.llm_compose import llm_compose_text
 from .tools.loader import register_all_tools
 
 from .agent.tool_registry import ToolRegistry, ToolContext
@@ -252,9 +249,9 @@ def _compact_tool_outputs(tool_outputs: list[Dict[str, Any]]) -> list[Dict[str, 
         payload = o.get("payload")
         if isinstance(payload, dict):
             payload = dict(payload)
-            # query_rag liefert sowohl hits als auch text. Für API-Responses reichen hits;
+            # rag_knowledgebase liefert sowohl hits als auch text. Für API-Responses reichen hits;
             # text bleibt intern in tool_outputs_full für nachfolgende Steps verfügbar.
-            if item["tool"] == "query_rag" and isinstance(payload.get("hits"), list):
+            if item["tool"] == "rag_knowledgebase" and isinstance(payload.get("hits"), list):
                 payload.pop("text", None)
             # llm_summarize liefert summary und text mit gleichem Inhalt.
             # Für API-Responses reicht summary; text bleibt intern verfügbar.
@@ -292,7 +289,7 @@ def _outputs_for_final_answer(tool_outputs: list[Dict[str, Any]]) -> list[Dict[s
 
         p = dict(payload)
         tool = item["tool"]
-        if tool == "query_rag":
+        if tool == "rag_knowledgebase":
             # Large snippets are expensive in prompt tokens.
             p.pop("hits", None)
             if isinstance(payload.get("hits"), list):
@@ -312,7 +309,6 @@ def _outputs_for_final_answer(tool_outputs: list[Dict[str, Any]]) -> list[Dict[s
         lean.append(item)
     return lean
 
-from .core.models import AgentAskRequest, AgentAskResponse
 from .services.llm_openai import LlmRuntime
 from server.services.llm_ionos import IonosLLM
 
@@ -490,14 +486,14 @@ def agent_run(
         return AgentRunResponse(ok=ok, outputs=_compact_tool_outputs(tool_outputs))
 
     # Default Flow (Phase 1):
-    # 1) query_rag (wenn rag_query gesetzt)
+    # 1) rag_knowledgebase (wenn rag_query gesetzt)
     # 2) write_file
     # 3) pdf_export
     tool_outputs = []
 
     rag_result = {"query": "", "hits": []}
     if req.rag_query:
-        o = orch.run_steps(ctx, [{"tool": "query_rag", "args": {"query": req.rag_query, "top_k": req.top_k}}])
+        o = orch.run_steps(ctx, [{"tool": "rag_knowledgebase", "args": {"query": req.rag_query, "top_k": req.top_k}}])
         tool_outputs.extend(o)
         if o and o[0].get("ok"):
             rag_result = o[0]["result"]

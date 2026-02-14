@@ -1,11 +1,11 @@
 PHASE1_ALLOWED_TOOLS = {
     "read_file",
     "write_file",
-    "query_rag",
+    "rag_knowledgebase",
     "llm_summarize",
     "llm_compose",
     "pdf_export",
     "ppt_export",
-    "search_web",
+    "search_multitable",
     "send_mail",
 }

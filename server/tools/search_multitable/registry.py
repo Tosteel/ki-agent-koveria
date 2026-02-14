@@ -6,7 +6,7 @@ from typing import Any, Dict
 from server.agent.tool_registry import ToolContext, ToolRegistry
 
 from .models import SearchGenerateJsonRequest
-from .search_koveria import SearchService
+from .search_multitable import SearchService
 
 
 def _search_result_to_text(user_prompt: str, result: Dict[str, Any]) -> str:
@@ -33,11 +33,11 @@ def _search_result_to_text(user_prompt: str, result: Dict[str, Any]) -> str:
 
 
 def register(registry: ToolRegistry) -> None:
-    def tool_search_web(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    def tool_search_multitable(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = SearchGenerateJsonRequest(**args)
         service = SearchService(ctx.settings.search_base_url, ctx.api_key)
         result = service.search_generate_json(user_prompt=req.user_prompt)
         result["text"] = _search_result_to_text(req.user_prompt, result)
         return result
 
-    registry.register("search_web", tool_search_web, request_model=SearchGenerateJsonRequest)
+    registry.register("search_multitable", tool_search_multitable, request_model=SearchGenerateJsonRequest)

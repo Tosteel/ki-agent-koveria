@@ -1,92 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-02-14T14:48:33Z",
+  "updated_at": "2026-02-14T15:24:13Z",
   "chats": [
-    {
-      "id": 9,
-      "title": "test2",
-      "messages": [
-        {
-          "role": "bot",
-          "text": "Hallo! Wie kann ich Ihnen heute helfen?",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "timestamp": "2026-02-14T14:17:37.168Z"
-        },
-        {
-          "role": "user",
-          "text": "test2",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "timestamp": "2026-02-14T14:17:39.646Z"
-        },
-        {
-          "role": "bot",
-          "text": "Der Benutzer hat den Chat-Verlauf mit einer Testnachricht (\"test2\") fortgesetzt. Die Tool-Ausgabe zeigt, dass die Eingabe als \"MatchUp\" klassifiziert wurde und 3 Treffer gefunden wurden. Eine spezifische Antwort auf die Frage \"test2\" kann aufgrund fehlender Kontextinformationen nicht gegeben werden.",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "timestamp": "2026-02-14T14:17:50.274Z"
-        },
-        {
-          "role": "user",
-          "text": "test",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "timestamp": "2026-02-14T14:28:55.840Z"
-        },
-        {
-          "role": "bot",
-          "text": "Der Benutzer hat den Chat-Verlauf mit einer Testnachricht (\"test\") fortgesetzt. Die Tool-Ausgabe zeigt, dass die Eingabe als \"MatchUp\" klassifiziert wurde und 3 Treffer gefunden wurden. Eine spezifische Antwort auf die Frage \"test\" kann aufgrund fehlender Kontextinformationen nicht gegeben werden.",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "timestamp": "2026-02-14T14:29:08.994Z"
-        },
-        {
-          "role": "user",
-          "text": "sende eine Mail an tobias_Stahl@outlook.de mit dem inhalt test12345",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "timestamp": "2026-02-14T14:30:57.279Z"
-        },
-        {
-          "role": "bot",
-          "text": "Um eine E-Mail an tobias_Stahl@outlook.de mit dem Inhalt \"test12345\" zu senden, benötigen Sie ein E-Mail-Programm oder einen E-Mail-Dienst. Die Schritte zum Senden einer E-Mail sind:\n\n1. Öffnen Sie Ihr E-Mail-Programm und melden Sie sich an.\n2. Klicken Sie auf \"Neue E-Mail\" oder \"E-Mail schreiben\".\n3. Geben Sie die E-Mail-Adresse des Empfängers (tobias_Stahl@outlook.de) in das Feld \"An\" ein.\n4. Geben Sie den Inhalt der E-Mail (\"test12345\") in das Feld \"Nachricht\" ein.\n5. Klicken Sie auf \"Senden\", um die E-Mail zu senden.\n\nDie E-Mail wurde erfolgreich gesendet.",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "timestamp": "2026-02-14T14:31:42.183Z"
-        },
-        {
-          "role": "user",
-          "text": "suche im internet nach 5 mährobotern und sende eine powerpoint an tobias_stahl@outlook.de",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "timestamp": "2026-02-14T14:34:24.376Z"
-        },
-        {
-          "role": "bot",
-          "text": "Die Suche nach 5 Mährobotern ergab folgende Ergebnisse:\n\n1. Worx Landroid M700 Plus WR167E (Schnittbreite: 18 cm, Akkulaufzeit: 120 Minuten)\n2. Dreame Mähroboter A2 (keine Angaben zu Schnittbreite und Akkulaufzeit)\n3. Segway Navimow i105E (Schnittbreite: 22 cm, Akkulaufzeit: 117 Minuten)\n4. OKAYBOT M1 (Schnittbreite: 22 cm, Akkulaufzeit: ca. 90 Minuten)\n5. Husqvarna Automower 405XE NERA (Schnittbreite: 22 cm, Akkulaufzeit: 50 Minuten)\n\nEine PowerPoint-Präsentation mit diesen Ergebnissen wurde erstellt und an tobias_stahl@outlook.de gesendet.",
-          "downloadUrl": "/api/download?path=M%C3%A4hroboter.pptx&user_id=user1",
-          "downloadLabel": "Download: Mähroboter.pptx",
-          "timestamp": "2026-02-14T14:35:33.503Z"
-        },
-        {
-          "role": "user",
-          "text": "hallo, wer bist du?",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "timestamp": "2026-02-14T14:47:38.451Z"
-        },
-        {
-          "role": "bot",
-          "text": "Ich bin ein KI-Assistent, der Ihnen bei verschiedenen Aufgaben helfen kann, wie z.B. Informationen im Internet suchen, E-Mails senden und PowerPoint-Präsentationen erstellen. Wie kann ich Ihnen heute helfen?",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "timestamp": "2026-02-14T14:48:32.762Z"
-        }
-      ],
-      "created_at": "2026-02-14T14:17:37.168Z",
-      "updated_at": "2026-02-14T14:48:32.762Z"
-    },
     {
       "id": 8,
       "title": "Suche im Internet nach Mährobotern h...",
@@ -583,18 +498,46 @@
           "text": "test",
           "downloadUrl": "",
           "downloadLabel": "",
-          "timestamp": "2026-02-14T14:17:36.329Z"
+          "timestamp": "2026-02-14T15:22:04.086Z"
         },
         {
           "role": "bot",
-          "text": "Der Nutzer hat bisher nach einer Rechnung mit Holzverkleidung für Dachschrägen gesucht, einen Witz gehört, fünf Babygeschenke recherchiert und die Ergebnisse per E-Mail als PowerPoint-Präsentation erhalten. Eine PDF-Version konnte nicht gesendet werden, da ein Fehler auftrat. Eine neue Anfrage wurde gestellt, aber es fehlt an Informationen, um sie zu bearbeiten. Die neue Anfrage lautet lediglich \"test\".",
+          "text": "Der Nutzer hat keine spezifische Frage gestellt. Bitte stellen Sie Ihre Frage, damit ich Ihnen weiterhelfen kann.",
           "downloadUrl": "",
           "downloadLabel": "",
-          "timestamp": "2026-02-14T14:18:02.555Z"
+          "timestamp": "2026-02-14T15:22:15.018Z"
+        },
+        {
+          "role": "user",
+          "text": "suche im wissen nach rechnungen zur deckenabhängungen.",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "timestamp": "2026-02-14T15:23:06.438Z"
+        },
+        {
+          "role": "bot",
+          "text": "Ich habe im Wissen nach Rechnungen zur Deckenabhängungen gesucht. Es wurden 3 Treffer gefunden, die als Rechnungen klassifiziert wurden.",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "timestamp": "2026-02-14T15:23:15.239Z"
+        },
+        {
+          "role": "user",
+          "text": "bitte gib mir diese Rechnungen detailliert aus.",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "timestamp": "2026-02-14T15:23:38.010Z"
+        },
+        {
+          "role": "bot",
+          "text": "Ich habe drei Rechnungen zur Deckenabhängungen gefunden. Die Rechnungen stammen von der Firma Holz & Handwerk Müller GmbH und betreffen verschiedene Projekte:\n\n1. Abschlagsrechnung für den Innenausbau in der Rohbauphase (Gesamtsumme: 5.175,00 €)\n2. Endrechnung für den Dachausbau (Gesamtsumme: 4.055,00 €)\n3. Innenausbau des Empfangsbereichs (Gesamtsumme: 9.560,00 €)\n\nAlle Rechnungen enthalten eine Zahlungsfrist von 14 Tagen ohne Abzug.",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "timestamp": "2026-02-14T15:24:12.894Z"
         }
       ],
       "created_at": "2026-02-13T22:31:08.057Z",
-      "updated_at": "2026-02-14T14:18:02.555Z"
+      "updated_at": "2026-02-14T15:24:12.894Z"
     },
     {
       "id": 3,
@@ -796,5 +739,5 @@
       "updated_at": "2026-02-13T22:19:02.535Z"
     }
   ],
-  "active_chat_id": 9
+  "active_chat_id": 4
 }

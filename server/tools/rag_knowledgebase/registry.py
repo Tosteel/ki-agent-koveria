@@ -5,7 +5,7 @@ from typing import Any, Dict
 from server.agent.tool_registry import ToolContext, ToolRegistry
 
 from .models import RagQueryRequest
-from .rag_koveria import RagService
+from .rag_knowledgebase import RagService
 
 
 def _hit_text(hit: Dict[str, Any]) -> str:
@@ -39,11 +39,11 @@ def _rag_result_to_text(query: str, rag_result: Dict[str, Any]) -> str:
 
 
 def register(registry: ToolRegistry) -> None:
-    def tool_query_rag(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+    def tool_rag_knowledgebase(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = RagQueryRequest(**args)
         service = RagService(ctx.settings.rag_base_url, ctx.api_key)
         result = service.query(query=req.query, top_k=req.top_k, classification=req.classification)
         result["text"] = _rag_result_to_text(req.query, result)
         return result
 
-    registry.register("query_rag", tool_query_rag, request_model=RagQueryRequest)
+    registry.register("rag_knowledgebase", tool_rag_knowledgebase, request_model=RagQueryRequest)
