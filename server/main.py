@@ -28,6 +28,7 @@ from .tools.powerpoint import export_text_pptx
 from .tools.mail import send_mail
 from .tools.llm_summary import llm_summarize_text
 from .tools.llm_compose import llm_compose_text
+from .tools.loader import register_all_tools
 
 from .agent.tool_registry import ToolRegistry, ToolContext
 from .agent.orchestrator import Orchestrator
@@ -460,148 +461,7 @@ def mail_send(
 # ----------------------------- Phase 1: Agent (Tool Registry + Orchestrator) -----------------------------
 def _build_registry() -> ToolRegistry:
     registry = ToolRegistry()
-
-    def tool_read_file(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
-        req = FileReadRequest(**args)
-        content = read_text(ctx.settings.user_work_dir(ctx.user_id), req.path, encoding=req.encoding)
-        return FileReadResponse(path=req.path, content=content).model_dump()
-
-    def tool_write_file(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
-        req = FileWriteRequest(**args)
-        n = write_text(
-            ctx.settings.user_work_dir(ctx.user_id),
-            req.path,
-            req.content,
-            encoding=req.encoding,
-            overwrite=req.overwrite,
-        )
-        return FileWriteResponse(path=req.path, bytes_written=n).model_dump()
-
-    def tool_query_rag(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
-        req = RagQueryRequest(**args)
-        service = RagService(ctx.settings.rag_base_url, ctx.api_key)
-        result = service.query(query=req.query, top_k=req.top_k, classification=req.classification)
-        # payload-freundlich: nachfolgende Schritte (z.B. pdf_export) können direkt "text" verwenden
-        result["text"] = _rag_result_to_text(req.query, result)
-        return result
-
-    def tool_pdf_export(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
-        req = PdfExportRequest(**args)
-        out = (ctx.settings.user_work_dir(ctx.user_id) / req.output_path).resolve()
-        size = export_text_pdf(out, title=req.title, text=req.text)
-        return PdfExportResponse(output_path=req.output_path, bytes_written=size).model_dump()
-
-    def tool_ppt_export(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
-        req = PptExportRequest(**args)
-        out = (ctx.settings.user_work_dir(ctx.user_id) / req.output_path).resolve()
-        result = export_text_pptx(
-            out,
-            title=req.title,
-            text=req.text,
-            use_llm_layout=req.use_llm_layout,
-            allow_heuristic_fallback=req.allow_heuristic_fallback,
-            goal=req.goal or ctx.goal,
-            instruction=req.instruction,
-            max_slides=req.max_slides,
-            max_boxes_per_slide=req.max_boxes_per_slide,
-        )
-        return PptExportResponse(
-            output_path=req.output_path,
-            bytes_written=int(result.get("bytes_written") or 0),
-            layout_mode=str(result.get("layout_mode") or "heuristic"),
-        ).model_dump()
-
-    def tool_llm_summarize(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
-        req = LlmSummaryRequest(**args)
-        result = llm_summarize_text(
-            text=req.text,
-            goal=req.goal,
-            instruction=req.instruction,
-            max_chars=req.max_chars,
-        )
-        return LlmSummaryResponse(**result).model_dump()
-
-    def tool_llm_compose(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
-        req = LlmComposeRequest(**args)
-        result = llm_compose_text(
-            text=req.text,
-            goal=req.goal,
-            instruction=req.instruction,
-            max_chars=req.max_chars,
-        )
-        return LlmComposeResponse(**result).model_dump()
-
-    def tool_search_web(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
-        req = SearchGenerateJsonRequest(**args)
-        service = SearchService(ctx.settings.search_base_url, ctx.api_key)
-        result = service.search_generate_json(user_prompt=req.user_prompt)
-        # payload-friendly: Folgeschritte wie pdf_export können {last.text} verwenden.
-        result["text"] = _search_result_to_text(req.user_prompt, result)
-        return result
-
-    def tool_send_mail(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
-        req = MailSendRequest(**args)
-        result = send_mail(
-            to=req.to,
-            subject=req.subject,
-            body=req.body,
-            attachment_paths=req.attachment_paths,
-            work_dir=_ctx.settings.user_work_dir(_ctx.user_id),
-            cc=req.cc,
-            bcc=req.bcc,
-            from_email=req.from_email,
-            reply_to=req.reply_to,
-            is_html=req.is_html,
-        )
-        return MailSendResponse(**result).model_dump()
-
-    registry.register(
-        "read_file",
-        tool_read_file,
-        request_model=FileReadRequest,
-    )
-    registry.register(
-        "write_file",
-        tool_write_file,
-        request_model=FileWriteRequest,
-    )
-    registry.register(
-        "query_rag",
-        tool_query_rag,
-        request_model=RagQueryRequest,
-    )
-    registry.register(
-        "llm_summarize",
-        tool_llm_summarize,
-        request_model=LlmSummaryRequest,
-    )
-    registry.register(
-        "llm_compose",
-        tool_llm_compose,
-        request_model=LlmComposeRequest,
-    )
-    registry.register(
-        "pdf_export",
-        tool_pdf_export,
-        request_model=PdfExportRequest,
-    )
-    registry.register(
-        "ppt_export",
-        tool_ppt_export,
-        request_model=PptExportRequest,
-    )
-    registry.register(
-        "search_web",
-        tool_search_web,
-        request_model=SearchGenerateJsonRequest,
-    )
-    registry.register(
-        "send_mail",
-        tool_send_mail,
-        request_model=MailSendRequest,
-    )
-
-    return registry
+    return register_all_tools(registry)
 
 
 

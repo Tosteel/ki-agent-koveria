@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from .agent_prompts import get_final_system_prompt, get_planner_system_prompt
 
 def _env_int(name: str, default: int) -> int:
     v = os.getenv(name, "").strip()
@@ -154,21 +155,12 @@ class IonosLLM:
             },
         }
 
+        planner_system = get_planner_system_prompt("ionos")
+
         # Primär: json_schema erzwingen
         completion = self.chat_completions(
             messages=[
-                {"role": "system",
-                 "content": "You are a planner. Output ONLY valid JSON with a top-level key 'steps'.\n"
-                            "read_file ist verboten, wenn der Nutzer keine Datei benennt. In diesem Fall MUSS query_rag genutzt werden.\n"
-                            "Formuliere für query_rag-Queries die Suchbegriffe (keine SQL).\n"
-                            "Wenn der Nutzer eine Zusammenfassung/kompakte Ausgabe verlangt, nutze llm_summarize nach query_rag und vor pdf_export.\n"
-                            "Wenn der Nutzer einen kohärenten, gut lesbaren Fließtext aus Bausteinen verlangt, nutze llm_compose nach query_rag und vor pdf_export.\n"
-                            "Für Präsentations-Export nutze ppt_export (statt pdf_export).\n"
-                            "Für Websuche/Internet-Recherche aus einem User-Prompt nutze search_web.\n"
-                            "Nachfolgende Schritte erhalten automatisch den Payload des vorherigen Schritts als zusätzliche Args.\n"
-                            "Plane daher so, dass Ergebnisfelder (z.B. text) von Schritt N direkt von Schritt N+1 genutzt werden können.\n"
-                            "Platzhalter nur als {steps[0].text}, {{steps.1.result.text}} oder {last.text}; niemals mit führendem $.\n"
-                 },
+                {"role": "system", "content": planner_system},
                 {"role": "user", "content": f"Goal: {goal}"},
             ],
             response_format=response_format,
@@ -183,18 +175,7 @@ class IonosLLM:
         # Fallback: wenigstens JSON erzwingen (falls json_schema/oneOf nicht sauber unterstützt wird)
         completion2 = self.chat_completions(
             messages=[
-                {"role": "system",
-                 "content": "You are a planner. Output ONLY valid JSON with a top-level key 'steps'.\n"
-                            "read_file ist verboten, wenn der Nutzer keine Datei benennt. In diesem Fall MUSS query_rag genutzt werden.\n"
-                            "Formuliere für query_rag-Queries die Suchbegriffe (keine SQL).\n"
-                            "Wenn der Nutzer eine Zusammenfassung/kompakte Ausgabe verlangt, nutze llm_summarize nach query_rag und vor pdf_export.\n"
-                            "Wenn der Nutzer einen kohärenten, gut lesbaren Fließtext aus Bausteinen verlangt, nutze llm_compose nach query_rag und vor pdf_export.\n"
-                            "Für Präsentations-Export nutze ppt_export (statt pdf_export).\n"
-                            "Für Websuche/Internet-Recherche aus einem User-Prompt nutze search_web.\n"
-                            "Nachfolgende Schritte erhalten automatisch den Payload des vorherigen Schritts als zusätzliche Args.\n"
-                            "Plane daher so, dass Ergebnisfelder (z.B. text) von Schritt N direkt von Schritt N+1 genutzt werden können.\n"
-                            "Platzhalter nur als {steps[0].text}, {{steps.1.result.text}} oder {last.text}; niemals mit führendem $.\n"
-                 },
+                {"role": "system", "content": planner_system},
                 {"role": "user", "content": f"Goal: {goal}"},
             ],
             response_format={"type": "json_object"},
@@ -205,11 +186,7 @@ class IonosLLM:
         return {"steps": steps2 if isinstance(steps2, list) else []}
 
     def final_answer(self, *, goal: str, tool_outputs: List[Dict[str, Any]]) -> str:
-        system = (
-            "Du bist ein Assistent. Antworte sachlich und knapp.\n"
-            "Nutze ausschließlich die Tool-Outputs. Erfinde nichts.\n"
-            "Wenn Daten fehlen: benenne das klar.\n"
-        )
+        system = get_final_system_prompt("ionos")
         user = (
             f"Ziel: {goal}\n\n"
             f"Tool-Outputs (JSON):\n{json.dumps(tool_outputs, ensure_ascii=False)}\n\n"
