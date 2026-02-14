@@ -1,7 +1,36 @@
 {
   "version": 1,
-  "updated_at": "2026-02-14T14:05:59Z",
+  "updated_at": "2026-02-14T14:18:12Z",
   "chats": [
+    {
+      "id": 9,
+      "title": "test2",
+      "messages": [
+        {
+          "role": "bot",
+          "text": "Hallo! Wie kann ich Ihnen heute helfen?",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "timestamp": "2026-02-14T14:17:37.168Z"
+        },
+        {
+          "role": "user",
+          "text": "test2",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "timestamp": "2026-02-14T14:17:39.646Z"
+        },
+        {
+          "role": "bot",
+          "text": "Der Benutzer hat den Chat-Verlauf mit einer Testnachricht (\"test2\") fortgesetzt. Die Tool-Ausgabe zeigt, dass die Eingabe als \"MatchUp\" klassifiziert wurde und 3 Treffer gefunden wurden. Eine spezifische Antwort auf die Frage \"test2\" kann aufgrund fehlender Kontextinformationen nicht gegeben werden.",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "timestamp": "2026-02-14T14:17:50.274Z"
+        }
+      ],
+      "created_at": "2026-02-14T14:17:37.168Z",
+      "updated_at": "2026-02-14T14:17:50.274Z"
+    },
     {
       "id": 8,
       "title": "Suche im Internet nach Mährobotern h...",
@@ -253,10 +282,45 @@
           "downloadUrl": "/api/download?path=Rechnung_Holzverkleidung.pdf",
           "downloadLabel": "Download: Rechnung_Holzverkleidung.pdf",
           "timestamp": "2026-02-13T22:53:32.897Z"
+        },
+        {
+          "role": "user",
+          "text": "test und erstelle eine PDF.",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "timestamp": "2026-02-14T14:10:50.439Z"
+        },
+        {
+          "role": "bot",
+          "text": "Fehler: API error: {\"detail\":\"Invalid token\"}",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "timestamp": "2026-02-14T14:10:50.467Z"
+        },
+        {
+          "role": "user",
+          "text": "test und erstelle eine PDF.",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "timestamp": "2026-02-14T14:11:16.297Z"
+        },
+        {
+          "role": "bot",
+          "text": "Die Anfrage wurde bearbeitet. Die Rechnung für die Holzverkleidung der Dachschrägen beträgt 2.375,00 €. Die Gesamtsumme der Rechnung, einschließlich MwSt, beträgt 4.055,00 €. Eine PDF wurde erstellt, aber aufgrund eines API-Fehlers konnte sie nicht gesendet werden. Die PDF wurde jedoch erfolgreich lokal erstellt.",
+          "downloadUrl": "/api/download?path=Rechnung_Holzverkleidung.pdf&user_id=user1",
+          "downloadLabel": "Download: Rechnung_Holzverkleidung.pdf",
+          "timestamp": "2026-02-14T14:11:37.835Z"
+        },
+        {
+          "role": "user",
+          "text": "test und erstelle eine PDF.",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "timestamp": "2026-02-14T14:13:08.170Z"
         }
       ],
       "created_at": "2026-02-13T22:51:20.908Z",
-      "updated_at": "2026-02-13T22:53:32.897Z"
+      "updated_at": "2026-02-14T14:13:08.170Z"
     },
     {
       "id": 4,
@@ -450,10 +514,31 @@
           "downloadUrl": "",
           "downloadLabel": "",
           "timestamp": "2026-02-14T09:28:05.734Z"
+        },
+        {
+          "role": "bot",
+          "text": "Die Anfrage wurde bearbeitet. Die Rechnung für die Holzverkleidung der Dachschrägen beträgt 2.375,00 €. Die Gesamtsumme der Rechnung, einschließlich MwSt, beträgt 4.055,00 €. Eine PDF wurde erfolgreich lokal erstellt.",
+          "downloadUrl": "/api/download?path=Rechnung_Holzverkleidung_Dachschr%C3%A4gen.pdf&user_id=user1",
+          "downloadLabel": "Download: Rechnung_Holzverkleidung_Dachschrägen.pdf",
+          "timestamp": "2026-02-14T14:13:49.750Z"
+        },
+        {
+          "role": "user",
+          "text": "test",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "timestamp": "2026-02-14T14:17:36.329Z"
+        },
+        {
+          "role": "bot",
+          "text": "Der Nutzer hat bisher nach einer Rechnung mit Holzverkleidung für Dachschrägen gesucht, einen Witz gehört, fünf Babygeschenke recherchiert und die Ergebnisse per E-Mail als PowerPoint-Präsentation erhalten. Eine PDF-Version konnte nicht gesendet werden, da ein Fehler auftrat. Eine neue Anfrage wurde gestellt, aber es fehlt an Informationen, um sie zu bearbeiten. Die neue Anfrage lautet lediglich \"test\".",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "timestamp": "2026-02-14T14:18:02.555Z"
         }
       ],
       "created_at": "2026-02-13T22:31:08.057Z",
-      "updated_at": "2026-02-14T09:28:05.734Z"
+      "updated_at": "2026-02-14T14:18:02.555Z"
     },
     {
       "id": 3,
@@ -655,5 +740,5 @@
       "updated_at": "2026-02-13T22:19:02.535Z"
     }
   ],
-  "active_chat_id": 1
+  "active_chat_id": 9
 }

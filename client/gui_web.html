@@ -467,6 +467,7 @@
     let activeChatId = null;
     let saveTimer = null;
     let currentUserId = '';
+    const pendingChats = new Set();
 
     function nowIso() {
       return new Date().toISOString();
@@ -600,6 +601,10 @@
       return chats.find((chat) => chat.id === activeChatId) || null;
     }
 
+    function getChatById(chatId) {
+      return chats.find((chat) => chat.id === chatId) || null;
+    }
+
     function isMobileView() {
       return window.matchMedia('(max-width: 960px)').matches;
     }
@@ -633,7 +638,7 @@
       chats.forEach((chat) => {
         const item = document.createElement('div');
         item.className = `item${chat.id === activeChatId ? ' active' : ''}`;
-        item.textContent = chat.title;
+        item.textContent = pendingChats.has(chat.id) ? `${chat.title} (...)` : chat.title;
         item.title = 'Doppelklick zum Umbenennen';
         item.addEventListener('click', () => {
           activeChatId = chat.id;
@@ -659,10 +664,11 @@
         messagesEl.appendChild(createMessageElement(msg.role, msg.text, msg));
       });
       messagesEl.scrollTop = messagesEl.scrollHeight;
+      refreshComposerState();
     }
 
-    function addMessage(role, text, meta = {}) {
-      const chat = getActiveChat();
+    function addMessageToChat(chatId, role, text, meta = {}) {
+      const chat = getChatById(chatId);
       if (!chat) return;
 
       chat.messages.push({
@@ -679,6 +685,12 @@
       renderChatList();
       renderActiveChat();
       scheduleChatMemorySave();
+    }
+
+    function addMessage(role, text, meta = {}) {
+      const chat = getActiveChat();
+      if (!chat) return;
+      addMessageToChat(chat.id, role, text, meta);
     }
 
     function extractDownloadPath(raw) {
@@ -723,6 +735,15 @@
       sendBtn.disabled = isSending;
       inputEl.disabled = isSending;
       if (!isSending) inputEl.focus();
+    }
+
+    function refreshComposerState() {
+      const chat = getActiveChat();
+      if (!chat) {
+        setSending(false);
+        return;
+      }
+      setSending(pendingChats.has(chat.id));
     }
 
     async function loadSettings() {
@@ -879,7 +900,11 @@
       if (!message) return;
 
       const chat = getActiveChat();
-      const history = (chat?.messages || [])
+      if (!chat) return;
+      const targetChatId = chat.id;
+      if (pendingChats.has(targetChatId)) return;
+
+      const history = (chat.messages || [])
         .slice(-MAX_CONTEXT_MESSAGES)
         .map((msg) => ({ role: msg.role, text: msg.text }));
 
@@ -888,9 +913,11 @@
         return;
       }
 
-      addMessage('user', message);
+      addMessageToChat(targetChatId, 'user', message);
       inputEl.value = '';
-      setSending(true);
+      pendingChats.add(targetChatId);
+      refreshComposerState();
+      renderChatList();
 
       try {
         const resp = await fetch('/api/chat', {
@@ -907,17 +934,19 @@
         if (outputPath) {
           const fileName = fileNameFromPath(outputPath);
           const downloadUrl = `/api/download?path=${encodeURIComponent(outputPath)}&user_id=${encodeURIComponent(currentUserId)}`;
-          addMessage('bot', data.answer || 'Keine Antwort erhalten.', {
+          addMessageToChat(targetChatId, 'bot', data.answer || 'Keine Antwort erhalten.', {
             downloadUrl,
             downloadLabel: `Download: ${fileName}`
           });
         } else {
-          addMessage('bot', data.answer || 'Keine Antwort erhalten.');
+          addMessageToChat(targetChatId, 'bot', data.answer || 'Keine Antwort erhalten.');
         }
       } catch (err) {
-        addMessage('bot', 'Verbindung zur API fehlgeschlagen.');
+        addMessageToChat(targetChatId, 'bot', 'Verbindung zur API fehlgeschlagen.');
       } finally {
-        setSending(false);
+        pendingChats.delete(targetChatId);
+        refreshComposerState();
+        renderChatList();
       }
     }
 
