@@ -12,6 +12,7 @@ from .core.models import (
     FileWriteRequest, FileWriteResponse,
     PdfExportRequest, PdfExportResponse,
     PptExportRequest, PptExportResponse,
+    MailSendRequest, MailSendResponse,
     SearchGenerateJsonRequest,
     LlmSummaryRequest, LlmSummaryResponse,
     LlmComposeRequest, LlmComposeResponse,
@@ -24,6 +25,7 @@ from .tools.search_koveria import SearchService
 from .tools.filesystem import read_text, write_text
 from .tools.pdf import export_text_pdf
 from .tools.powerpoint import export_text_pptx
+from .tools.mail import send_mail
 from .tools.llm_summary import llm_summarize_text
 from .tools.llm_compose import llm_compose_text
 
@@ -433,6 +435,28 @@ def ppt_export(
     )
 
 
+@app.post("/mail/send", response_model=MailSendResponse)
+def mail_send(
+    req: MailSendRequest,
+    user_id: str = Depends(get_current_user),
+    s: Settings = Depends(dep_settings),
+) -> MailSendResponse:
+    _ensure_user_dirs(s, user_id)
+    result = send_mail(
+        to=req.to,
+        subject=req.subject,
+        body=req.body,
+        attachment_paths=req.attachment_paths,
+        work_dir=s.user_work_dir(user_id),
+        cc=req.cc,
+        bcc=req.bcc,
+        from_email=req.from_email,
+        reply_to=req.reply_to,
+        is_html=req.is_html,
+    )
+    return MailSendResponse(**result)
+
+
 # ----------------------------- Phase 1: Agent (Tool Registry + Orchestrator) -----------------------------
 def _build_registry() -> ToolRegistry:
     registry = ToolRegistry()
@@ -515,6 +539,22 @@ def _build_registry() -> ToolRegistry:
         result["text"] = _search_result_to_text(req.user_prompt, result)
         return result
 
+    def tool_send_mail(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+        req = MailSendRequest(**args)
+        result = send_mail(
+            to=req.to,
+            subject=req.subject,
+            body=req.body,
+            attachment_paths=req.attachment_paths,
+            work_dir=_ctx.settings.user_work_dir(_ctx.user_id),
+            cc=req.cc,
+            bcc=req.bcc,
+            from_email=req.from_email,
+            reply_to=req.reply_to,
+            is_html=req.is_html,
+        )
+        return MailSendResponse(**result).model_dump()
+
     registry.register(
         "read_file",
         tool_read_file,
@@ -554,6 +594,11 @@ def _build_registry() -> ToolRegistry:
         "search_web",
         tool_search_web,
         request_model=SearchGenerateJsonRequest,
+    )
+    registry.register(
+        "send_mail",
+        tool_send_mail,
+        request_model=MailSendRequest,
     )
 
     return registry

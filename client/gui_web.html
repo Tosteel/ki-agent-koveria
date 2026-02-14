@@ -127,12 +127,33 @@
       background: linear-gradient(180deg, #fcfdff 0%, #f9fbff 100%);
     }
 
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
     .topbar h1 {
       margin: 0;
-      font-size: 18px;
+      font-size: 16px;
       font-weight: 700;
       color: #223f71;
       letter-spacing: 0.3px;
+    }
+
+    .mobile-sidebar-toggle {
+      display: none;
+      border: 1px solid #d7e2f9;
+      background: #f7faff;
+      color: #4d6fae;
+      border-radius: 8px;
+      width: 34px;
+      height: 34px;
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0;
     }
 
     .actions button {
@@ -286,6 +307,16 @@
 
     .overlay.open { display: flex; }
 
+    .sidebar-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(27, 45, 87, 0.26);
+      z-index: 12;
+    }
+
+    .sidebar-backdrop.open { display: block; }
+
     .modal {
       width: min(580px, 100%);
       background: #fff;
@@ -337,9 +368,22 @@
 
     @media (max-width: 960px) {
       .app { grid-template-columns: 1fr; height: calc(100vh - 20px); }
-      .sidebar { display: none; }
+      .sidebar {
+        display: flex;
+        position: fixed;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: min(320px, 84vw);
+        z-index: 13;
+        transform: translateX(-104%);
+        transition: transform 0.2s ease;
+        box-shadow: 0 20px 48px rgba(20, 45, 92, 0.35);
+      }
+      .sidebar.open { transform: translateX(0); }
+      .mobile-sidebar-toggle { display: inline-block; }
       body { padding: 10px; }
-      .topbar h1 { font-size: 30px; }
+      .topbar h1 { font-size: 22px; }
       .bubble { font-size: 16px; }
       .composer input { font-size: 16px; }
     }
@@ -358,7 +402,10 @@
 
     <section class="chat">
       <header class="topbar">
-        <h1 id="chatTitle">Neuer Chat</h1>
+        <div class="topbar-left">
+          <button class="mobile-sidebar-toggle" id="sidebarToggleBtn" title="Chats">💬</button>
+          <h1 id="chatTitle">Neuer Chat</h1>
+        </div>
         <div class="actions">
           <button id="menuBtn" title="Einstellungen">☰</button>
         </div>
@@ -372,6 +419,7 @@
       </footer>
     </section>
   </div>
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
   <div class="overlay" id="settingsOverlay">
     <div class="modal">
@@ -397,6 +445,9 @@
     const newChatBtn = document.getElementById('newChat');
     const chatListEl = document.getElementById('chatList');
     const chatTitleEl = document.getElementById('chatTitle');
+    const sidebarEl = document.querySelector('.sidebar');
+    const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
+    const sidebarBackdrop = document.getElementById('sidebarBackdrop');
 
     const overlay = document.getElementById('settingsOverlay');
     const menuBtn = document.getElementById('menuBtn');
@@ -408,9 +459,96 @@
 
     const BOT_WELCOME = 'Hallo! Wie kann ich Ihnen heute helfen?';
     const MAX_CONTEXT_MESSAGES = 12;
+    const SAVE_DEBOUNCE_MS = 250;
+    const PROFILES_STORAGE_KEY = 'koveria.web.profiles.v1';
+    const ACTIVE_USER_STORAGE_KEY = 'koveria.web.active_user.v1';
     let nextChatId = 1;
     const chats = [];
     let activeChatId = null;
+    let saveTimer = null;
+    let currentUserId = '';
+
+    function nowIso() {
+      return new Date().toISOString();
+    }
+
+    function scheduleChatMemorySave() {
+      if (saveTimer) window.clearTimeout(saveTimer);
+      saveTimer = window.setTimeout(() => {
+        saveTimer = null;
+        void saveChatMemory();
+      }, SAVE_DEBOUNCE_MS);
+    }
+
+    function touchChat(chat) {
+      if (!chat) return;
+      if (!chat.created_at) chat.created_at = nowIso();
+      chat.updated_at = nowIso();
+    }
+
+    function loadProfilesCache() {
+      try {
+        const raw = window.localStorage.getItem(PROFILES_STORAGE_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return {};
+        return parsed;
+      } catch (_err) {
+        return {};
+      }
+    }
+
+    function saveProfilesCache(profiles) {
+      try {
+        window.localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(profiles || {}));
+      } catch (_err) {
+        // ignore quota/storage errors
+      }
+    }
+
+    function getActiveUserFromSession() {
+      try {
+        return String(window.sessionStorage.getItem(ACTIVE_USER_STORAGE_KEY) || '').trim();
+      } catch (_err) {
+        return '';
+      }
+    }
+
+    function setActiveUserInSession(userId) {
+      try {
+        const clean = String(userId || '').trim();
+        if (!clean) {
+          window.sessionStorage.removeItem(ACTIVE_USER_STORAGE_KEY);
+          return;
+        }
+        window.sessionStorage.setItem(ACTIVE_USER_STORAGE_KEY, clean);
+      } catch (_err) {
+        // ignore storage errors
+      }
+    }
+
+    function saveUserProfile(userId, profile) {
+      const cleanUserId = String(userId || '').trim();
+      if (!cleanUserId) return;
+      const profiles = loadProfilesCache();
+      profiles[cleanUserId] = {
+        ask_ionos_url: String(profile?.ask_ionos_url || '').trim(),
+        api_key: String(profile?.api_key || '').trim()
+      };
+      saveProfilesCache(profiles);
+    }
+
+    function loadUserProfile(userId) {
+      const cleanUserId = String(userId || '').trim();
+      if (!cleanUserId) return null;
+      const profiles = loadProfilesCache();
+      const profile = profiles[cleanUserId];
+      if (!profile || typeof profile !== 'object') return null;
+      return {
+        ask_ionos_url: String(profile.ask_ionos_url || '').trim(),
+        api_key: String(profile.api_key || '').trim()
+      };
+    }
 
     function createMessageElement(role, text, meta = {}) {
       const row = document.createElement('div');
@@ -462,14 +600,32 @@
       return chats.find((chat) => chat.id === activeChatId) || null;
     }
 
+    function isMobileView() {
+      return window.matchMedia('(max-width: 960px)').matches;
+    }
+
+    function closeSidebar() {
+      if (!sidebarEl || !sidebarBackdrop) return;
+      sidebarEl.classList.remove('open');
+      sidebarBackdrop.classList.remove('open');
+    }
+
+    function toggleSidebar() {
+      if (!sidebarEl || !sidebarBackdrop) return;
+      const open = sidebarEl.classList.toggle('open');
+      sidebarBackdrop.classList.toggle('open', open);
+    }
+
     function renameChat(chatId) {
       const chat = chats.find((entry) => entry.id === chatId);
       if (!chat) return;
       const input = window.prompt('Chat umbenennen', chat.title);
       if (input === null) return;
       chat.title = truncateTitle(input);
+      touchChat(chat);
       renderChatList();
       renderActiveChat();
+      scheduleChatMemorySave();
     }
 
     function renderChatList() {
@@ -483,6 +639,8 @@
           activeChatId = chat.id;
           renderChatList();
           renderActiveChat();
+          if (isMobileView()) closeSidebar();
+          scheduleChatMemorySave();
         });
         item.addEventListener('dblclick', () => {
           renameChat(chat.id);
@@ -511,13 +669,16 @@
         role,
         text,
         downloadUrl: meta.downloadUrl || '',
-        downloadLabel: meta.downloadLabel || ''
+        downloadLabel: meta.downloadLabel || '',
+        timestamp: nowIso()
       });
+      touchChat(chat);
       if (role === 'user' && chat.title === 'Neuer Chat') {
         chat.title = truncateTitle(text);
       }
       renderChatList();
       renderActiveChat();
+      scheduleChatMemorySave();
     }
 
     function extractDownloadPath(raw) {
@@ -543,15 +704,19 @@
     }
 
     function startNewChat() {
+      const ts = nowIso();
       const chat = {
         id: nextChatId++,
         title: 'Neuer Chat',
-        messages: [{ role: 'bot', text: BOT_WELCOME }],
+        messages: [{ role: 'bot', text: BOT_WELCOME, downloadUrl: '', downloadLabel: '', timestamp: ts }],
+        created_at: ts,
+        updated_at: ts
       };
       chats.unshift(chat);
       activeChatId = chat.id;
       renderChatList();
       renderActiveChat();
+      scheduleChatMemorySave();
     }
 
     function setSending(isSending) {
@@ -562,13 +727,118 @@
 
     async function loadSettings() {
       settingsStatus.textContent = '';
+      const activeUser = getActiveUserFromSession();
+      if (!activeUser) {
+        currentUserId = '';
+        apiUrlEl.value = '';
+        apiKeyEl.value = '';
+        return;
+      }
+      const profile = loadUserProfile(activeUser);
+      if (!profile) {
+        currentUserId = '';
+        apiUrlEl.value = '';
+        apiKeyEl.value = '';
+        return;
+      }
+      currentUserId = activeUser;
+      apiUrlEl.value = profile.ask_ionos_url || '';
+      apiKeyEl.value = profile.api_key || '';
+    }
+
+    function applyLoadedChats(memory) {
+      const rawChats = Array.isArray(memory?.chats) ? memory.chats : [];
+      chats.length = 0;
+
+      rawChats.forEach((entry) => {
+        const id = Number(entry?.id);
+        if (!Number.isInteger(id) || id < 1) return;
+        const title = truncateTitle(String(entry?.title || 'Neuer Chat'));
+
+        const rawMessages = Array.isArray(entry?.messages) ? entry.messages : [];
+        const messages = rawMessages
+          .map((m) => ({
+            role: m?.role === 'user' ? 'user' : 'bot',
+            text: String(m?.text || '').trim(),
+            downloadUrl: String(m?.downloadUrl || ''),
+            downloadLabel: String(m?.downloadLabel || ''),
+            timestamp: String(m?.timestamp || nowIso())
+          }))
+          .filter((m) => m.text.length > 0);
+
+        if (!messages.length) {
+          messages.push({ role: 'bot', text: BOT_WELCOME, downloadUrl: '', downloadLabel: '', timestamp: nowIso() });
+        }
+
+        chats.push({
+          id,
+          title: title || 'Neuer Chat',
+          messages,
+          created_at: String(entry?.created_at || nowIso()),
+          updated_at: String(entry?.updated_at || nowIso())
+        });
+      });
+
+      nextChatId = chats.reduce((maxId, chat) => Math.max(maxId, chat.id), 0) + 1;
+      const desiredActiveId = Number(memory?.active_chat_id);
+      const hasDesiredActive = chats.some((chat) => chat.id === desiredActiveId);
+      activeChatId = hasDesiredActive ? desiredActiveId : (chats[0]?.id || null);
+    }
+
+    async function loadChatMemory() {
+      if (!currentUserId) {
+        chats.length = 0;
+        activeChatId = null;
+        nextChatId = 1;
+        startNewChat();
+        return;
+      }
       try {
-        const resp = await fetch('/api/settings');
+        const resp = await fetch(`/api/chat-memory?user_id=${encodeURIComponent(currentUserId)}`);
         const data = await resp.json();
-        apiUrlEl.value = data.ask_ionos_url || '';
-        apiKeyEl.value = data.api_key || '';
-      } catch (err) {
-        settingsStatus.textContent = 'Einstellungen konnten nicht geladen werden.';
+        if (!resp.ok) throw new Error('chat-memory');
+        applyLoadedChats(data);
+      } catch (_err) {
+        chats.length = 0;
+        activeChatId = null;
+        nextChatId = 1;
+      }
+
+      if (!chats.length) {
+        startNewChat();
+        return;
+      }
+      renderChatList();
+      renderActiveChat();
+    }
+
+    async function saveChatMemory() {
+      const payload = {
+        user_id: currentUserId,
+        chats: chats.map((chat) => ({
+          id: chat.id,
+          title: chat.title,
+          created_at: chat.created_at || nowIso(),
+          updated_at: chat.updated_at || nowIso(),
+          messages: (chat.messages || []).map((msg) => ({
+            role: msg.role === 'user' ? 'user' : 'bot',
+            text: msg.text || '',
+            downloadUrl: msg.downloadUrl || '',
+            downloadLabel: msg.downloadLabel || '',
+            timestamp: msg.timestamp || nowIso()
+          }))
+        })),
+        active_chat_id: activeChatId
+      };
+      if (!currentUserId) return;
+      try {
+        await fetch('/api/chat-memory', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } catch (_err) {
+        // no-op; next mutation will retry
       }
     }
 
@@ -577,7 +847,8 @@
       try {
         const payload = {
           ask_ionos_url: apiUrlEl.value.trim(),
-          api_key: apiKeyEl.value.trim()
+          api_key: apiKeyEl.value.trim(),
+          user_id: currentUserId
         };
         const resp = await fetch('/api/settings', {
           method: 'POST',
@@ -589,7 +860,14 @@
           settingsStatus.textContent = data.detail || 'Speichern fehlgeschlagen.';
           return;
         }
+        currentUserId = String(data.user_id || '').trim();
+        saveUserProfile(currentUserId, {
+          ask_ionos_url: apiUrlEl.value.trim(),
+          api_key: apiKeyEl.value.trim()
+        });
+        setActiveUserInSession(currentUserId);
         settingsStatus.textContent = 'Gespeichert.';
+        await loadChatMemory();
         setTimeout(() => { overlay.classList.remove('open'); }, 350);
       } catch (err) {
         settingsStatus.textContent = 'Speichern fehlgeschlagen.';
@@ -605,6 +883,11 @@
         .slice(-MAX_CONTEXT_MESSAGES)
         .map((msg) => ({ role: msg.role, text: msg.text }));
 
+      if (!currentUserId) {
+        addMessage('bot', 'Bitte zuerst API-Key in den Einstellungen speichern.');
+        return;
+      }
+
       addMessage('user', message);
       inputEl.value = '';
       setSending(true);
@@ -613,7 +896,7 @@
         const resp = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message, history })
+          body: JSON.stringify({ message, history, user_id: currentUserId })
         });
         const data = await resp.json();
         if (!resp.ok) {
@@ -623,7 +906,7 @@
         const outputPath = extractDownloadPath(data.raw);
         if (outputPath) {
           const fileName = fileNameFromPath(outputPath);
-          const downloadUrl = `/api/download?path=${encodeURIComponent(outputPath)}`;
+          const downloadUrl = `/api/download?path=${encodeURIComponent(outputPath)}&user_id=${encodeURIComponent(currentUserId)}`;
           addMessage('bot', data.answer || 'Keine Antwort erhalten.', {
             downloadUrl,
             downloadLabel: `Download: ${fileName}`
@@ -660,10 +943,23 @@
 
     newChatBtn.addEventListener('click', () => {
       startNewChat();
+      if (isMobileView()) closeSidebar();
     });
 
-    startNewChat();
-    loadSettings();
+    if (sidebarToggleBtn) {
+      sidebarToggleBtn.addEventListener('click', toggleSidebar);
+    }
+    if (sidebarBackdrop) {
+      sidebarBackdrop.addEventListener('click', closeSidebar);
+    }
+    window.addEventListener('resize', () => {
+      if (!isMobileView()) closeSidebar();
+    });
+
+    (async () => {
+      await loadSettings();
+      await loadChatMemory();
+    })();
   </script>
 </body>
 </html>

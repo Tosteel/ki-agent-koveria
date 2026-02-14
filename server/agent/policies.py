@@ -7,4 +7,5 @@ PHASE1_ALLOWED_TOOLS = {
     "pdf_export",
     "ppt_export",
     "search_web",
+    "send_mail",
 }

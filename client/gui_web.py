@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlsplit, urlunsplit
@@ -32,6 +33,7 @@ DEFAULT_SETTINGS: Dict[str, str] = {
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
     history: Optional[List["ChatHistoryMessage"]] = None
+    user_id: Optional[str] = ""
 
 
 class ChatHistoryMessage(BaseModel):
@@ -42,6 +44,28 @@ class ChatHistoryMessage(BaseModel):
 class SettingsRequest(BaseModel):
     ask_ionos_url: str = Field(..., min_length=1)
     api_key: Optional[str] = ""
+    user_id: Optional[str] = ""
+
+
+class ChatMemoryMessage(BaseModel):
+    role: Literal["user", "bot"]
+    text: str = Field(..., min_length=1)
+    downloadUrl: str = ""
+    downloadLabel: str = ""
+    timestamp: str = ""
+
+
+class ChatMemoryChat(BaseModel):
+    id: int = Field(..., ge=1)
+    title: str = Field(..., min_length=1)
+    messages: List[ChatMemoryMessage] = Field(default_factory=list)
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class ChatMemoryRequest(BaseModel):
+    chats: List[ChatMemoryChat] = Field(default_factory=list)
+    active_chat_id: Optional[int] = Field(default=None, ge=1)
     user_id: Optional[str] = ""
 
 
@@ -56,6 +80,11 @@ def _sanitize_user_id(user_id: Optional[str]) -> str:
 def _user_settings_path(user_id: str) -> Path:
     safe_user_id = _sanitize_user_id(user_id)
     return USER_DATA_DIR / safe_user_id / "gui_web_config.json"
+
+
+def _user_chat_memory_path(user_id: str) -> Path:
+    safe_user_id = _sanitize_user_id(user_id)
+    return USER_DATA_DIR / safe_user_id / "chat_memory.json"
 
 
 def _extract_api_base_url(ask_ionos_url: str) -> Optional[str]:
@@ -156,6 +185,55 @@ def _user_work_dir(user_id: str) -> Path:
     return SERVER_DATA_DIR / "users" / _sanitize_user_id(user_id) / "work"
 
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _load_chat_memory_for_user(user_id: str) -> Dict[str, Any]:
+    path = _user_chat_memory_path(user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        return {"chats": [], "active_chat_id": None}
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"chats": [], "active_chat_id": None}
+
+    if not isinstance(data, dict):
+        return {"chats": [], "active_chat_id": None}
+
+    raw_chats = data.get("chats")
+    raw_active = data.get("active_chat_id")
+
+    chats: List[Dict[str, Any]] = []
+    if isinstance(raw_chats, list):
+        for raw_chat in raw_chats:
+            try:
+                chat_obj = ChatMemoryChat.model_validate(raw_chat)
+            except Exception:
+                continue
+            chats.append(chat_obj.model_dump())
+
+    active_chat_id: Optional[int] = None
+    if isinstance(raw_active, int) and raw_active > 0:
+        active_chat_id = raw_active
+
+    return {"chats": chats, "active_chat_id": active_chat_id}
+
+
+def _save_chat_memory_for_user(user_id: str, req: ChatMemoryRequest) -> None:
+    path = _user_chat_memory_path(user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": 1,
+        "updated_at": _now_iso(),
+        "chats": [chat.model_dump() for chat in req.chats],
+        "active_chat_id": req.active_chat_id,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 app = FastAPI(title="Koveria Web GUI", version="0.1.0")
 MAX_HISTORY_ITEMS = 12
 
@@ -204,8 +282,9 @@ def bot_avatar() -> FileResponse:
 
 
 @app.get("/api/download")
-def download(path: str = Query(..., min_length=1)) -> FileResponse:
-    user_id = _get_active_user_id()
+def download(path: str = Query(..., min_length=1), user_id: str = Query("")) -> FileResponse:
+    resolved_user_id = _sanitize_user_id(user_id) if user_id.strip() else _get_active_user_id()
+    user_id = resolved_user_id
     user_work = _user_work_dir(user_id).resolve()
     rel = path.strip().lstrip("/")
     candidate = (user_work / rel).resolve()
@@ -219,11 +298,12 @@ def download(path: str = Query(..., min_length=1)) -> FileResponse:
 
 
 @app.get("/api/settings")
-def get_settings() -> JSONResponse:
-    user_id = _get_active_user_id()
-    settings = _load_settings_for_user(user_id)
-    _set_active_user_id(user_id)
-    return JSONResponse({"user_id": user_id, **settings})
+def get_settings(user_id: str = Query("")) -> JSONResponse:
+    if not user_id.strip():
+        return JSONResponse({"user_id": "", **DEFAULT_SETTINGS})
+    resolved_user_id = _sanitize_user_id(user_id)
+    settings = _load_settings_for_user(resolved_user_id)
+    return JSONResponse({"user_id": resolved_user_id, **settings})
 
 
 @app.post("/api/settings")
@@ -241,14 +321,14 @@ def set_settings(req: SettingsRequest) -> JSONResponse:
     user_id = _sanitize_user_id(user_id)
 
     _save_settings_for_user(user_id, settings)
-    _set_active_user_id(user_id)
 
     return JSONResponse({"ok": True, "user_id": user_id, "settings": settings})
 
 
 @app.post("/api/chat")
 def chat(req: ChatRequest) -> JSONResponse:
-    settings = _load_settings_for_user(_get_active_user_id())
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    settings = _load_settings_for_user(user_id)
     url = settings["ask_ionos_url"].strip()
     api_key = settings.get("api_key", "").strip()
 
@@ -273,6 +353,22 @@ def chat(req: ChatRequest) -> JSONResponse:
         answer = json.dumps(data, ensure_ascii=False)
 
     return JSONResponse({"ok": True, "answer": answer, "raw": data})
+
+
+@app.get("/api/chat-memory")
+def get_chat_memory(user_id: str = Query("")) -> JSONResponse:
+    if not user_id.strip():
+        return JSONResponse({"user_id": "", "chats": [], "active_chat_id": None})
+    resolved_user_id = _sanitize_user_id(user_id)
+    memory = _load_chat_memory_for_user(resolved_user_id)
+    return JSONResponse({"user_id": resolved_user_id, **memory})
+
+
+@app.post("/api/chat-memory")
+def set_chat_memory(req: ChatMemoryRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    _save_chat_memory_for_user(user_id, req)
+    return JSONResponse({"ok": True, "user_id": user_id})
 
 
 if __name__ == "__main__":
