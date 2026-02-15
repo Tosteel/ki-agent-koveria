@@ -249,16 +249,6 @@ def _compact_tool_outputs(tool_outputs: list[Dict[str, Any]]) -> list[Dict[str, 
         payload = o.get("payload")
         if isinstance(payload, dict):
             payload = dict(payload)
-            # rag_knowledgebase liefert sowohl hits als auch text. Für API-Responses reichen hits;
-            # text bleibt intern in tool_outputs_full für nachfolgende Steps verfügbar.
-            if item["tool"] == "rag_knowledgebase" and isinstance(payload.get("hits"), list):
-                payload.pop("text", None)
-            # llm_summarize liefert summary und text mit gleichem Inhalt.
-            # Für API-Responses reicht summary; text bleibt intern verfügbar.
-            if item["tool"] == "llm_summarize" and isinstance(payload.get("summary"), str):
-                payload.pop("text", None)
-            if item["tool"] == "llm_compose" and isinstance(payload.get("composed_text"), str):
-                payload.pop("text", None)
         if o.get("ok"):
             # Response kompakt halten: nur payload zurückgeben (enthält bereits die result-Felder).
             item["payload"] = payload
@@ -308,6 +298,63 @@ def _outputs_for_final_answer(tool_outputs: list[Dict[str, Any]]) -> list[Dict[s
             item["error"] = o.get("error")
         lean.append(item)
     return lean
+
+
+def _run_clarification_gate(llm: Any, goal: str) -> Dict[str, Any]:
+    g = (goal or "").strip().lower()
+    # Retrieval/Recherche soll nicht durch überstrenge Rückfragen blockiert werden.
+    # Bei solchen Zielen lieber best-effort planen und ausführen.
+    search_like_markers = [
+        "suche",
+        "such",
+        "recherche",
+        "finde",
+        "in meinem wissen",
+        "wissen",
+        "knowledgebase",
+        "rag",
+        "websuche",
+        "internet",
+    ]
+    if any(m in g for m in search_like_markers):
+        return {"status": "ready", "normalized_goal": goal, "missing_fields": [], "questions": []}
+
+    if not hasattr(llm, "enabled") or not llm.enabled():
+        return {"status": "ready", "normalized_goal": goal, "missing_fields": [], "questions": []}
+    if not hasattr(llm, "clarify_goal"):
+        return {"status": "ready", "normalized_goal": goal, "missing_fields": [], "questions": []}
+
+    try:
+        out = llm.clarify_goal(goal=goal)
+    except Exception:
+        return {"status": "ready", "normalized_goal": goal, "missing_fields": [], "questions": []}
+
+    status = out.get("status")
+    if status not in {"ready", "needs_info"}:
+        status = "ready"
+    return {
+        "status": status,
+        "normalized_goal": str(out.get("normalized_goal") or goal),
+        "missing_fields": list(out.get("missing_fields") or []),
+        "questions": list(out.get("questions") or []),
+    }
+
+
+def _clarification_response(req_goal: str, gate: Dict[str, Any]) -> AgentAskResponse:
+    questions = [str(q).strip() for q in (gate.get("questions") or []) if str(q).strip()]
+    if not questions:
+        questions = ["Welche Informationen fehlen genau, damit ich starten kann?"]
+    answer = "Bevor ich starte, brauche ich noch:\n" + "\n".join(f"- {q}" for q in questions)
+    return AgentAskResponse(
+        ok=True,
+        goal=req_goal,
+        steps=[],
+        tool_outputs=[],
+        answer=answer,
+        requires_user_input=True,
+        missing_fields=list(gate.get("missing_fields") or []),
+        questions=questions,
+    )
 
 from .services.llm_openai import LlmRuntime
 from server.services.llm_ionos import IonosLLM
@@ -521,9 +568,15 @@ def agent_askOpenAI(
     ctx = ToolContext(user_id=user_id, settings=s, api_key=api_key, goal=req.goal)
 
     llm = LlmRuntime()
+    gate = _run_clarification_gate(llm, req.goal)
+    if gate["status"] == "needs_info":
+        return _clarification_response(req.goal, gate)
+
+    effective_goal = gate["normalized_goal"]
+    ctx.goal = effective_goal
     planner = Planner(llm, registry)
-    steps = planner.create_steps(goal=req.goal)
-    steps = _inject_llm_summary_before_pdf(steps, req.goal)
+    steps = planner.create_steps(goal=effective_goal)
+    steps = _inject_llm_summary_before_pdf(steps, effective_goal)
     #steps = planner.create_steps(req.goal)
 
     tool_outputs_full = orch.run_steps(ctx, steps)
@@ -531,7 +584,7 @@ def agent_askOpenAI(
 
     llm_view = _outputs_for_final_answer(tool_outputs_full)
     if llm.enabled():
-        answer = llm.final_answer(goal=req.goal, tool_outputs=llm_view)
+        answer = llm.final_answer(goal=effective_goal, tool_outputs=llm_view)
     else:
         # Fallback: sehr kurze Antwort aus Outputs
         answer = str(llm_view)
@@ -554,9 +607,23 @@ def agent_askIonos(
     ctx = ToolContext(user_id=user_id, settings=s, api_key=api_key, goal=req.goal)
 
     llm = IonosLLM()
+    gate = _run_clarification_gate(llm, req.goal)
+
+    print("\n===== CLARIFICATION =====")
+    print(f"status={gate.get('status')}")
+    print(f"normalized_goal={gate.get('normalized_goal')}")
+    print(f"missing_fields={gate.get('missing_fields')}")
+    print(f"questions={gate.get('questions')}")
+    print("=========================\n")
+
+    if gate["status"] == "needs_info":
+        return _clarification_response(req.goal, gate)
+
+    effective_goal = gate["normalized_goal"]
+    ctx.goal = effective_goal
     planner = Planner(llm, registry)
-    steps = planner.create_steps(goal=req.goal)
-    steps = _inject_llm_summary_before_pdf(steps, req.goal)
+    steps = planner.create_steps(goal=effective_goal)
+    steps = _inject_llm_summary_before_pdf(steps, effective_goal)
 
     print("\n===== PLANNED STEPS =====")
     for i, s in enumerate(steps, 1):
@@ -568,7 +635,7 @@ def agent_askIonos(
 
     llm_view = _outputs_for_final_answer(tool_outputs_full)
     if llm.enabled():
-        answer = llm.final_answer(goal=req.goal, tool_outputs=llm_view)
+        answer = llm.final_answer(goal=effective_goal, tool_outputs=llm_view)
     else:
         # Fallback: sehr kurze Antwort aus Outputs
         answer = str(llm_view)

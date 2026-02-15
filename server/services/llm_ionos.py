@@ -8,7 +8,11 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from .agent_prompts import get_final_system_prompt, get_planner_system_prompt
+from .agent_prompts import (
+    get_clarification_system_prompt,
+    get_final_system_prompt,
+    get_planner_system_prompt,
+)
 
 def _env_int(name: str, default: int) -> int:
     v = os.getenv(name, "").strip()
@@ -196,6 +200,46 @@ class IonosLLM:
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
         )
         return self.extract_text(completion)
+
+    def clarify_goal(self, *, goal: str) -> Dict[str, Any]:
+        schema = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "clarification_gate",
+                "schema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "status": {"type": "string", "enum": ["ready", "needs_info"]},
+                        "normalized_goal": {"type": "string"},
+                        "missing_fields": {"type": "array", "items": {"type": "string"}},
+                        "questions": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["status", "normalized_goal", "missing_fields", "questions"],
+                },
+                "strict": True,
+            },
+        }
+        completion = self.chat_completions(
+            messages=[
+                {
+                    "role": "system",
+                    "content": get_clarification_system_prompt("ionos"),
+                },
+                {"role": "user", "content": f"Anfrage: {goal}"},
+            ],
+            response_format=schema,
+        )
+        parsed = _parse_json_strictish(self.extract_text(completion))
+        status = parsed.get("status")
+        if status not in {"ready", "needs_info"}:
+            status = "ready"
+        return {
+            "status": status,
+            "normalized_goal": str(parsed.get("normalized_goal") or goal),
+            "missing_fields": list(parsed.get("missing_fields") or []),
+            "questions": list(parsed.get("questions") or []),
+        }
 
 
 def _parse_json_strictish(text: str) -> Dict[str, Any]:

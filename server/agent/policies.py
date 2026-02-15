@@ -8,5 +8,7 @@ PHASE1_ALLOWED_TOOLS = {
     "ppt_export",
     "search_multitable",
     "search_ebay",
+    "view_website",
+    "browse_website",
     "send_mail",
 }

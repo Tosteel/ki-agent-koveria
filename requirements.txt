@@ -1,1 +1,3 @@
 python-pptx
+beautifulsoup4
+playwright

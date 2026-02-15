@@ -5,7 +5,11 @@ import json
 import requests
 from typing import Any, Dict, List, Optional
 
-from .agent_prompts import get_final_system_prompt, get_planner_system_prompt
+from .agent_prompts import (
+    get_clarification_system_prompt,
+    get_final_system_prompt,
+    get_planner_system_prompt,
+)
 
 OPENAI_URL = "https://api.openai.com/v1/responses"
 
@@ -113,6 +117,52 @@ class LlmRuntime:
                 if c.get("type") == "output_text":
                     out += c.get("text", "")
         return json.loads(out)
+
+    def clarify_goal(self, *, goal: str) -> Dict[str, Any]:
+        schema = {
+            "type": "json_schema",
+            "name": "clarification_gate",
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "status": {"type": "string", "enum": ["ready", "needs_info"]},
+                    "normalized_goal": {"type": "string"},
+                    "missing_fields": {"type": "array", "items": {"type": "string"}},
+                    "questions": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["status", "normalized_goal", "missing_fields", "questions"],
+            },
+            "strict": False,
+        }
+        resp = self._call(
+            input_messages=[
+                {
+                    "role": "system",
+                    "content": get_clarification_system_prompt("openai"),
+                },
+                {"role": "user", "content": f"Anfrage: {goal}"},
+            ],
+            text_format=schema,
+        )
+        out = ""
+        for item in resp.get("output", []):
+            for c in item.get("content", []):
+                if c.get("type") == "output_text":
+                    out += c.get("text", "")
+        try:
+            parsed = json.loads(out or "{}")
+        except Exception:
+            parsed = {}
+        status = parsed.get("status")
+        if status not in {"ready", "needs_info"}:
+            status = "ready"
+        return {
+            "status": status,
+            "normalized_goal": str(parsed.get("normalized_goal") or goal),
+            "missing_fields": list(parsed.get("missing_fields") or []),
+            "questions": list(parsed.get("questions") or []),
+        }
 
     def final_answer(self, *, goal: str, tool_outputs: List[Dict[str, Any]]) -> str:
         resp = self._call(

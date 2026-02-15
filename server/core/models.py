@@ -60,3 +60,6 @@ class AgentAskResponse(BaseModel):
     steps: List[Dict[str, Any]] = Field(default_factory=list)
     tool_outputs: List[Dict[str, Any]] = Field(default_factory=list)
     answer: str
+    requires_user_input: bool = False
+    missing_fields: List[str] = Field(default_factory=list)
+    questions: List[str] = Field(default_factory=list)

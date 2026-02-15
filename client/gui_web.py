@@ -317,7 +317,8 @@ def set_settings(req: SettingsRequest) -> JSONResponse:
 
     explicit_user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else ""
     resolved_user_id = _resolve_user_id_from_api(settings["ask_ionos_url"], settings["api_key"])
-    user_id = explicit_user_id or resolved_user_id or _get_active_user_id()
+    # If API key resolves to another user, switch to that user profile and memory.
+    user_id = resolved_user_id or explicit_user_id or _get_active_user_id()
     user_id = _sanitize_user_id(user_id)
 
     _save_settings_for_user(user_id, settings)

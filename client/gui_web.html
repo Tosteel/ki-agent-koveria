@@ -50,6 +50,10 @@
       display: flex;
       flex-direction: column;
       border-right: 1px solid var(--line);
+      min-height: 0;
+      width: 220px;
+      min-width: 220px;
+      max-width: 220px;
     }
 
     .brand {
@@ -78,13 +82,22 @@
 
     .menu {
       padding: 2px 8px 12px;
-      overflow: auto;
+      overflow-y: auto;
+      overflow-x: hidden;
+      flex: 1;
+      min-height: 0;
+      min-width: 0;
       display: grid;
+      grid-template-columns: 1fr;
+      grid-auto-rows: 38px;
       gap: 6px;
     }
 
     .item {
-      padding: 8px 8px;
+      width: 100%;
+      max-width: 100%;
+      height: 38px;
+      padding: 0 8px;
       border-radius: 8px;
       font-size: 14px;
       color: #38527f;
@@ -92,11 +105,52 @@
       border: 1px solid #d9e4fb;
       cursor: pointer;
       user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow: hidden;
+      min-width: 0;
     }
 
     .item.active {
       background: #edf3ff;
       border-color: #b5cbf5;
+    }
+
+    .item-label {
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .item-delete {
+      width: 18px;
+      height: 18px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: #7e93ba;
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+    }
+
+    .item:hover .item-delete,
+    .item:focus-within .item-delete {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .item-delete:hover {
+      background: #e9efff;
+      color: #355ea6;
     }
 
     .new-chat {
@@ -397,7 +451,7 @@
       </div>
       <input class="search" placeholder="Search" />
       <div class="menu" id="chatList"></div>
-      <button class="new-chat" id="newChat" title="Neuer Chat">+</button>
+      <button class="new-chat" id="newChat" title="Neue Aufgabe">+</button>
     </aside>
 
     <section class="chat">
@@ -633,16 +687,62 @@
       scheduleChatMemorySave();
     }
 
+    function deleteChat(chatId) {
+      const idx = chats.findIndex((entry) => entry.id === chatId);
+      if (idx < 0) return;
+      chats.splice(idx, 1);
+
+      if (!chats.length) {
+        activeChatId = null;
+        nextChatId = 1;
+        startNewChat();
+        return;
+      }
+
+      if (activeChatId === chatId) {
+        activeChatId = chats[Math.max(0, idx - 1)]?.id || chats[0].id;
+      }
+
+      renderChatList();
+      renderActiveChat();
+      scheduleChatMemorySave();
+    }
+
+    function refreshActiveChatHighlight() {
+      const items = chatListEl.querySelectorAll('.item');
+      items.forEach((el) => {
+        const id = Number(el.getAttribute('data-chat-id'));
+        el.classList.toggle('active', id === activeChatId);
+      });
+    }
+
     function renderChatList() {
       chatListEl.innerHTML = '';
       chats.forEach((chat) => {
         const item = document.createElement('div');
+        item.setAttribute('data-chat-id', String(chat.id));
         item.className = `item${chat.id === activeChatId ? ' active' : ''}`;
-        item.textContent = pendingChats.has(chat.id) ? `${chat.title} (...)` : chat.title;
+        const label = document.createElement('span');
+        label.className = 'item-label';
+        label.textContent = pendingChats.has(chat.id) ? `${chat.title} (...)` : chat.title;
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'item-delete';
+        delBtn.type = 'button';
+        delBtn.setAttribute('aria-label', 'Chat löschen');
+        delBtn.textContent = '×';
+        delBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          deleteChat(chat.id);
+        });
+
+        item.appendChild(label);
+        item.appendChild(delBtn);
         item.title = 'Doppelklick zum Umbenennen';
         item.addEventListener('click', () => {
+          if (activeChatId === chat.id) return;
           activeChatId = chat.id;
-          renderChatList();
+          refreshActiveChatHighlight();
           renderActiveChat();
           if (isMobileView()) closeSidebar();
           scheduleChatMemorySave();
