@@ -458,7 +458,7 @@
       <header class="topbar">
         <div class="topbar-left">
           <button class="mobile-sidebar-toggle" id="sidebarToggleBtn" title="Chats">💬</button>
-          <h1 id="chatTitle">Neuer Chat</h1>
+          <h1 id="chatTitle">Neue Aufgabe</h1>
         </div>
         <div class="actions">
           <button id="menuBtn" title="Einstellungen">☰</button>
@@ -647,7 +647,7 @@
 
     function truncateTitle(value) {
       const text = (value || '').trim();
-      if (!text) return 'Neuer Chat';
+      if (!text) return 'Neue Aufgabe';
       return text.length > 36 ? `${text.slice(0, 36)}...` : text;
     }
 
@@ -779,7 +779,7 @@
         timestamp: nowIso()
       });
       touchChat(chat);
-      if (role === 'user' && chat.title === 'Neuer Chat') {
+      if (role === 'user' && chat.title === 'Neue Aufgabe') {
         chat.title = truncateTitle(text);
       }
       renderChatList();
@@ -819,7 +819,7 @@
       const ts = nowIso();
       const chat = {
         id: nextChatId++,
-        title: 'Neuer Chat',
+        title: 'Neue Aufgabe',
         messages: [{ role: 'bot', text: BOT_WELCOME, downloadUrl: '', downloadLabel: '', timestamp: ts }],
         created_at: ts,
         updated_at: ts
@@ -874,7 +874,7 @@
       rawChats.forEach((entry) => {
         const id = Number(entry?.id);
         if (!Number.isInteger(id) || id < 1) return;
-        const title = truncateTitle(String(entry?.title || 'Neuer Chat'));
+        const title = truncateTitle(String(entry?.title || 'Neue Aufgabe'));
 
         const rawMessages = Array.isArray(entry?.messages) ? entry.messages : [];
         const messages = rawMessages
@@ -893,7 +893,7 @@
 
         chats.push({
           id,
-          title: title || 'Neuer Chat',
+          title: title || 'Neue Aufgabe',
           messages,
           created_at: String(entry?.created_at || nowIso()),
           updated_at: String(entry?.updated_at || nowIso())

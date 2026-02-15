@@ -18,6 +18,7 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
                 "Für Produktsuche auf eBay nutze search_ebay.\n"
                 "Für gezielte Inhalts-Suche auf einer konkreten Website-URL nutze view_website.\n"
                 "Wenn Klicks/Navigation über mehrere Unterseiten nötig sind, nutze browse_website.\n"
+                "Wenn der Nutzer nach Fähigkeiten/Tools des Agenten fragt, nutze list_skills.\n"
                 "Nachfolgende Schritte erhalten automatisch den Payload des vorherigen Schritts als zusätzliche Args.\n"
                 "Plane daher so, dass Ergebnisfelder (z.B. text) von Schritt N direkt von Schritt N+1 genutzt werden können.\n"
                 "Platzhalter nur als {steps[0].text}, {{steps.1.result.text}} oder {last.text}; niemals mit führendem $.\n"
@@ -43,7 +44,8 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
                 "Use search_multitable for internet/web research from a user prompt. "
                 "Use search_ebay for product search on eBay. "
                 "Use view_website for targeted content lookup on a specific website URL. "
-                "Use browse_website when click/navigation across subpages is required."
+                "Use browse_website when click/navigation across subpages is required. "
+                "Use list_skills when the user asks about agent capabilities/tools."
             ),
             "final_system": "You are an assistant. Use the tool outputs to answer the goal succinctly.",
             "clarification_system": (

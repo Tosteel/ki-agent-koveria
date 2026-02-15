@@ -11,4 +11,5 @@ PHASE1_ALLOWED_TOOLS = {
     "view_website",
     "browse_website",
     "send_mail",
+    "list_skills",
 }
