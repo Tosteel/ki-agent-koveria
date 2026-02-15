@@ -47,11 +47,17 @@ class SettingsRequest(BaseModel):
     user_id: Optional[str] = ""
 
 
+class TaskExplainRequest(BaseModel):
+    steps: List[str] = Field(default_factory=list)
+    user_id: Optional[str] = ""
+
+
 class ChatMemoryMessage(BaseModel):
     role: Literal["user", "bot"]
     text: str = Field(..., min_length=1)
     downloadUrl: str = ""
     downloadLabel: str = ""
+    plannedSteps: List[str] = Field(default_factory=list)
     timestamp: str = ""
 
 
@@ -95,6 +101,55 @@ def _extract_api_base_url(ask_ionos_url: str) -> Optional[str]:
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         return None
     return urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+
+
+def _agent_run_url_from_ask_url(ask_url: str) -> str:
+    raw = (ask_url or "").strip()
+    if not raw:
+        return ""
+    parsed = urlsplit(raw)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return ""
+    path = parsed.path or ""
+    if path.endswith("/agent/askIonos"):
+        path = path[: -len("/agent/askIonos")] + "/agent/run"
+    elif path.endswith("/agent/askOpenAI"):
+        path = path[: -len("/agent/askOpenAI")] + "/agent/run"
+    else:
+        path = "/agent/run"
+    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+
+
+def _compact_planned_steps(steps: List[str]) -> List[str]:
+    compact: List[str] = []
+    for idx, raw in enumerate(steps, start=1):
+        line = str(raw or "").strip()
+        m = re.match(r"^\s*\d+\.\s*tool=([^\s]+)\s*args=(.*)$", line)
+        if not m:
+            compact.append(f"{idx}. {line[:180]}")
+            continue
+
+        tool = m.group(1).strip()
+        args_raw = (m.group(2) or "").strip()
+        short_parts: List[str] = []
+        try:
+            parsed = json.loads(args_raw) if args_raw else {}
+            if isinstance(parsed, dict):
+                for key, val in parsed.items():
+                    if key in {"body", "text", "content", "composed_text"}:
+                        continue
+                    sval = str(val)
+                    if len(sval) > 80:
+                        sval = sval[:77] + "..."
+                    short_parts.append(f"{key}={sval}")
+        except Exception:
+            pass
+
+        if short_parts:
+            compact.append(f"{idx}. tool={tool} ({', '.join(short_parts[:4])})")
+        else:
+            compact.append(f"{idx}. tool={tool}")
+    return compact
 
 
 def _resolve_user_id_from_api(ask_ionos_url: str, api_key: str) -> Optional[str]:
@@ -239,25 +294,21 @@ MAX_HISTORY_ITEMS = 12
 
 
 def _build_goal(message: str, history: Optional[List[ChatHistoryMessage]]) -> str:
+    _ = history
+    return message.strip()
+
+
+def _build_history_payload(history: Optional[List[ChatHistoryMessage]]) -> List[Dict[str, str]]:
     if not history:
-        return message.strip()
-
-    entries: List[str] = []
-    for item in history[-MAX_HISTORY_ITEMS:]:
-        role = "Nutzer" if item.role == "user" else "Assistent"
-        text = item.text.strip()
-        if text:
-            entries.append(f"{role}: {text}")
-
-    if not entries:
-        return message.strip()
-
-    context = "\n".join(entries)
-    return (
-        "Nutze den folgenden Chat-Verlauf als Kontext und beantworte danach die neue Frage.\n\n"
-        f"{context}\n\n"
-        f"Neue Frage: {message.strip()}"
-    )
+        return []
+    items: List[Dict[str, str]] = []
+    for msg in history[-MAX_HISTORY_ITEMS:]:
+        text = msg.text.strip()
+        if not text:
+            continue
+        role = "user" if msg.role == "user" else "assistant"
+        items.append({"role": role, "text": text})
+    return items
 
 
 @app.get("/")
@@ -338,9 +389,10 @@ def chat(req: ChatRequest) -> JSONResponse:
         headers["Authorization"] = f"Bearer {api_key}"
 
     goal = _build_goal(req.message, req.history)
+    history_payload = _build_history_payload(req.history)
 
     try:
-        resp = requests.post(url, headers=headers, json={"goal": goal}, timeout=180)
+        resp = requests.post(url, headers=headers, json={"goal": goal, "history": history_payload}, timeout=180)
     except requests.RequestException as exc:
         raise HTTPException(status_code=502, detail=f"API request failed: {exc}") from exc
 
@@ -354,6 +406,73 @@ def chat(req: ChatRequest) -> JSONResponse:
         answer = json.dumps(data, ensure_ascii=False)
 
     return JSONResponse({"ok": True, "answer": answer, "raw": data})
+
+
+@app.post("/api/planned-task-explain")
+def planned_task_explain(req: TaskExplainRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    settings = _load_settings_for_user(user_id)
+    run_url = _agent_run_url_from_ask_url(settings.get("ask_ionos_url", ""))
+    api_key = settings.get("api_key", "").strip()
+    if not run_url:
+        raise HTTPException(status_code=422, detail="Ungültige askIonos URL.")
+
+    steps = [str(s).strip() for s in (req.steps or []) if str(s).strip()]
+    if not steps:
+        return JSONResponse({"ok": True, "answer": "Für diesen Chat wurden noch keine geplanten Aufgaben gefunden."})
+
+    compact_steps = _compact_planned_steps(steps)
+    source_text = "PLANNED STEPS:\n" + "\n".join(compact_steps)
+    compose_instruction = (
+        "Antworte mit einem individuellen Titel, danach ausschließlich als nummerierte Liste auf Deutsch. "
+        "Keine Einleitung, kein Fließtext, keine Zusammenfassung außerhalb der Liste."
+        "Jeder Schritt maximal ein kurzer Satz. "
+        "Format strikt eine Zeile pro Step: 1. Wissensdatenbank: Nach ... durchsucht."
+        "2. Textgenerierung: Ergebnisse aus der Wissensdatenbank in einen Text überführt."
+    )
+
+    headers: Dict[str, str] = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    payload = {
+        "steps": [
+            {
+                "tool": "llm_compose",
+                "args": {
+                    "text": source_text,
+                    "instruction": compose_instruction,
+                    "goal": "Letzte geplante Aufgabe als kurze Liste",
+                    "max_chars": 500,
+                },
+            }
+        ]
+    }
+
+    try:
+        resp = requests.post(run_url, headers=headers, json=payload, timeout=90)
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"API request failed: {exc}") from exc
+
+    if resp.status_code >= 400:
+        snippet = resp.text[:500]
+        raise HTTPException(status_code=resp.status_code, detail=f"API error: {snippet}")
+
+    data: Dict[str, Any] = resp.json() if resp.content else {}
+    outputs = data.get("outputs")
+    if isinstance(outputs, list) and outputs:
+        payload0 = outputs[0].get("payload") if isinstance(outputs[0], dict) else {}
+        if isinstance(payload0, dict):
+            answer = payload0.get("composed_text") or payload0.get("text")
+            if isinstance(answer, str) and answer.strip():
+                return JSONResponse({"ok": True, "answer": answer.strip()})
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "answer": "Ich konnte die letzte Aufgabe nicht umformulieren. Bitte versuche es erneut.",
+        }
+    )
 
 
 @app.get("/api/chat-memory")

@@ -356,6 +356,32 @@ def _clarification_response(req_goal: str, gate: Dict[str, Any]) -> AgentAskResp
         questions=questions,
     )
 
+
+def _history_to_context(history: Any, max_items: int = 12) -> str:
+    if not isinstance(history, list):
+        return ""
+    lines: list[str] = []
+    for item in history[-max_items:]:
+        if not isinstance(item, dict):
+            continue
+        role_raw = str(item.get("role") or "").strip().lower()
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        role = "Nutzer" if role_raw == "user" else "Assistent"
+        lines.append(f"{role}: {text}")
+    return "\n".join(lines).strip()
+
+
+def _goal_with_context(goal: str, history: Any) -> str:
+    base = (goal or "").strip()
+    if not base:
+        return base
+    hist = _history_to_context(history, max_items=12)
+    if not hist:
+        return base
+    return f"Aktuelle Anfrage:\n{base}\n\nDialogverlauf (letzte 12 Nachrichten):\n{hist}"
+
 from .services.llm_openai import LlmRuntime
 from server.services.llm_ionos import IonosLLM
 
@@ -523,33 +549,14 @@ def agent_run(
         user_id=user_id,
         settings=s,
         api_key=credentials.credentials,  # ← wichtig
-        goal=req.rag_query or "",
+        goal="",
     )
 
-    # Wenn steps explizit: ausführen
-    if req.steps:
-        tool_outputs = orch.run_steps(ctx, [step.model_dump() for step in req.steps])
-        ok = all(o.get("ok") for o in tool_outputs) if tool_outputs else True
-        return AgentRunResponse(ok=ok, outputs=_compact_tool_outputs(tool_outputs))
+    # Nur explizite Steps ausführen; kein impliziter Default-Flow.
+    if not req.steps:
+        raise HTTPException(status_code=422, detail="steps must not be empty for /agent/run")
 
-    # Default Flow (Phase 1):
-    # 1) rag_knowledgebase (wenn rag_query gesetzt)
-    # 2) write_file
-    # 3) pdf_export
-    tool_outputs = []
-
-    rag_result = {"query": "", "hits": []}
-    if req.rag_query:
-        o = orch.run_steps(ctx, [{"tool": "rag_knowledgebase", "args": {"query": req.rag_query, "top_k": req.top_k}}])
-        tool_outputs.extend(o)
-        if o and o[0].get("ok"):
-            rag_result = o[0]["result"]
-
-    text_out = _rag_result_to_text(req.rag_query or "", rag_result) if req.rag_query else "Kein Inhalt."
-
-    tool_outputs.extend(orch.run_steps(ctx, [{"tool": "write_file", "args": {"path": req.write_path, "content": text_out, "overwrite": True}}]))
-    tool_outputs.extend(orch.run_steps(ctx, [{"tool": "pdf_export", "args": {"output_path": req.pdf_path, "title": req.pdf_title, "text": text_out}}]))
-
+    tool_outputs = orch.run_steps(ctx, [step.model_dump() for step in req.steps])
     ok = all(o.get("ok") for o in tool_outputs) if tool_outputs else True
     return AgentRunResponse(ok=ok, outputs=_compact_tool_outputs(tool_outputs))
 
@@ -561,14 +568,15 @@ def agent_askOpenAI(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> AgentAskResponse:
     _ensure_user_dirs(s, user_id)
+    goal_ctx = _goal_with_context(req.goal, req.history)
 
     api_key = credentials.credentials
     registry = _build_registry()           # existiert bei dir bereits
     orch = Orchestrator(registry)          # existiert bei dir bereits
-    ctx = ToolContext(user_id=user_id, settings=s, api_key=api_key, goal=req.goal)
+    ctx = ToolContext(user_id=user_id, settings=s, api_key=api_key, goal=goal_ctx)
 
     llm = LlmRuntime()
-    gate = _run_clarification_gate(llm, req.goal)
+    gate = _run_clarification_gate(llm, goal_ctx)
     if gate["status"] == "needs_info":
         return _clarification_response(req.goal, gate)
 
@@ -600,14 +608,15 @@ def agent_askIonos(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> AgentAskResponse:
     _ensure_user_dirs(s, user_id)
+    goal_ctx = _goal_with_context(req.goal, req.history)
 
     api_key = credentials.credentials
     registry = _build_registry()           # existiert bei dir bereits
     orch = Orchestrator(registry)          # existiert bei dir bereits
-    ctx = ToolContext(user_id=user_id, settings=s, api_key=api_key, goal=req.goal)
+    ctx = ToolContext(user_id=user_id, settings=s, api_key=api_key, goal=goal_ctx)
 
     llm = IonosLLM()
-    gate = _run_clarification_gate(llm, req.goal)
+    gate = _run_clarification_gate(llm, goal_ctx)
 
     print("\n===== CLARIFICATION =====")
     print(f"status={gate.get('status')}")

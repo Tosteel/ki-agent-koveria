@@ -295,6 +295,14 @@
       overflow-wrap: anywhere;
     }
 
+    .msg-time {
+      margin-top: 6px;
+      font-size: 11px;
+      color: #9aa8c4;
+      text-align: right;
+      line-height: 1.2;
+    }
+
     .download-link {
       display: inline-block;
       margin-top: 8px;
@@ -347,6 +355,24 @@
     }
 
     .send:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .task-btn {
+      width: 50px;
+      height: 50px;
+      border: 0;
+      border-radius: 11px;
+      background: linear-gradient(145deg, #4b88ef, #2f6de0);
+      color: #ffffff;
+      font-size: 24px;
+      cursor: pointer;
+      box-shadow: 0 8px 18px rgba(51, 111, 231, 0.35);
+    }
+
+    .task-btn:hover {
+      filter: brightness(1.05);
+    }
+
+    .task-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
     .overlay {
       position: fixed;
@@ -470,6 +496,7 @@
       <footer class="composer">
         <input id="messageInput" type="text" placeholder="Nachricht eingeben..." />
         <button class="send" id="sendBtn" title="Senden">➤</button>
+        <button class="task-btn" id="taskBtn" title="Letzte Aufgabe">📋</button>
       </footer>
     </section>
   </div>
@@ -495,6 +522,7 @@
   <script>
     const messagesEl = document.getElementById('messages');
     const inputEl = document.getElementById('messageInput');
+    const taskBtn = document.getElementById('taskBtn');
     const sendBtn = document.getElementById('sendBtn');
     const newChatBtn = document.getElementById('newChat');
     const chatListEl = document.getElementById('chatList');
@@ -525,6 +553,17 @@
 
     function nowIso() {
       return new Date().toISOString();
+    }
+
+    function formatTimestampDisplay(value) {
+      const d = new Date(String(value || ''));
+      if (Number.isNaN(d.getTime())) return String(value || '');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const yyyy = String(d.getFullYear());
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mi = String(d.getMinutes()).padStart(2, '0');
+      return `${dd}-${mm}-${yyyy}, ${hh}:${mi} Uhr`;
     }
 
     function scheduleChatMemorySave() {
@@ -632,6 +671,12 @@
         link.textContent = meta.downloadLabel || 'Datei herunterladen';
         link.setAttribute('download', '');
         bubble.appendChild(link);
+      }
+      if (meta.timestamp) {
+        const timeEl = document.createElement('div');
+        timeEl.className = 'msg-time';
+        timeEl.textContent = formatTimestampDisplay(meta.timestamp);
+        bubble.appendChild(timeEl);
       }
 
       if (role === 'user') {
@@ -776,6 +821,7 @@
         text,
         downloadUrl: meta.downloadUrl || '',
         downloadLabel: meta.downloadLabel || '',
+        plannedSteps: Array.isArray(meta.plannedSteps) ? meta.plannedSteps : [],
         timestamp: nowIso()
       });
       touchChat(chat);
@@ -807,6 +853,47 @@
       return '';
     }
 
+    function extractPlannedSteps(raw) {
+      const steps = Array.isArray(raw?.steps) ? raw.steps : [];
+      const out = [];
+      steps.forEach((step, index) => {
+        const tool = String(step?.tool || '').trim();
+        if (!tool) return;
+        const args = step?.args && typeof step.args === 'object' ? step.args : {};
+        out.push(`${index + 1}. tool=${tool} args=${JSON.stringify(args)}`);
+      });
+      return out;
+    }
+
+    async function showLastPlannedTask() {
+      const chat = getActiveChat();
+      if (!chat) return;
+      const messages = Array.isArray(chat.messages) ? chat.messages : [];
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const msg = messages[i];
+        const steps = Array.isArray(msg?.plannedSteps) ? msg.plannedSteps : [];
+        if (msg?.role === 'bot' && steps.length > 0) {
+          try {
+            const resp = await fetch('/api/planned-task-explain', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ steps, user_id: currentUserId })
+            });
+            const data = await resp.json();
+            if (!resp.ok) {
+              addMessage('bot', `Fehler bei Aufgaben-Erklärung: ${data.detail || 'Unbekannter Fehler'}`);
+              return;
+            }
+            addMessage('bot', data.answer || 'Keine Erklärung erhalten.');
+          } catch (_err) {
+            addMessage('bot', 'Fehler bei der Anfrage zur Aufgaben-Erklärung.');
+          }
+          return;
+        }
+      }
+      addMessage('bot', 'Für diesen Chat wurden noch keine geplanten Aufgaben gefunden.');
+    }
+
     function fileNameFromPath(path) {
       const clean = String(path || '').trim();
       if (!clean) return 'Datei';
@@ -833,6 +920,7 @@
 
     function setSending(isSending) {
       sendBtn.disabled = isSending;
+      taskBtn.disabled = isSending;
       inputEl.disabled = isSending;
       if (!isSending) inputEl.focus();
     }
@@ -883,6 +971,7 @@
             text: String(m?.text || '').trim(),
             downloadUrl: String(m?.downloadUrl || ''),
             downloadLabel: String(m?.downloadLabel || ''),
+            plannedSteps: Array.isArray(m?.plannedSteps) ? m.plannedSteps.map((s) => String(s)) : [],
             timestamp: String(m?.timestamp || nowIso())
           }))
           .filter((m) => m.text.length > 0);
@@ -946,6 +1035,7 @@
             text: msg.text || '',
             downloadUrl: msg.downloadUrl || '',
             downloadLabel: msg.downloadLabel || '',
+            plannedSteps: Array.isArray(msg.plannedSteps) ? msg.plannedSteps.map((s) => String(s)) : [],
             timestamp: msg.timestamp || nowIso()
           }))
         })),
@@ -1030,16 +1120,18 @@
           addMessage('bot', `Fehler: ${data.detail || 'Unbekannter Fehler'}`);
           return;
         }
+        const plannedSteps = extractPlannedSteps(data.raw);
         const outputPath = extractDownloadPath(data.raw);
         if (outputPath) {
           const fileName = fileNameFromPath(outputPath);
           const downloadUrl = `/api/download?path=${encodeURIComponent(outputPath)}&user_id=${encodeURIComponent(currentUserId)}`;
           addMessageToChat(targetChatId, 'bot', data.answer || 'Keine Antwort erhalten.', {
             downloadUrl,
-            downloadLabel: `Download: ${fileName}`
+            downloadLabel: `Download: ${fileName}`,
+            plannedSteps
           });
         } else {
-          addMessageToChat(targetChatId, 'bot', data.answer || 'Keine Antwort erhalten.');
+          addMessageToChat(targetChatId, 'bot', data.answer || 'Keine Antwort erhalten.', { plannedSteps });
         }
       } catch (err) {
         addMessageToChat(targetChatId, 'bot', 'Verbindung zur API fehlgeschlagen.');
@@ -1063,6 +1155,7 @@
     });
 
     sendBtn.addEventListener('click', sendMessage);
+    taskBtn.addEventListener('click', showLastPlannedTask);
     inputEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();

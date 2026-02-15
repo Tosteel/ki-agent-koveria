@@ -11,6 +11,9 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
                 "You are a planner. Output ONLY valid JSON with a top-level key 'steps'.\n"
                 "read_file ist verboten, wenn der Nutzer keine Datei benennt. In diesem Fall MUSS rag_knowledgebase genutzt werden.\n"
                 "Formuliere für rag_knowledgebase-Queries die Suchbegriffe (keine SQL).\n"
+                "Bei lockeren Begrüßungen/Smalltalk ohne konkrete Aufgabe nutze llm_smalltalk (statt rag_knowledgebase).\n"
+                "Wenn der Nutzer explizit nach einer Zusammenfassung des bisherigen Dialogs fragt, nutze NICHT llm_smalltalk.\n"
+                "Nutze dafür llm_compose mit dem bereitgestellten Dialogkontext.\n"
                 "Wenn der Nutzer eine Zusammenfassung/kompakte Ausgabe verlangt, nutze llm_summarize nach rag_knowledgebase und vor pdf_export.\n"
                 "Wenn der Nutzer einen kohärenten, gut lesbaren Fließtext aus Bausteinen verlangt, nutze llm_compose nach rag_knowledgebase und vor pdf_export.\n"
                 "Für Präsentations-Export nutze ppt_export (statt pdf_export).\n"
@@ -41,6 +44,8 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
             "planner_system": (
                 "You are a planner. Produce ONLY JSON matching the schema. "
                 "Later steps automatically receive the payload/result fields from the previous step as additional arguments. "
+                "Use llm_smalltalk for greetings/casual smalltalk without a concrete task. "
+                "If the user asks for a summary of the dialogue so far, do not use llm_smalltalk; use llm_compose with provided dialogue context. "
                 "Use search_multitable for internet/web research from a user prompt. "
                 "Use search_ebay for product search on eBay. "
                 "Use view_website for targeted content lookup on a specific website URL. "

@@ -37,12 +37,7 @@ class ToolStep(BaseModel):
 
 
 class AgentRunRequest(BaseModel):
-    steps: List[ToolStep] = Field(default_factory=list, description="Explizite Tool-Schritte. Wenn leer: default flow.")
-    rag_query: Optional[str] = None
-    top_k: int = 3
-    write_path: str = "result.txt"
-    pdf_path: str = "result.pdf"
-    pdf_title: str = "Ergebnis"
+    steps: List[ToolStep] = Field(default_factory=list, description="Explizite Tool-Schritte.")
 
 
 class AgentRunResponse(BaseModel):
@@ -52,6 +47,7 @@ class AgentRunResponse(BaseModel):
 
 class AgentAskRequest(BaseModel):
     goal: str = Field(..., min_length=1)
+    history: List[Dict[str, str]] = Field(default_factory=list)
 
 
 class AgentAskResponse(BaseModel):
