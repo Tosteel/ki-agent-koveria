@@ -303,6 +303,42 @@
       line-height: 1.2;
     }
 
+    .message-options {
+      margin-top: 8px;
+      padding-top: 6px;
+      border-top: 1px solid #e0e8fb;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .option-btn {
+      border: 0;
+      background: transparent;
+      color: #7c879f;
+      font-size: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      padding: 2px 0;
+    }
+
+    .option-btn:hover {
+      color: #5f6c86;
+    }
+
+    .option-btn[disabled] {
+      opacity: 0.6;
+      cursor: default;
+    }
+
+    .option-icon {
+      font-size: 12px;
+      line-height: 1;
+    }
+
     .download-link {
       display: inline-block;
       margin-top: 8px;
@@ -679,6 +715,39 @@
         bubble.appendChild(timeEl);
       }
 
+      const options = Array.isArray(meta.options) ? meta.options : [];
+      if (role === 'bot' && options.length > 0) {
+        const optionsRow = document.createElement('div');
+        optionsRow.className = 'message-options';
+        options.forEach((opt) => {
+          const type = String(opt?.type || '').trim();
+          if (type !== 'save_task') return;
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'option-btn';
+          const alreadySaved = String(opt?.saved || '') === '1';
+          btn.innerHTML = alreadySaved
+            ? '<span class="option-icon">💾</span><span>Gespeichert</span>'
+            : '<span class="option-icon">💾</span><span>Aufgabe speichern</span>';
+          btn.disabled = alreadySaved;
+          btn.addEventListener('click', async () => {
+            const taskText = String(opt?.taskText || text || '').trim();
+            const plannedSteps = Array.isArray(meta?.plannedSteps) ? meta.plannedSteps.map((s) => String(s)) : [];
+            const ok = await saveTaskForUser(taskText, plannedSteps);
+            if (ok) {
+              opt.saved = '1';
+              btn.disabled = true;
+              btn.innerHTML = '<span class="option-icon">💾</span><span>Gespeichert</span>';
+              scheduleChatMemorySave();
+            }
+          });
+          optionsRow.appendChild(btn);
+        });
+        if (optionsRow.childElementCount > 0) {
+          bubble.appendChild(optionsRow);
+        }
+      }
+
       if (role === 'user') {
         row.appendChild(bubble);
         row.appendChild(avatar);
@@ -822,7 +891,8 @@
         downloadUrl: meta.downloadUrl || '',
         downloadLabel: meta.downloadLabel || '',
         plannedSteps: Array.isArray(meta.plannedSteps) ? meta.plannedSteps : [],
-        timestamp: nowIso()
+        options: Array.isArray(meta.options) ? meta.options : [],
+        timestamp: meta.timestamp || nowIso()
       });
       touchChat(chat);
       if (role === 'user' && chat.title === 'Neue Aufgabe') {
@@ -884,7 +954,10 @@
               addMessage('bot', `Fehler bei Aufgaben-Erklärung: ${data.detail || 'Unbekannter Fehler'}`);
               return;
             }
-            addMessage('bot', data.answer || 'Keine Erklärung erhalten.');
+            addMessage('bot', data.answer || 'Keine Erklärung erhalten.', {
+              plannedSteps: steps,
+              options: [{ type: 'save_task', taskText: data.answer || '' }]
+            });
           } catch (_err) {
             addMessage('bot', 'Fehler bei der Anfrage zur Aufgaben-Erklärung.');
           }
@@ -972,6 +1045,13 @@
             downloadUrl: String(m?.downloadUrl || ''),
             downloadLabel: String(m?.downloadLabel || ''),
             plannedSteps: Array.isArray(m?.plannedSteps) ? m.plannedSteps.map((s) => String(s)) : [],
+            options: Array.isArray(m?.options)
+              ? m.options.map((opt) => ({
+                  type: String(opt?.type || ''),
+                  taskText: String(opt?.taskText || ''),
+                  saved: String(opt?.saved || '')
+                }))
+              : [],
             timestamp: String(m?.timestamp || nowIso())
           }))
           .filter((m) => m.text.length > 0);
@@ -1036,6 +1116,13 @@
             downloadUrl: msg.downloadUrl || '',
             downloadLabel: msg.downloadLabel || '',
             plannedSteps: Array.isArray(msg.plannedSteps) ? msg.plannedSteps.map((s) => String(s)) : [],
+            options: Array.isArray(msg.options)
+              ? msg.options.map((opt) => ({
+                  type: String(opt?.type || ''),
+                  taskText: String(opt?.taskText || ''),
+                  saved: String(opt?.saved || '')
+                }))
+              : [],
             timestamp: msg.timestamp || nowIso()
           }))
         })),
@@ -1050,6 +1137,36 @@
         });
       } catch (_err) {
         // no-op; next mutation will retry
+      }
+    }
+
+    async function saveTaskForUser(taskText, plannedSteps = []) {
+      const cleanTaskText = String(taskText || '').trim();
+      const cleanSteps = Array.isArray(plannedSteps) ? plannedSteps.map((s) => String(s).trim()).filter(Boolean) : [];
+      if (!cleanTaskText) return false;
+      if (!currentUserId) {
+        addMessage('bot', 'Bitte zuerst API-Key in den Einstellungen speichern.');
+        return false;
+      }
+      try {
+        const resp = await fetch('/api/tasks/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: currentUserId,
+            task_text: cleanTaskText,
+            planned_steps: cleanSteps
+          })
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          addMessage('bot', `Aufgabe konnte nicht gespeichert werden: ${data.detail || 'Unbekannter Fehler'}`);
+          return false;
+        }
+        return true;
+      } catch (_err) {
+        addMessage('bot', 'Aufgabe konnte nicht gespeichert werden (Verbindungsfehler).');
+        return false;
       }
     }
 

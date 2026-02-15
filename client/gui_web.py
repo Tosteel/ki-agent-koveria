@@ -1,3 +1,6 @@
+#uvicorn client.gui_web:app --host 0.0.0.0 --port 8013 --reload
+#python3 client/gui_web.py
+
 from __future__ import annotations
 
 import json
@@ -52,12 +55,19 @@ class TaskExplainRequest(BaseModel):
     user_id: Optional[str] = ""
 
 
+class TaskSaveRequest(BaseModel):
+    task_text: str = Field(..., min_length=1)
+    planned_steps: List[str] = Field(default_factory=list)
+    user_id: Optional[str] = ""
+
+
 class ChatMemoryMessage(BaseModel):
     role: Literal["user", "bot"]
     text: str = Field(..., min_length=1)
     downloadUrl: str = ""
     downloadLabel: str = ""
     plannedSteps: List[str] = Field(default_factory=list)
+    options: List[Dict[str, str]] = Field(default_factory=list)
     timestamp: str = ""
 
 
@@ -91,6 +101,22 @@ def _user_settings_path(user_id: str) -> Path:
 def _user_chat_memory_path(user_id: str) -> Path:
     safe_user_id = _sanitize_user_id(user_id)
     return USER_DATA_DIR / safe_user_id / "chat_memory.json"
+
+
+def _user_task_path(user_id: str) -> Path:
+    safe_user_id = _sanitize_user_id(user_id)
+    return USER_DATA_DIR / safe_user_id / "tasks_memory.json"
+
+
+def _planned_steps_block(steps: List[str]) -> str:
+    clean_steps = [str(s).strip() for s in (steps or []) if str(s).strip()]
+    if not clean_steps:
+        return ""
+    return (
+        "===== PLANNED STEPS =====\n"
+        + "\n".join(clean_steps)
+        + "\n========================="
+    )
 
 
 def _extract_api_base_url(ask_ionos_url: str) -> Optional[str]:
@@ -489,6 +515,46 @@ def set_chat_memory(req: ChatMemoryRequest) -> JSONResponse:
     user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
     _save_chat_memory_for_user(user_id, req)
     return JSONResponse({"ok": True, "user_id": user_id})
+
+
+@app.post("/api/tasks/save")
+def save_task(req: TaskSaveRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    task_text = req.task_text.strip()
+    planned_steps = [str(s).strip() for s in (req.planned_steps or []) if str(s).strip()]
+    if not task_text:
+        raise HTTPException(status_code=422, detail="task_text must not be empty")
+
+    path = _user_task_path(user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing: Dict[str, Any] = {}
+    if path.exists():
+        try:
+            parsed = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(parsed, dict):
+                existing = parsed
+        except Exception:
+            existing = {}
+
+    tasks = existing.get("tasks")
+    if not isinstance(tasks, list):
+        tasks = []
+
+    task_entry = {
+        "id": len(tasks) + 1,
+        "text": task_text,
+        "planned_steps": planned_steps,
+        "planned_steps_text": _planned_steps_block(planned_steps),
+        "created_at": _now_iso(),
+    }
+    tasks.append(task_entry)
+    payload = {
+        "version": 1,
+        "updated_at": _now_iso(),
+        "tasks": tasks,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return JSONResponse({"ok": True, "user_id": user_id, "saved": task_entry})
 
 
 if __name__ == "__main__":

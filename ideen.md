@@ -23,3 +23,32 @@ Warum das bei euch passt:
 - Backend sendet aktuell nur `{"goal": req.message}` in `client/gui_web.py`, dort fehlt der Kontext-Teil.
 
 Wenn du willst, setze ich dir jetzt direkt Stufe 1 sauber um (inkl. Limitierung, damit Requests nicht zu groß werden).
+
+## Idee: Trigger für automatische Aufgaben (z. B. neue E-Mail)
+
+Ziel: Aufgaben nicht nur manuell über „Neue Aufgabe“ starten, sondern auch automatisch durch Ereignisse.
+
+Pragmatischer Weg in 3 Stufen:
+
+1. Trigger-Quelle anbinden (einfach starten)
+- Polling-Ansatz: alle X Minuten `fetch_unanswered_mails` prüfen.
+- Später optional: IMAP-IDLE/Webhook statt Polling.
+
+2. Trigger-Regeln auswerten
+- Pro neuer Mail Regeln prüfen (Absender, Betreff-Keywords, Priorität).
+- Wenn Regel passt: automatisch eine neue Aufgabe im Client/Taskspeicher anlegen (`source=trigger`).
+
+3. Idempotenz und Kontrolle
+- Verarbeitete Mail-UIDs speichern, damit keine Doppelaufgaben entstehen.
+- Optional Freigabe-Workflow: Aufgabe wird vorgeschlagen, aber erst nach Bestätigung ausgeführt.
+
+Architektur-Vorschlag:
+- `server/automation/triggers.py` für Regel-Engine.
+- `server/automation/state.json` für zuletzt gesehene/verarbeitete IDs.
+- Separater Worker-Loop (nicht im HTTP-Request), z. B. alle 60 Sekunden.
+- GUI-Badge „automatisch erstellt“ für Trigger-Aufgaben.
+
+Beispielregel:
+- Wenn neue unbeantwortete Mail von `*@kunde.de` und Betreff enthält „Lieferung“:
+- Aufgabe erzeugen: „Mail prüfen und Lieferstatus antworten“.
+- Optional direkt Tool-Kette vorbereiten: `fetch_unanswered_mails -> answer_mail`.

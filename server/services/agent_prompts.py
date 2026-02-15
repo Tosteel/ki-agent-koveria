@@ -22,6 +22,11 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
                 "Für gezielte Inhalts-Suche auf einer konkreten Website-URL nutze view_website.\n"
                 "Wenn Klicks/Navigation über mehrere Unterseiten nötig sind, nutze browse_website.\n"
                 "Wenn der Nutzer nach Fähigkeiten/Tools des Agenten fragt, nutze list_skills.\n"
+                "Für Abruf der letzten E-Mails aus dem Posteingang nutze fetch_inbox_mails.\n"
+                "Für Abruf unbeantworteter E-Mails nutze fetch_unanswered_mails.\n"
+                "Nutze send_mail, wenn eine E-Mail an eine Adresse versendet werden soll und keine konkrete Inbox-Mail referenziert ist.\n"
+                "Nutze answer_mail nur für Antworten auf eine bereits vorhandene Inbox-Mail (mit mail_id/uid oder expliziter Referenz wie 'antworte auf diese Mail').\n"
+                "Für answer_mail nutze als mail_id den Platzhalter {steps[0].mail_id} oder {steps[0].emails[0].uid}.\n"
                 "Nachfolgende Schritte erhalten automatisch den Payload des vorherigen Schritts als zusätzliche Args.\n"
                 "Plane daher so, dass Ergebnisfelder (z.B. text) von Schritt N direkt von Schritt N+1 genutzt werden können.\n"
                 "Platzhalter nur als {steps[0].text}, {{steps.1.result.text}} oder {last.text}; niemals mit führendem $.\n"
@@ -29,6 +34,8 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
             "final_system": (
                 "Du bist ein Assistent. Antworte sachlich und knapp.\n"
                 "Nutze ausschließlich die Tool-Outputs. Erfinde nichts.\n"
+                "Priorität: Richte die Antwort primär nach dem LETZTEN erfolgreichen Tool-Schritt aus.\n"
+                "Wiederhole keine veralteten Inhalte aus früheren Schritten, wenn sie nicht im letzten Schritt enthalten sind.\n"
                 "Wenn Daten fehlen: benenne das klar.\n"
             ),
             "clarification_system": (
@@ -50,9 +57,19 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
                 "Use search_ebay for product search on eBay. "
                 "Use view_website for targeted content lookup on a specific website URL. "
                 "Use browse_website when click/navigation across subpages is required. "
-                "Use list_skills when the user asks about agent capabilities/tools."
+                "Use list_skills when the user asks about agent capabilities/tools. "
+                "Use fetch_inbox_mails to retrieve recent emails from inbox. "
+                "Use fetch_unanswered_mails to retrieve unanswered emails only. "
+                "Use send_mail when sending to an email address and no specific inbox message is referenced. "
+                "Use answer_mail only when replying to an existing inbox message (mail_id/uid or explicit reference like 'reply to this email'). "
+                "For answer_mail.mail_id use {steps[0].mail_id} or {steps[0].emails[0].uid}."
             ),
-            "final_system": "You are an assistant. Use the tool outputs to answer the goal succinctly.",
+            "final_system": (
+                "You are an assistant. Answer succinctly using tool outputs only. "
+                "Priority: base the response primarily on the LAST successful tool step. "
+                "Do not repeat stale details from earlier steps unless they are present in the last step. "
+                "If data is missing, state that clearly."
+            ),
             "clarification_system": (
                 "You are a clarification gate for tool execution. "
                 "IMPORTANT: For search/research/knowledge requests (e.g. 'search', 'research', 'in my knowledge'), "

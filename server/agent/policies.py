@@ -12,5 +12,8 @@ PHASE1_ALLOWED_TOOLS = {
     "view_website",
     "browse_website",
     "send_mail",
+    "answer_mail",
+    "fetch_inbox_mails",
+    "fetch_unanswered_mails",
     "list_skills",
 }
