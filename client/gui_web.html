@@ -80,6 +80,32 @@
 
     .sidebar .search::placeholder { color: #8ba0c7; }
 
+    .sidebar-modes {
+      margin: 12px 12px 0;
+      display: flex;
+      gap: 8px;
+    }
+
+    .mode-btn {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      border: 1px solid #d7e2f9;
+      background: #f7faff;
+      color: #4d6fae;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      font-size: 17px;
+      line-height: 1;
+    }
+
+    .mode-btn.active {
+      background: #eaf1ff;
+      color: #2f6de0;
+      border-color: #b9ccf1;
+    }
+
     .menu {
       padding: 2px 8px 12px;
       overflow-y: auto;
@@ -165,6 +191,14 @@
       cursor: pointer;
     }
 
+    .sidebar-sync-status {
+      margin: 0 12px 10px;
+      font-size: 11px;
+      color: #9aa8c4;
+      min-height: 14px;
+      text-align: left;
+    }
+
     .chat {
       display: grid;
       grid-template-rows: 70px 1fr 84px;
@@ -194,6 +228,10 @@
       font-weight: 700;
       color: #223f71;
       letter-spacing: 0.3px;
+    }
+
+    .topbar h1.title-editable {
+      cursor: text;
     }
 
     .mobile-sidebar-toggle {
@@ -283,7 +321,7 @@
     .avatar img { width: 100%; height: 100%; object-fit: cover; }
 
     .bubble {
-      max-width: min(760px, 88%);
+      max-width: min(760px, calc(100% - 46px));
       padding: 14px 16px;
       border-radius: 12px;
       background: var(--bubble);
@@ -293,6 +331,38 @@
       border: 1px solid #e4ebfb;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
+      position: relative;
+    }
+
+    .message-delete {
+      position: absolute;
+      top: 6px;
+      right: 8px;
+      width: 18px;
+      height: 18px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: #8aa0c8;
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+    }
+
+    .bubble:hover .message-delete,
+    .bubble:focus-within .message-delete {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .message-delete:hover {
+      background: #e9efff;
+      color: #355ea6;
     }
 
     .msg-time {
@@ -367,6 +437,7 @@
 
     .composer input {
       flex: 1;
+      min-width: 0;
       border: 1px solid #d8e1f6;
       background: #fff;
       border-radius: 10px;
@@ -500,8 +571,15 @@
       .mobile-sidebar-toggle { display: inline-block; }
       body { padding: 10px; }
       .topbar h1 { font-size: 22px; }
+      .messages { padding: 14px 12px; }
+      .row { gap: 8px; }
+      .avatar { width: 28px; height: 28px; flex-basis: 28px; }
+      .bubble { max-width: calc(100% - 36px); }
       .bubble { font-size: 16px; }
-      .composer input { font-size: 16px; }
+      .composer { padding: 10px 12px; gap: 8px; }
+      .composer input { font-size: 14px; padding: 10px 10px; }
+      .send,
+      .task-btn { width: 42px; height: 42px; font-size: 20px; border-radius: 10px; flex: 0 0 42px; }
     }
   </style>
 </head>
@@ -511,16 +589,22 @@
       <div class="brand">
         <img src="/assets/logo.png" alt="Koveria" />
       </div>
+      <div class="sidebar-modes">
+        <button class="mode-btn active" id="modeChatsBtn" title="Chats">💬</button>
+        <button class="mode-btn" id="modeTasksBtn" title="Aufgaben">📋</button>
+        <button class="mode-btn" id="modeTriggersBtn" title="Trigger">🕒</button>
+      </div>
       <input class="search" placeholder="Search" />
       <div class="menu" id="chatList"></div>
-      <button class="new-chat" id="newChat" title="Neue Aufgabe">+</button>
+      <button class="new-chat" id="newChat" title="Neuer Chat">+</button>
+      <div class="sidebar-sync-status" id="sidebarSyncStatus"></div>
     </aside>
 
     <section class="chat">
       <header class="topbar">
         <div class="topbar-left">
-          <button class="mobile-sidebar-toggle" id="sidebarToggleBtn" title="Chats">💬</button>
-          <h1 id="chatTitle">Neue Aufgabe</h1>
+          <button class="mobile-sidebar-toggle" id="sidebarToggleBtn" title="Chats">›</button>
+          <h1 id="chatTitle">Neuer Chat</h1>
         </div>
         <div class="actions">
           <button id="menuBtn" title="Einstellungen">☰</button>
@@ -561,8 +645,12 @@
     const taskBtn = document.getElementById('taskBtn');
     const sendBtn = document.getElementById('sendBtn');
     const newChatBtn = document.getElementById('newChat');
+    const modeChatsBtn = document.getElementById('modeChatsBtn');
+    const modeTasksBtn = document.getElementById('modeTasksBtn');
+    const modeTriggersBtn = document.getElementById('modeTriggersBtn');
     const chatListEl = document.getElementById('chatList');
     const chatTitleEl = document.getElementById('chatTitle');
+    const sidebarSyncStatusEl = document.getElementById('sidebarSyncStatus');
     const sidebarEl = document.querySelector('.sidebar');
     const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
     const sidebarBackdrop = document.getElementById('sidebarBackdrop');
@@ -585,7 +673,27 @@
     let activeChatId = null;
     let saveTimer = null;
     let currentUserId = '';
+    let sidebarMode = 'chats';
+    const taskEntries = [];
+    let activeTaskId = null;
+    const triggerEntries = [];
+    let activeTriggerId = '';
     const pendingChats = new Set();
+    const pendingTasks = new Set();
+
+    function setSidebarSyncStatus(status) {
+      if (!sidebarSyncStatusEl) return;
+      const value = String(status || '').trim();
+      if (value === 'synchronized') {
+        sidebarSyncStatusEl.textContent = 'Tasks: synchronisiert';
+        return;
+      }
+      if (value === 'offline_cache') {
+        sidebarSyncStatusEl.textContent = 'Tasks: offline cache';
+        return;
+      }
+      sidebarSyncStatusEl.textContent = '';
+    }
 
     function nowIso() {
       return new Date().toISOString();
@@ -700,6 +808,19 @@
       const textNode = document.createElement('div');
       textNode.textContent = text;
       bubble.appendChild(textNode);
+
+      if (canDeleteMessage(meta)) {
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'message-delete';
+        del.setAttribute('aria-label', 'Nachricht löschen');
+        del.textContent = '×';
+        del.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          await deleteMessageByMeta(meta);
+        });
+        bubble.appendChild(del);
+      }
       if (meta.downloadUrl) {
         const link = document.createElement('a');
         link.className = 'download-link';
@@ -721,27 +842,95 @@
         optionsRow.className = 'message-options';
         options.forEach((opt) => {
           const type = String(opt?.type || '').trim();
-          if (type !== 'save_task') return;
-          const btn = document.createElement('button');
-          btn.type = 'button';
-          btn.className = 'option-btn';
-          const alreadySaved = String(opt?.saved || '') === '1';
-          btn.innerHTML = alreadySaved
-            ? '<span class="option-icon">💾</span><span>Gespeichert</span>'
-            : '<span class="option-icon">💾</span><span>Aufgabe speichern</span>';
-          btn.disabled = alreadySaved;
-          btn.addEventListener('click', async () => {
-            const taskText = String(opt?.taskText || text || '').trim();
-            const plannedSteps = Array.isArray(meta?.plannedSteps) ? meta.plannedSteps.map((s) => String(s)) : [];
-            const ok = await saveTaskForUser(taskText, plannedSteps);
-            if (ok) {
-              opt.saved = '1';
+          if (type === 'save_task') {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'option-btn';
+            const alreadySaved = String(opt?.saved || '') === '1';
+            btn.innerHTML = alreadySaved
+              ? '<span class="option-icon">💾</span><span>Gespeichert</span>'
+              : '<span class="option-icon">💾</span><span>Aufgabe speichern</span>';
+            btn.disabled = alreadySaved;
+            btn.addEventListener('click', async () => {
+              const taskText = String(opt?.taskText || text || '').trim();
+              const plannedSteps = Array.isArray(meta?.plannedSteps) ? meta.plannedSteps.map((s) => String(s)) : [];
+              const ok = await saveTaskForUser(taskText, plannedSteps);
+              if (ok) {
+                opt.saved = '1';
+                btn.disabled = true;
+                btn.innerHTML = '<span class="option-icon">💾</span><span>Gespeichert</span>';
+                scheduleChatMemorySave();
+              }
+            });
+            optionsRow.appendChild(btn);
+            return;
+          }
+
+          if (type === 'rerun_task') {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'option-btn';
+            btn.innerHTML = '<span class="option-icon">↻</span><span>Rerun</span>';
+            btn.addEventListener('click', async () => {
+              const plannedSteps = Array.isArray(opt?.plannedSteps)
+                ? opt.plannedSteps.map((s) => String(s)).filter(Boolean)
+                : [];
+              const taskId = Number(opt?.taskId || 0);
+              if (!plannedSteps.length) return;
+              if (!Number.isInteger(taskId) || taskId < 1) return;
               btn.disabled = true;
-              btn.innerHTML = '<span class="option-icon">💾</span><span>Gespeichert</span>';
-              scheduleChatMemorySave();
-            }
-          });
-          optionsRow.appendChild(btn);
+              btn.innerHTML = '<span class="option-icon">↻</span><span>Rerun läuft...</span>';
+              const result = await rerunTaskForUser(taskId, plannedSteps);
+              btn.disabled = false;
+              btn.innerHTML = '<span class="option-icon">↻</span><span>Rerun</span>';
+              if (!result.ok) {
+                messagesEl.appendChild(createMessageElement('bot', `Rerun fehlgeschlagen: ${result.error || 'Unbekannter Fehler'}`, { timestamp: nowIso() }));
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+                return;
+              }
+              await loadTasksMemory();
+              renderSidebarList();
+              renderActiveTask();
+            });
+            optionsRow.appendChild(btn);
+            return;
+          }
+
+          if (type === 'create_manual_trigger') {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'option-btn';
+            const alreadyCreated = String(opt?.created || '') === '1';
+            btn.innerHTML = alreadyCreated
+              ? '<span class="option-icon">🕒</span><span>Trigger erstellt</span>'
+              : '<span class="option-icon">🕒</span><span>Als Trigger speichern</span>';
+            btn.disabled = alreadyCreated;
+            btn.addEventListener('click', async () => {
+              const taskId = Number(opt?.taskId || 0);
+              if (!Number.isInteger(taskId) || taskId < 1) return;
+              btn.disabled = true;
+              btn.innerHTML = '<span class="option-icon">🕒</span><span>Erstelle...</span>';
+              const result = await createManualTriggerForTask(taskId);
+              if (!result.ok) {
+                btn.disabled = false;
+                btn.innerHTML = '<span class="option-icon">🕒</span><span>Als Trigger speichern</span>';
+                messagesEl.appendChild(createMessageElement('bot', `Trigger konnte nicht erstellt werden: ${result.error || 'Unbekannter Fehler'}`, { timestamp: nowIso() }));
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+                return;
+              }
+              opt.created = '1';
+              btn.disabled = true;
+              btn.innerHTML = '<span class="option-icon">🕒</span><span>Trigger erstellt</span>';
+              messagesEl.appendChild(createMessageElement('bot', `Trigger erstellt: ${result.name || 'Manueller Trigger'}`, { timestamp: nowIso() }));
+              messagesEl.scrollTop = messagesEl.scrollHeight;
+              if (sidebarMode === 'triggers') {
+                await loadTriggers();
+                renderSidebarList();
+                renderActiveTrigger();
+              }
+            });
+            optionsRow.appendChild(btn);
+          }
         });
         if (optionsRow.childElementCount > 0) {
           bubble.appendChild(optionsRow);
@@ -759,9 +948,21 @@
       return row;
     }
 
+    function canDeleteMessage(meta = {}) {
+      if (sidebarMode === 'tasks') {
+        const taskId = Number(meta?.taskId || 0);
+        if (!Number.isInteger(taskId) || taskId < 1) return false;
+        if (meta?.taskBase === true) return true;
+        const rerunIndex = Number(meta?.rerunIndex);
+        return Number.isInteger(rerunIndex) && rerunIndex >= 0;
+      }
+      const idx = Number(meta?.messageIndex);
+      return Number.isInteger(idx) && idx >= 0;
+    }
+
     function truncateTitle(value) {
       const text = (value || '').trim();
-      if (!text) return 'Neue Aufgabe';
+      if (!text) return 'Neuer Chat';
       return text.length > 36 ? `${text.slice(0, 36)}...` : text;
     }
 
@@ -769,8 +970,26 @@
       return chats.find((chat) => chat.id === activeChatId) || null;
     }
 
+    function getActiveTask() {
+      return taskEntries.find((task) => task.id === activeTaskId) || null;
+    }
+
     function getChatById(chatId) {
       return chats.find((chat) => chat.id === chatId) || null;
+    }
+
+    function taskTitle(task) {
+      const preferred = String(task?.title || '').trim();
+      const text = preferred || String(task?.text || '').trim();
+      if (!text) return 'Aufgabe';
+      const single = text.replace(/\s+/g, ' ');
+      return single.length > 36 ? `${single.slice(0, 36)}...` : single;
+    }
+
+    function updateSidebarModeButtons() {
+      modeChatsBtn.classList.toggle('active', sidebarMode === 'chats');
+      modeTasksBtn.classList.toggle('active', sidebarMode === 'tasks');
+      modeTriggersBtn.classList.toggle('active', sidebarMode === 'triggers');
     }
 
     function isMobileView() {
@@ -789,18 +1008,6 @@
       sidebarBackdrop.classList.toggle('open', open);
     }
 
-    function renameChat(chatId) {
-      const chat = chats.find((entry) => entry.id === chatId);
-      if (!chat) return;
-      const input = window.prompt('Chat umbenennen', chat.title);
-      if (input === null) return;
-      chat.title = truncateTitle(input);
-      touchChat(chat);
-      renderChatList();
-      renderActiveChat();
-      scheduleChatMemorySave();
-    }
-
     function deleteChat(chatId) {
       const idx = chats.findIndex((entry) => entry.id === chatId);
       if (idx < 0) return;
@@ -817,7 +1024,7 @@
         activeChatId = chats[Math.max(0, idx - 1)]?.id || chats[0].id;
       }
 
-      renderChatList();
+      renderSidebarList();
       renderActiveChat();
       scheduleChatMemorySave();
     }
@@ -852,20 +1059,100 @@
 
         item.appendChild(label);
         item.appendChild(delBtn);
-        item.title = 'Doppelklick zum Umbenennen';
         item.addEventListener('click', () => {
           if (activeChatId === chat.id) return;
           activeChatId = chat.id;
-          refreshActiveChatHighlight();
+          renderSidebarList();
           renderActiveChat();
           if (isMobileView()) closeSidebar();
           scheduleChatMemorySave();
         });
-        item.addEventListener('dblclick', () => {
-          renameChat(chat.id);
+        chatListEl.appendChild(item);
+      });
+    }
+
+    function renderTaskList() {
+      chatListEl.innerHTML = '';
+      taskEntries.forEach((task) => {
+        const item = document.createElement('div');
+        item.setAttribute('data-task-id', String(task.id));
+        item.className = `item${task.id === activeTaskId ? ' active' : ''}`;
+        const label = document.createElement('span');
+        label.className = 'item-label';
+        label.textContent = taskTitle(task);
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'item-delete';
+        delBtn.type = 'button';
+        delBtn.setAttribute('aria-label', 'Aufgabe löschen');
+        delBtn.textContent = '×';
+        delBtn.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          await deleteTask(task.id);
+        });
+
+        item.appendChild(label);
+        item.appendChild(delBtn);
+        item.addEventListener('click', () => {
+          if (activeTaskId === task.id) return;
+          activeTaskId = task.id;
+          renderTaskList();
+          renderActiveTask();
+          if (isMobileView()) closeSidebar();
         });
         chatListEl.appendChild(item);
       });
+    }
+
+    function triggerTitle(trigger) {
+      const raw = String(trigger?.name || '').trim() || `Trigger ${String(trigger?.id || '')}`;
+      return raw.length > 36 ? `${raw.slice(0, 36)}...` : raw;
+    }
+
+    function renderTriggerList() {
+      chatListEl.innerHTML = '';
+      triggerEntries.forEach((trigger) => {
+        const item = document.createElement('div');
+        const triggerId = String(trigger?.id || '');
+        item.setAttribute('data-trigger-id', triggerId);
+        item.className = `item${triggerId === String(activeTriggerId || '') ? ' active' : ''}`;
+        const label = document.createElement('span');
+        label.className = 'item-label';
+        label.textContent = triggerTitle(trigger);
+        const delBtn = document.createElement('button');
+        delBtn.className = 'item-delete';
+        delBtn.type = 'button';
+        delBtn.setAttribute('aria-label', 'Trigger löschen');
+        delBtn.textContent = '×';
+        delBtn.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          await deleteTrigger(triggerId);
+        });
+
+        item.appendChild(label);
+        item.appendChild(delBtn);
+        item.addEventListener('click', () => {
+          if (!triggerId || triggerId === String(activeTriggerId || '')) return;
+          activeTriggerId = triggerId;
+          renderTriggerList();
+          renderActiveTrigger();
+          if (isMobileView()) closeSidebar();
+        });
+        chatListEl.appendChild(item);
+      });
+    }
+
+    function renderSidebarList() {
+      updateSidebarModeButtons();
+      if (sidebarMode === 'tasks') {
+        renderTaskList();
+        return;
+      }
+      if (sidebarMode === 'triggers') {
+        renderTriggerList();
+        return;
+      }
+      renderChatList();
     }
 
     function renderActiveChat() {
@@ -873,12 +1160,116 @@
       if (!chat) return;
 
       chatTitleEl.textContent = chat.title;
+      chatTitleEl.classList.add('title-editable');
       messagesEl.innerHTML = '';
-      chat.messages.forEach((msg) => {
-        messagesEl.appendChild(createMessageElement(msg.role, msg.text, msg));
+      chat.messages.forEach((msg, index) => {
+        messagesEl.appendChild(createMessageElement(msg.role, msg.text, {
+          ...msg,
+          messageIndex: index
+        }));
       });
       messagesEl.scrollTop = messagesEl.scrollHeight;
       refreshComposerState();
+    }
+
+    function renderActiveTask() {
+      const task = getActiveTask();
+      chatTitleEl.textContent = 'Gespeicherte Aufgaben';
+      chatTitleEl.classList.remove('title-editable');
+      messagesEl.innerHTML = '';
+      if (!task) {
+        messagesEl.appendChild(createMessageElement('bot', 'Keine gespeicherten Aufgaben vorhanden.', { timestamp: nowIso() }));
+        refreshComposerState();
+        return;
+      }
+      chatTitleEl.textContent = taskTitle(task);
+      chatTitleEl.classList.add('title-editable');
+      messagesEl.appendChild(
+        createMessageElement('bot', String(task.text || ''), {
+          plannedSteps: Array.isArray(task.planned_steps) ? task.planned_steps : [],
+          options: Array.isArray(task.planned_steps) && task.planned_steps.length
+            ? [
+                { type: 'rerun_task', plannedSteps: task.planned_steps, taskId: task.id },
+                { type: 'create_manual_trigger', taskId: task.id }
+              ]
+            : [],
+          taskId: task.id,
+          taskBase: true,
+          timestamp: task.created_at || nowIso()
+        })
+      );
+      (Array.isArray(task.dialog) ? task.dialog : []).forEach((entry) => {
+        messagesEl.appendChild(
+          createMessageElement(entry.role === 'user' ? 'user' : 'bot', String(entry.text || ''), {
+            timestamp: entry.timestamp || nowIso()
+          })
+        );
+      });
+      (Array.isArray(task.reruns) ? task.reruns : []).forEach((entry, rerunIndex) => {
+        messagesEl.appendChild(
+          createMessageElement('bot', String(entry.answer || ''), {
+            taskId: task.id,
+            rerunIndex,
+            timestamp: entry.created_at || nowIso()
+          })
+        );
+      });
+      if (pendingTasks.has(task.id)) {
+        messagesEl.appendChild(createMessageElement('bot', '...', { timestamp: nowIso() }));
+      }
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      refreshComposerState();
+    }
+
+    function getActiveTrigger() {
+      return triggerEntries.find((t) => String(t?.id || '') === String(activeTriggerId || '')) || null;
+    }
+
+    function renderActiveTrigger() {
+      const trigger = getActiveTrigger();
+      chatTitleEl.textContent = 'Trigger';
+      chatTitleEl.classList.add('title-editable');
+      messagesEl.innerHTML = '';
+      if (!trigger) {
+        messagesEl.appendChild(createMessageElement('bot', 'Keine Trigger vorhanden.', { timestamp: nowIso() }));
+        refreshComposerState();
+        return;
+      }
+      const lines = [
+        `Name: ${String(trigger.name || '-')}`,
+        `Typ: ${String(trigger.trigger_type || '-')}`,
+        `Task-ID: ${String(trigger.task_id || '-')}`,
+        `Status: ${trigger.enabled ? 'aktiv' : 'inaktiv'}`,
+      ];
+      if (String(trigger.last_fired_at || '').trim()) {
+        lines.push(`Letzte Ausführung: ${String(trigger.last_fired_at)}`);
+      }
+      if (String(trigger.last_error || '').trim()) {
+        lines.push(`Letzter Fehler: ${String(trigger.last_error)}`);
+      }
+      chatTitleEl.textContent = triggerTitle(trigger);
+      messagesEl.appendChild(createMessageElement('bot', lines.join('\n'), { timestamp: nowIso() }));
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      refreshComposerState();
+    }
+
+    function renderActivePane() {
+      if (sidebarMode === 'tasks') {
+        renderActiveTask();
+        return;
+      }
+      if (sidebarMode === 'triggers') {
+        renderActiveTrigger();
+        return;
+      }
+      renderActiveChat();
+    }
+
+    function setSidebarMode(mode) {
+      sidebarMode = mode === 'tasks' ? 'tasks' : (mode === 'triggers' ? 'triggers' : 'chats');
+      newChatBtn.style.display = sidebarMode === 'chats' ? '' : 'none';
+      renderSidebarList();
+      renderActivePane();
     }
 
     function addMessageToChat(chatId, role, text, meta = {}) {
@@ -895,10 +1286,10 @@
         timestamp: meta.timestamp || nowIso()
       });
       touchChat(chat);
-      if (role === 'user' && chat.title === 'Neue Aufgabe') {
+      if (role === 'user' && chat.title === 'Neuer Chat') {
         chat.title = truncateTitle(text);
       }
-      renderChatList();
+      renderSidebarList();
       renderActiveChat();
       scheduleChatMemorySave();
     }
@@ -907,6 +1298,48 @@
       const chat = getActiveChat();
       if (!chat) return;
       addMessageToChat(chat.id, role, text, meta);
+    }
+
+    function getTaskDialogHistory(task, maxItems = MAX_CONTEXT_MESSAGES) {
+      const dialog = Array.isArray(task?.dialog) ? task.dialog : [];
+      return dialog
+        .slice(-maxItems)
+        .map((m) => ({ role: m.role === 'user' ? 'user' : 'bot', text: String(m.text || '').trim() }))
+        .filter((m) => m.text.length > 0);
+    }
+
+    function plannedStepsBlockForGoal(steps) {
+      const clean = Array.isArray(steps) ? steps.map((s) => String(s).trim()).filter(Boolean) : [];
+      if (!clean.length) return 'Keine vorhandenen Schritte.';
+      return clean.join('\n');
+    }
+
+    function setPendingBotPlaceholder(chatId, enabled) {
+      const chat = getChatById(chatId);
+      if (!chat) return;
+      const existingIdx = (chat.messages || []).findIndex((m) => m && m._pendingBot === true);
+      if (enabled) {
+        if (existingIdx >= 0) return;
+        chat.messages.push({
+          role: 'bot',
+          text: '...',
+          downloadUrl: '',
+          downloadLabel: '',
+          plannedSteps: [],
+          options: [],
+          timestamp: nowIso(),
+          _pendingBot: true
+        });
+        touchChat(chat);
+        renderSidebarList();
+        if (activeChatId === chatId) renderActiveChat();
+        return;
+      }
+      if (existingIdx < 0) return;
+      chat.messages.splice(existingIdx, 1);
+      touchChat(chat);
+      renderSidebarList();
+      if (activeChatId === chatId) renderActiveChat();
     }
 
     function extractDownloadPath(raw) {
@@ -935,7 +1368,23 @@
       return out;
     }
 
+    function extractPlannedStepsFromText(text) {
+      const src = String(text || '');
+      if (!src.trim()) return [];
+      const lines = src.split('\n');
+      const out = [];
+      for (const line of lines) {
+        const trimmed = String(line || '').trim();
+        if (!trimmed) continue;
+        if (/^\d+\.\s*tool=.+\s+args=/.test(trimmed)) {
+          out.push(trimmed);
+        }
+      }
+      return out;
+    }
+
     async function showLastPlannedTask() {
+      if (sidebarMode === 'tasks') return;
       const chat = getActiveChat();
       if (!chat) return;
       const messages = Array.isArray(chat.messages) ? chat.messages : [];
@@ -979,14 +1428,15 @@
       const ts = nowIso();
       const chat = {
         id: nextChatId++,
-        title: 'Neue Aufgabe',
+        title: 'Neuer Chat',
         messages: [{ role: 'bot', text: BOT_WELCOME, downloadUrl: '', downloadLabel: '', timestamp: ts }],
         created_at: ts,
         updated_at: ts
       };
       chats.unshift(chat);
       activeChatId = chat.id;
-      renderChatList();
+      sidebarMode = 'chats';
+      renderSidebarList();
       renderActiveChat();
       scheduleChatMemorySave();
     }
@@ -999,7 +1449,25 @@
     }
 
     function refreshComposerState() {
+      if (sidebarMode === 'triggers') {
+        inputEl.placeholder = 'Auslöser bearbeiten...';
+        sendBtn.disabled = true;
+        taskBtn.disabled = true;
+        inputEl.disabled = true;
+        return;
+      }
+      if (sidebarMode === 'tasks') {
+        inputEl.placeholder = 'Aufgabe bearbeiten...';
+        const task = getActiveTask();
+        const isPending = !!task && pendingTasks.has(task.id);
+        sendBtn.disabled = isPending || !task;
+        taskBtn.disabled = true;
+        inputEl.disabled = isPending || !task;
+        if (!inputEl.disabled) inputEl.focus();
+        return;
+      }
       const chat = getActiveChat();
+      inputEl.placeholder = 'Nachricht eingeben...';
       if (!chat) {
         setSending(false);
         return;
@@ -1035,7 +1503,7 @@
       rawChats.forEach((entry) => {
         const id = Number(entry?.id);
         if (!Number.isInteger(id) || id < 1) return;
-        const title = truncateTitle(String(entry?.title || 'Neue Aufgabe'));
+        const title = truncateTitle(String(entry?.title || 'Neuer Chat'));
 
         const rawMessages = Array.isArray(entry?.messages) ? entry.messages : [];
         const messages = rawMessages
@@ -1062,7 +1530,7 @@
 
         chats.push({
           id,
-          title: title || 'Neue Aufgabe',
+          title: title || 'Neuer Chat',
           messages,
           created_at: String(entry?.created_at || nowIso()),
           updated_at: String(entry?.updated_at || nowIso())
@@ -1098,8 +1566,243 @@
         startNewChat();
         return;
       }
-      renderChatList();
+      renderSidebarList();
       renderActiveChat();
+    }
+
+    async function loadTasksMemory() {
+      taskEntries.length = 0;
+      activeTaskId = null;
+      if (!currentUserId) {
+        setSidebarSyncStatus('');
+        return;
+      }
+
+      try {
+        const resp = await fetch(`/api/tasks-memory?user_id=${encodeURIComponent(currentUserId)}`);
+        const data = await resp.json();
+        if (!resp.ok) throw new Error('tasks-memory');
+        setSidebarSyncStatus(String(data?.sync_status || 'offline_cache'));
+        const rawTasks = Array.isArray(data?.tasks) ? data.tasks : [];
+        rawTasks.forEach((task) => {
+          const id = Number(task?.id);
+          const text = String(task?.text || '').trim();
+          if (!Number.isInteger(id) || id < 1 || !text) return;
+          taskEntries.push({
+            id,
+            title: String(task?.title || ''),
+            text,
+            planned_steps: Array.isArray(task?.planned_steps) ? task.planned_steps.map((s) => String(s)) : [],
+            planned_steps_text: String(task?.planned_steps_text || ''),
+            created_at: String(task?.created_at || nowIso()),
+            dialog: Array.isArray(task?.dialog)
+              ? task.dialog
+                  .map((m) => ({
+                    role: m?.role === 'user' ? 'user' : 'bot',
+                    text: String(m?.text || '').trim(),
+                    timestamp: String(m?.timestamp || nowIso())
+                  }))
+                  .filter((m) => m.text.length > 0)
+              : [],
+            reruns: Array.isArray(task?.reruns)
+              ? task.reruns
+                  .map((r) => ({
+                    answer: String(r?.answer || '').trim(),
+                    created_at: String(r?.created_at || nowIso())
+                  }))
+                  .filter((r) => r.answer.length > 0)
+              : []
+          });
+        });
+      } catch (_err) {
+        setSidebarSyncStatus('offline_cache');
+        // keep empty task list
+      }
+
+      if (taskEntries.length > 0) {
+        activeTaskId = taskEntries[0].id;
+      }
+    }
+
+    async function loadTriggers() {
+      triggerEntries.length = 0;
+      activeTriggerId = '';
+      if (!currentUserId) return;
+
+      try {
+        const resp = await fetch(`/api/triggers?user_id=${encodeURIComponent(currentUserId)}`);
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(String(data?.detail || 'triggers'));
+        const rawTriggers = Array.isArray(data?.triggers) ? data.triggers : [];
+        rawTriggers.forEach((t) => {
+          const id = String(t?.id || '').trim();
+          if (!id) return;
+          triggerEntries.push({
+            id,
+            name: String(t?.name || '').trim(),
+            trigger_type: String(t?.trigger_type || '').trim(),
+            task_id: Number(t?.task_id || 0),
+            enabled: Boolean(t?.enabled),
+            last_fired_at: String(t?.last_fired_at || ''),
+            last_error: String(t?.last_error || ''),
+          });
+        });
+      } catch (_err) {
+        // keep empty trigger list
+      }
+
+      if (triggerEntries.length > 0) {
+        activeTriggerId = String(triggerEntries[0].id || '');
+      }
+    }
+
+    async function renameTask(taskId, title) {
+      const cleanTitle = String(title || '').trim();
+      if (!cleanTitle || !currentUserId) return false;
+      try {
+        const resp = await fetch('/api/tasks/rename', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: currentUserId,
+            task_id: Number(taskId),
+            title: cleanTitle
+          })
+        });
+        const data = await resp.json();
+        if (!resp.ok) return false;
+        const task = taskEntries.find((t) => t.id === Number(taskId));
+        if (task) task.title = String(data?.task?.title || cleanTitle);
+        return true;
+      } catch (_err) {
+        return false;
+      }
+    }
+
+    async function renameTrigger(triggerId, name) {
+      const cleanName = String(name || '').trim();
+      const cleanTriggerId = String(triggerId || '').trim();
+      if (!cleanName || !cleanTriggerId || !currentUserId) return false;
+      try {
+        const resp = await fetch('/api/triggers/rename', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: currentUserId,
+            trigger_id: cleanTriggerId,
+            name: cleanName
+          })
+        });
+        const data = await resp.json();
+        if (!resp.ok) return false;
+        const trigger = triggerEntries.find((t) => String(t.id) === cleanTriggerId);
+        if (trigger) trigger.name = String(data?.trigger?.name || cleanName);
+        return true;
+      } catch (_err) {
+        return false;
+      }
+    }
+
+    async function deleteTask(taskId) {
+      if (!currentUserId) return false;
+      try {
+        const resp = await fetch('/api/tasks/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: currentUserId,
+            task_id: Number(taskId)
+          })
+        });
+        if (!resp.ok) return false;
+      } catch (_err) {
+        return false;
+      }
+      const idx = taskEntries.findIndex((t) => t.id === Number(taskId));
+      if (idx >= 0) {
+        taskEntries.splice(idx, 1);
+      }
+      if (activeTaskId === Number(taskId)) {
+        activeTaskId = taskEntries[0]?.id || null;
+      }
+      renderSidebarList();
+      renderActiveTask();
+      return true;
+    }
+
+    async function deleteTrigger(triggerId) {
+      const cleanTriggerId = String(triggerId || '').trim();
+      if (!cleanTriggerId || !currentUserId) return false;
+      try {
+        const resp = await fetch('/api/triggers/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: currentUserId,
+            trigger_id: cleanTriggerId
+          })
+        });
+        if (!resp.ok) return false;
+      } catch (_err) {
+        return false;
+      }
+      const idx = triggerEntries.findIndex((t) => String(t.id) === cleanTriggerId);
+      if (idx >= 0) {
+        triggerEntries.splice(idx, 1);
+      }
+      if (String(activeTriggerId || '') === cleanTriggerId) {
+        activeTriggerId = triggerEntries[0]?.id || '';
+      }
+      renderSidebarList();
+      renderActiveTrigger();
+      return true;
+    }
+
+    async function deleteTaskRerun(taskId, rerunIndex) {
+      if (!currentUserId) return false;
+      try {
+        const resp = await fetch('/api/tasks/rerun/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: currentUserId,
+            task_id: Number(taskId),
+            rerun_index: Number(rerunIndex)
+          })
+        });
+        if (!resp.ok) return false;
+      } catch (_err) {
+        return false;
+      }
+      await loadTasksMemory();
+      renderSidebarList();
+      renderActiveTask();
+      return true;
+    }
+
+    async function deleteMessageByMeta(meta = {}) {
+      if (sidebarMode === 'tasks') {
+        const taskId = Number(meta?.taskId || 0);
+        if (!Number.isInteger(taskId) || taskId < 1) return;
+        if (meta?.taskBase === true) {
+          await deleteTask(taskId);
+          return;
+        }
+        const rerunIndex = Number(meta?.rerunIndex);
+        if (!Number.isInteger(rerunIndex) || rerunIndex < 0) return;
+        await deleteTaskRerun(taskId, rerunIndex);
+        return;
+      }
+
+      const chat = getActiveChat();
+      if (!chat) return;
+      const messageIndex = Number(meta?.messageIndex);
+      if (!Number.isInteger(messageIndex) || messageIndex < 0 || messageIndex >= chat.messages.length) return;
+      chat.messages.splice(messageIndex, 1);
+      touchChat(chat);
+      renderSidebarList();
+      renderActiveChat();
+      scheduleChatMemorySave();
     }
 
     async function saveChatMemory() {
@@ -1110,7 +1813,9 @@
           title: chat.title,
           created_at: chat.created_at || nowIso(),
           updated_at: chat.updated_at || nowIso(),
-          messages: (chat.messages || []).map((msg) => ({
+          messages: (chat.messages || [])
+            .filter((msg) => !(msg && msg._pendingBot === true))
+            .map((msg) => ({
             role: msg.role === 'user' ? 'user' : 'bot',
             text: msg.text || '',
             downloadUrl: msg.downloadUrl || '',
@@ -1163,10 +1868,207 @@
           addMessage('bot', `Aufgabe konnte nicht gespeichert werden: ${data.detail || 'Unbekannter Fehler'}`);
           return false;
         }
+        await loadTasksMemory();
+        if (sidebarMode === 'tasks') {
+          renderSidebarList();
+          renderActiveTask();
+        }
         return true;
       } catch (_err) {
         addMessage('bot', 'Aufgabe konnte nicht gespeichert werden (Verbindungsfehler).');
         return false;
+      }
+    }
+
+    async function rerunTaskForUser(taskId, plannedSteps = []) {
+      const cleanSteps = Array.isArray(plannedSteps) ? plannedSteps.map((s) => String(s).trim()).filter(Boolean) : [];
+      if (!cleanSteps.length) return { ok: false, error: 'Keine geplanten Schritte vorhanden.' };
+      const cleanTaskId = Number(taskId);
+      if (!Number.isInteger(cleanTaskId) || cleanTaskId < 1) return { ok: false, error: 'Ungültige Task-ID.' };
+      if (!currentUserId) return { ok: false, error: 'Bitte zuerst API-Key in den Einstellungen speichern.' };
+      try {
+        const resp = await fetch('/api/tasks/rerun', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: currentUserId,
+            task_id: cleanTaskId,
+            planned_steps: cleanSteps
+          })
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          return { ok: false, error: data.detail || 'Unbekannter Fehler' };
+        }
+        return { ok: true, answer: String(data.answer || '') };
+      } catch (_err) {
+        return { ok: false, error: 'Verbindung zur API fehlgeschlagen.' };
+      }
+    }
+
+    async function updateTaskForUser(task) {
+      if (!task || !currentUserId) return false;
+      try {
+        const resp = await fetch('/api/tasks/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: currentUserId,
+            task_id: Number(task.id),
+            planned_steps: Array.isArray(task.planned_steps) ? task.planned_steps.map((s) => String(s).trim()).filter(Boolean) : [],
+            text: String(task.text || ''),
+            dialog: Array.isArray(task.dialog)
+              ? task.dialog.map((m) => ({
+                  role: m.role === 'user' ? 'user' : 'bot',
+                  text: String(m.text || '').trim(),
+                  timestamp: String(m.timestamp || nowIso())
+                })).filter((m) => m.text.length > 0)
+              : []
+          })
+        });
+        if (!resp.ok) return false;
+        return true;
+      } catch (_err) {
+        return false;
+      }
+    }
+
+    async function createManualTriggerForTask(taskId) {
+      const cleanTaskId = Number(taskId);
+      if (!Number.isInteger(cleanTaskId) || cleanTaskId < 1) return { ok: false, error: 'Ungültige Task-ID.' };
+      if (!currentUserId) return { ok: false, error: 'Bitte zuerst API-Key in den Einstellungen speichern.' };
+      const task = taskEntries.find((t) => t.id === cleanTaskId);
+      const nameBase = task ? taskTitle(task) : `Task ${cleanTaskId}`;
+      const name = `Manuell: ${nameBase}`;
+      try {
+        const resp = await fetch('/api/triggers/create-manual', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: currentUserId,
+            task_id: cleanTaskId,
+            name
+          })
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          return { ok: false, error: data.detail || 'Unbekannter Fehler' };
+        }
+        await loadTriggers();
+        return { ok: true, name: String(data?.trigger?.name || name) };
+      } catch (_err) {
+        return { ok: false, error: 'Verbindung zur API fehlgeschlagen.' };
+      }
+    }
+
+    async function sendTaskMessage() {
+      const message = inputEl.value.trim();
+      if (!message) return;
+      const task = getActiveTask();
+      if (!task) return;
+      const taskId = Number(task.id);
+      if (!Number.isInteger(taskId) || taskId < 1) return;
+      if (pendingTasks.has(taskId)) return;
+      if (!currentUserId) {
+        messagesEl.appendChild(createMessageElement('bot', 'Bitte zuerst API-Key in den Einstellungen speichern.', { timestamp: nowIso() }));
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        return;
+      }
+
+      const currentPlannedSteps = Array.isArray(task.planned_steps) ? task.planned_steps : [];
+
+      if (!Array.isArray(task.dialog)) task.dialog = [];
+      task.dialog.push({ role: 'user', text: message, timestamp: nowIso() });
+      inputEl.value = '';
+      pendingTasks.add(taskId);
+      renderActiveTask();
+      renderSidebarList();
+      {
+        const okPersist = await updateTaskForUser(task);
+        if (!okPersist) {
+          task.dialog.push({
+            role: 'bot',
+            text: 'Hinweis: Die Änderung konnte noch nicht in tasks_memory gespeichert werden.',
+            timestamp: nowIso()
+          });
+        }
+      }
+
+      try {
+        const resp = await fetch('/api/tasks/replan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            planned_steps: currentPlannedSteps,
+            change_request: message,
+            user_id: currentUserId
+          })
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          task.dialog.push({ role: 'bot', text: `Fehler: ${data.detail || 'Unbekannter Fehler'}`, timestamp: nowIso() });
+          await updateTaskForUser(task);
+          return;
+        }
+        const rawReplanText = String(data?.raw_text || '');
+        let newSteps = Array.isArray(data?.planned_steps) ? data.planned_steps.map((s) => String(s).trim()).filter(Boolean) : [];
+        if (newSteps.length === 0) {
+          newSteps = extractPlannedStepsFromText(rawReplanText);
+        }
+        if (newSteps.length > 0) {
+          task.planned_steps = newSteps;
+          try {
+            const explainResp = await fetch('/api/planned-task-explain', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ steps: newSteps, user_id: currentUserId })
+            });
+            const explainData = await explainResp.json();
+            if (explainResp.ok && String(explainData?.answer || '').trim()) {
+              task.dialog.push({ role: 'bot', text: String(explainData.answer).trim(), timestamp: nowIso() });
+            } else {
+              task.dialog.push({
+                role: 'bot',
+                text: 'Die geplanten Schritte wurden aktualisiert.',
+                timestamp: nowIso()
+              });
+            }
+          } catch (_explainErr) {
+            task.dialog.push({
+              role: 'bot',
+              text: 'Die geplanten Schritte wurden aktualisiert.',
+              timestamp: nowIso()
+            });
+          }
+        } else {
+          task.dialog.push({
+            role: 'bot',
+            text: 'Hinweis: Es wurden keine neuen geplanten Schritte erkannt. Die vorhandene Planung bleibt unverändert.',
+            timestamp: nowIso()
+          });
+        }
+        const okPersist = await updateTaskForUser(task);
+        if (!okPersist) {
+          task.dialog.push({
+            role: 'bot',
+            text: 'Hinweis: Die aktualisierten Schritte konnten nicht in tasks_memory gespeichert werden.',
+            timestamp: nowIso()
+          });
+        }
+      } catch (_err) {
+        task.dialog.push({ role: 'bot', text: 'Verbindung zur API fehlgeschlagen.', timestamp: nowIso() });
+        const okPersist = await updateTaskForUser(task);
+        if (!okPersist) {
+          task.dialog.push({
+            role: 'bot',
+            text: 'Hinweis: Die Fehlermeldung konnte nicht in tasks_memory gespeichert werden.',
+            timestamp: nowIso()
+          });
+        }
+      } finally {
+        pendingTasks.delete(taskId);
+        renderActiveTask();
+        renderSidebarList();
       }
     }
 
@@ -1196,6 +2098,10 @@
         setActiveUserInSession(currentUserId);
         settingsStatus.textContent = 'Gespeichert.';
         await loadChatMemory();
+        await loadTasksMemory();
+        await loadTriggers();
+        renderSidebarList();
+        renderActivePane();
         setTimeout(() => { overlay.classList.remove('open'); }, 350);
       } catch (err) {
         settingsStatus.textContent = 'Speichern fehlgeschlagen.';
@@ -1203,6 +2109,11 @@
     }
 
     async function sendMessage() {
+      if (sidebarMode === 'triggers') return;
+      if (sidebarMode === 'tasks') {
+        await sendTaskMessage();
+        return;
+      }
       const message = inputEl.value.trim();
       if (!message) return;
 
@@ -1221,10 +2132,11 @@
       }
 
       addMessageToChat(targetChatId, 'user', message);
+      setPendingBotPlaceholder(targetChatId, true);
       inputEl.value = '';
       pendingChats.add(targetChatId);
       refreshComposerState();
-      renderChatList();
+      renderSidebarList();
 
       try {
         const resp = await fetch('/api/chat', {
@@ -1234,11 +2146,13 @@
         });
         const data = await resp.json();
         if (!resp.ok) {
+          setPendingBotPlaceholder(targetChatId, false);
           addMessage('bot', `Fehler: ${data.detail || 'Unbekannter Fehler'}`);
           return;
         }
         const plannedSteps = extractPlannedSteps(data.raw);
         const outputPath = extractDownloadPath(data.raw);
+        setPendingBotPlaceholder(targetChatId, false);
         if (outputPath) {
           const fileName = fileNameFromPath(outputPath);
           const downloadUrl = `/api/download?path=${encodeURIComponent(outputPath)}&user_id=${encodeURIComponent(currentUserId)}`;
@@ -1251,11 +2165,13 @@
           addMessageToChat(targetChatId, 'bot', data.answer || 'Keine Antwort erhalten.', { plannedSteps });
         }
       } catch (err) {
+        setPendingBotPlaceholder(targetChatId, false);
         addMessageToChat(targetChatId, 'bot', 'Verbindung zur API fehlgeschlagen.');
       } finally {
+        setPendingBotPlaceholder(targetChatId, false);
         pendingChats.delete(targetChatId);
         refreshComposerState();
-        renderChatList();
+        renderSidebarList();
       }
     }
 
@@ -1273,15 +2189,114 @@
 
     sendBtn.addEventListener('click', sendMessage);
     taskBtn.addEventListener('click', showLastPlannedTask);
+    chatTitleEl.addEventListener('click', () => {
+      const isTaskMode = sidebarMode === 'tasks';
+      const isTriggerMode = sidebarMode === 'triggers';
+      const task = isTaskMode ? getActiveTask() : null;
+      const trigger = isTriggerMode ? getActiveTrigger() : null;
+      const chat = (!isTaskMode && !isTriggerMode) ? getActiveChat() : null;
+      if (isTaskMode && !task) return;
+      if (isTriggerMode && !trigger) return;
+      if (!isTaskMode && !isTriggerMode && !chat) return;
+      const currentTitle = isTaskMode
+        ? taskTitle(task)
+        : (isTriggerMode ? (String(trigger.name || '').trim() || `Trigger ${String(trigger.id || '')}`) : String(chat.title || 'Neuer Chat'));
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = currentTitle;
+      input.style.width = '100%';
+      input.style.maxWidth = '420px';
+      input.style.fontSize = '16px';
+      input.style.fontWeight = '700';
+      input.style.border = '1px solid #c8d7f3';
+      input.style.borderRadius = '6px';
+      input.style.padding = '4px 8px';
+
+      const commit = async () => {
+        const next = String(input.value || '').trim();
+        if (!next) {
+          renderActivePane();
+          return;
+        }
+        if (isTaskMode) {
+          const ok = await renameTask(task.id, next);
+          if (!ok) {
+            renderActivePane();
+            return;
+          }
+        } else if (isTriggerMode) {
+          const ok = await renameTrigger(trigger.id, next);
+          if (!ok) {
+            renderActivePane();
+            return;
+          }
+        } else {
+          chat.title = truncateTitle(next);
+          touchChat(chat);
+          scheduleChatMemorySave();
+        }
+        renderSidebarList();
+        renderActivePane();
+      };
+
+      chatTitleEl.replaceWith(input);
+      input.focus();
+      input.select();
+
+      const restoreTitleNode = () => {
+        if (input.parentNode) {
+          input.replaceWith(chatTitleEl);
+        }
+      };
+      const oldCommit = commit;
+      const wrappedCommit = async () => {
+        await oldCommit();
+        restoreTitleNode();
+      };
+      input.onblur = () => { void wrappedCommit(); };
+      input.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          void wrappedCommit();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          restoreTitleNode();
+          renderActivePane();
+        }
+      };
+    });
     inputEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        sendMessage();
+        void sendMessage();
       }
     });
 
     newChatBtn.addEventListener('click', () => {
+      setSidebarMode('chats');
       startNewChat();
+      if (isMobileView()) closeSidebar();
+    });
+
+    modeChatsBtn.addEventListener('click', async () => {
+      await loadChatMemory();
+      await loadTasksMemory();
+      await loadTriggers();
+      setSidebarMode('chats');
+      if (isMobileView()) closeSidebar();
+    });
+
+    modeTasksBtn.addEventListener('click', async () => {
+      await loadTasksMemory();
+      await loadTriggers();
+      setSidebarMode('tasks');
+      if (isMobileView()) closeSidebar();
+    });
+
+    modeTriggersBtn.addEventListener('click', async () => {
+      await loadTasksMemory();
+      await loadTriggers();
+      setSidebarMode('triggers');
       if (isMobileView()) closeSidebar();
     });
 
@@ -1298,6 +2313,9 @@
     (async () => {
       await loadSettings();
       await loadChatMemory();
+      await loadTasksMemory();
+      await loadTriggers();
+      setSidebarMode('chats');
     })();
   </script>
 </body>

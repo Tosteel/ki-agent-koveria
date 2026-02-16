@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import ast
 import mimetypes
 import re
 from datetime import datetime, timezone
@@ -58,6 +59,60 @@ class TaskExplainRequest(BaseModel):
 class TaskSaveRequest(BaseModel):
     task_text: str = Field(..., min_length=1)
     planned_steps: List[str] = Field(default_factory=list)
+    user_id: Optional[str] = ""
+
+
+class TaskRenameRequest(BaseModel):
+    task_id: int = Field(..., ge=1)
+    title: str = Field(..., min_length=1)
+    user_id: Optional[str] = ""
+
+
+class TaskDeleteRequest(BaseModel):
+    task_id: int = Field(..., ge=1)
+    user_id: Optional[str] = ""
+
+
+class TaskRerunRequest(BaseModel):
+    task_id: int = Field(..., ge=1)
+    planned_steps: List[str] = Field(default_factory=list)
+    user_id: Optional[str] = ""
+
+
+class TaskRerunDeleteRequest(BaseModel):
+    task_id: int = Field(..., ge=1)
+    rerun_index: int = Field(..., ge=0)
+    user_id: Optional[str] = ""
+
+
+class TaskUpdateRequest(BaseModel):
+    task_id: int = Field(..., ge=1)
+    planned_steps: List[str] = Field(default_factory=list)
+    text: Optional[str] = ""
+    dialog: List[Dict[str, str]] = Field(default_factory=list)
+    user_id: Optional[str] = ""
+
+
+class TaskReplanRequest(BaseModel):
+    planned_steps: List[str] = Field(default_factory=list)
+    change_request: str = Field(..., min_length=1)
+    user_id: Optional[str] = ""
+
+
+class TriggerRenameRequest(BaseModel):
+    trigger_id: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1)
+    user_id: Optional[str] = ""
+
+
+class TriggerDeleteRequest(BaseModel):
+    trigger_id: str = Field(..., min_length=1)
+    user_id: Optional[str] = ""
+
+
+class TriggerCreateManualRequest(BaseModel):
+    task_id: int = Field(..., ge=1)
+    name: str = Field(..., min_length=1)
     user_id: Optional[str] = ""
 
 
@@ -176,6 +231,52 @@ def _compact_planned_steps(steps: List[str]) -> List[str]:
         else:
             compact.append(f"{idx}. tool={tool}")
     return compact
+
+
+def _extract_rerun_answer(data: Dict[str, Any]) -> str:
+    outputs = data.get("outputs")
+    if not isinstance(outputs, list):
+        return json.dumps(data, ensure_ascii=False)
+    for out in reversed(outputs):
+        if not isinstance(out, dict) or not out.get("ok"):
+            continue
+        payload = out.get("payload")
+        if isinstance(payload, dict):
+            for key in ("composed_text", "text", "summary", "answer", "message"):
+                val = payload.get(key)
+                if isinstance(val, str) and val.strip():
+                    return val.strip()
+    return json.dumps(data, ensure_ascii=False)
+
+
+def _parse_planned_steps_lines(lines: List[str]) -> List[Dict[str, Any]]:
+    steps: List[Dict[str, Any]] = []
+    for raw in lines:
+        line = str(raw or "").strip()
+        if not line:
+            continue
+        m = re.match(r"^\s*\d+\.\s*tool=([^\s]+)\s+args=(.+)$", line)
+        if not m:
+            continue
+        tool = m.group(1).strip()
+        args_raw = m.group(2).strip()
+        if not tool:
+            continue
+        args: Dict[str, Any] = {}
+        if args_raw:
+            try:
+                loaded = json.loads(args_raw)
+                if isinstance(loaded, dict):
+                    args = loaded
+            except Exception:
+                try:
+                    loaded = ast.literal_eval(args_raw)
+                    if isinstance(loaded, dict):
+                        args = loaded
+                except Exception:
+                    args = {}
+        steps.append({"tool": tool, "args": args})
+    return steps
 
 
 def _resolve_user_id_from_api(ask_ionos_url: str, api_key: str) -> Optional[str]:
@@ -315,6 +416,113 @@ def _save_chat_memory_for_user(user_id: str, req: ChatMemoryRequest) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _load_tasks_memory_for_user(user_id: str) -> Dict[str, Any]:
+    local_memory = _load_tasks_memory_local_for_user(user_id)
+    settings = _load_settings_for_user(user_id)
+    api_base = _extract_api_base_url(settings.get("ask_ionos_url", ""))
+    api_key = settings.get("api_key", "").strip()
+    if not api_base or not api_key:
+        return {"tasks": local_memory.get("tasks", []), "sync_status": "offline_cache"}
+    try:
+        resp = requests.get(
+            f"{api_base}/tasks/memory",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=8,
+        )
+        if resp.status_code >= 400:
+            return {"tasks": local_memory.get("tasks", []), "sync_status": "offline_cache"}
+        data = resp.json() if resp.content else {}
+        raw_tasks = data.get("tasks") if isinstance(data, dict) else []
+        if isinstance(raw_tasks, list):
+            local_tasks = local_memory.get("tasks") if isinstance(local_memory.get("tasks"), list) else []
+            if not raw_tasks and local_tasks:
+                _write_tasks_memory_for_user(user_id, local_tasks)
+                return {"tasks": local_tasks, "sync_status": "synchronized"}
+            _write_tasks_memory_local_for_user(user_id, raw_tasks)
+            refreshed = _load_tasks_memory_local_for_user(user_id)
+            return {"tasks": refreshed.get("tasks", []), "sync_status": "synchronized"}
+    except Exception:
+        return {"tasks": local_memory.get("tasks", []), "sync_status": "offline_cache"}
+    return {"tasks": local_memory.get("tasks", []), "sync_status": "offline_cache"}
+
+
+def _load_tasks_memory_local_for_user(user_id: str) -> Dict[str, Any]:
+    path = _user_task_path(user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        return {"tasks": []}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"tasks": []}
+    if not isinstance(data, dict):
+        return {"tasks": []}
+    raw_tasks = data.get("tasks")
+    tasks: List[Dict[str, Any]] = []
+    if isinstance(raw_tasks, list):
+        for t in raw_tasks:
+            if not isinstance(t, dict):
+                continue
+            tasks.append(
+                {
+                    "id": int(t.get("id") or 0),
+                    "title": str(t.get("title") or "").strip(),
+                    "text": str(t.get("text") or "").strip(),
+                    "planned_steps": [str(s) for s in (t.get("planned_steps") or []) if str(s).strip()],
+                    "planned_steps_text": str(t.get("planned_steps_text") or "").strip(),
+                    "created_at": str(t.get("created_at") or ""),
+                    "dialog": [
+                        {
+                            "role": ("user" if str(m.get("role") or "").strip().lower() == "user" else "bot"),
+                            "text": str(m.get("text") or "").strip(),
+                            "timestamp": str(m.get("timestamp") or ""),
+                        }
+                        for m in (t.get("dialog") or [])
+                        if isinstance(m, dict) and str(m.get("text") or "").strip()
+                    ],
+                    "reruns": [
+                        {
+                            "answer": str(r.get("answer") or "").strip(),
+                            "created_at": str(r.get("created_at") or ""),
+                        }
+                        for r in (t.get("reruns") or [])
+                        if isinstance(r, dict) and str(r.get("answer") or "").strip()
+                    ],
+                }
+            )
+    tasks = [t for t in tasks if t["id"] > 0 and t["text"]]
+    return {"tasks": tasks}
+
+
+def _write_tasks_memory_local_for_user(user_id: str, tasks: List[Dict[str, Any]]) -> None:
+    path = _user_task_path(user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": 1,
+        "updated_at": _now_iso(),
+        "tasks": tasks,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _write_tasks_memory_for_user(user_id: str, tasks: List[Dict[str, Any]]) -> None:
+    _write_tasks_memory_local_for_user(user_id, tasks)
+    settings = _load_settings_for_user(user_id)
+    api_base = _extract_api_base_url(settings.get("ask_ionos_url", ""))
+    api_key = settings.get("api_key", "").strip()
+    if not api_base or not api_key:
+        return
+    try:
+        requests.post(
+            f"{api_base}/tasks/memory/sync",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"tasks": tasks},
+            timeout=8,
+        )
+    except Exception:
+        pass
+
+
 app = FastAPI(title="Koveria Web GUI", version="0.1.0")
 MAX_HISTORY_ITEMS = 12
 
@@ -450,7 +658,9 @@ def planned_task_explain(req: TaskExplainRequest) -> JSONResponse:
     compact_steps = _compact_planned_steps(steps)
     source_text = "PLANNED STEPS:\n" + "\n".join(compact_steps)
     compose_instruction = (
-        "Antworte mit einem individuellen Titel, danach ausschließlich als nummerierte Liste auf Deutsch. "
+        "Zeile 1: Ein individueller, konkreter Titel zur Aufgabe."
+        "Verboten im Titel: Anführungszeichen, 'letzte geplante Titel' "
+        "Ab Zeile 2 ausschließlich als nummerierte Liste auf Deutsch. "
         "Keine Einleitung, kein Fließtext, keine Zusammenfassung außerhalb der Liste."
         "Jeder Schritt maximal ein kurzer Satz. "
         "Format strikt eine Zeile pro Step: 1. Wissensdatenbank: Nach ... durchsucht."
@@ -468,7 +678,7 @@ def planned_task_explain(req: TaskExplainRequest) -> JSONResponse:
                 "args": {
                     "text": source_text,
                     "instruction": compose_instruction,
-                    "goal": "Letzte geplante Aufgabe als kurze Liste",
+                    "goal": "Erkläre die letzte geplante Aufgabe mit individuellem Titel",
                     "max_chars": 500,
                 },
             }
@@ -517,6 +727,148 @@ def set_chat_memory(req: ChatMemoryRequest) -> JSONResponse:
     return JSONResponse({"ok": True, "user_id": user_id})
 
 
+@app.get("/api/tasks-memory")
+def get_tasks_memory(user_id: str = Query("")) -> JSONResponse:
+    if not user_id.strip():
+        return JSONResponse({"user_id": "", "tasks": []})
+    resolved_user_id = _sanitize_user_id(user_id)
+    memory = _load_tasks_memory_for_user(resolved_user_id)
+    return JSONResponse({"user_id": resolved_user_id, **memory})
+
+
+@app.get("/api/triggers")
+def get_triggers(user_id: str = Query("")) -> JSONResponse:
+    if not user_id.strip():
+        return JSONResponse({"user_id": "", "triggers": []})
+    resolved_user_id = _sanitize_user_id(user_id)
+    settings = _load_settings_for_user(resolved_user_id)
+    api_base = _extract_api_base_url(settings.get("ask_ionos_url", ""))
+    api_key = settings.get("api_key", "").strip()
+    if not api_base or not api_key:
+        return JSONResponse({"user_id": resolved_user_id, "triggers": [], "sync_status": "offline_cache"})
+
+    try:
+        resp = requests.get(
+            f"{api_base}/triggers",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=8,
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"API request failed: {exc}") from exc
+
+    if resp.status_code >= 400:
+        snippet = resp.text[:500]
+        raise HTTPException(status_code=resp.status_code, detail=f"API error: {snippet}")
+
+    data: Dict[str, Any] = resp.json() if resp.content else {}
+    triggers = data.get("triggers") if isinstance(data, dict) else []
+    if not isinstance(triggers, list):
+        triggers = []
+    return JSONResponse({"user_id": resolved_user_id, "triggers": triggers, "sync_status": "synchronized"})
+
+
+@app.post("/api/triggers/rename")
+def rename_trigger(req: TriggerRenameRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    trigger_id = req.trigger_id.strip()
+    name = req.name.strip()
+    if not trigger_id:
+        raise HTTPException(status_code=422, detail="trigger_id must not be empty")
+    if not name:
+        raise HTTPException(status_code=422, detail="name must not be empty")
+
+    settings = _load_settings_for_user(user_id)
+    api_base = _extract_api_base_url(settings.get("ask_ionos_url", ""))
+    api_key = settings.get("api_key", "").strip()
+    if not api_base or not api_key:
+        raise HTTPException(status_code=422, detail="API settings missing")
+
+    try:
+        resp = requests.patch(
+            f"{api_base}/triggers/{trigger_id}",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"name": name},
+            timeout=8,
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"API request failed: {exc}") from exc
+    if resp.status_code >= 400:
+        snippet = resp.text[:500]
+        raise HTTPException(status_code=resp.status_code, detail=f"API error: {snippet}")
+
+    data: Dict[str, Any] = resp.json() if resp.content else {}
+    return JSONResponse({"ok": True, "user_id": user_id, "trigger": data.get("trigger") if isinstance(data, dict) else {}})
+
+
+@app.post("/api/triggers/delete")
+def delete_trigger(req: TriggerDeleteRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    trigger_id = req.trigger_id.strip()
+    if not trigger_id:
+        raise HTTPException(status_code=422, detail="trigger_id must not be empty")
+
+    settings = _load_settings_for_user(user_id)
+    api_base = _extract_api_base_url(settings.get("ask_ionos_url", ""))
+    api_key = settings.get("api_key", "").strip()
+    if not api_base or not api_key:
+        raise HTTPException(status_code=422, detail="API settings missing")
+
+    try:
+        resp = requests.delete(
+            f"{api_base}/triggers/{trigger_id}",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=8,
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"API request failed: {exc}") from exc
+    if resp.status_code >= 400:
+        snippet = resp.text[:500]
+        raise HTTPException(status_code=resp.status_code, detail=f"API error: {snippet}")
+
+    data: Dict[str, Any] = resp.json() if resp.content else {}
+    if isinstance(data, dict) and data.get("ok") is False:
+        raise HTTPException(status_code=404, detail=str(data.get("error") or "trigger_not_found"))
+    return JSONResponse({"ok": True, "user_id": user_id, "trigger_id": trigger_id})
+
+
+@app.post("/api/triggers/create-manual")
+def create_manual_trigger(req: TriggerCreateManualRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name must not be empty")
+
+    settings = _load_settings_for_user(user_id)
+    api_base = _extract_api_base_url(settings.get("ask_ionos_url", ""))
+    api_key = settings.get("api_key", "").strip()
+    if not api_base or not api_key:
+        raise HTTPException(status_code=422, detail="API settings missing")
+
+    payload = {
+        "name": name,
+        "trigger_type": "manually",
+        "task_id": int(req.task_id),
+        "config": {},
+        "enabled": False,
+    }
+    try:
+        resp = requests.post(
+            f"{api_base}/triggers",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=8,
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"API request failed: {exc}") from exc
+    if resp.status_code >= 400:
+        snippet = resp.text[:500]
+        raise HTTPException(status_code=resp.status_code, detail=f"API error: {snippet}")
+
+    data: Dict[str, Any] = resp.json() if resp.content else {}
+    trigger = data.get("trigger") if isinstance(data, dict) else {}
+    return JSONResponse({"ok": True, "user_id": user_id, "trigger": trigger})
+
+
 @app.post("/api/tasks/save")
 def save_task(req: TaskSaveRequest) -> JSONResponse:
     user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
@@ -525,36 +877,266 @@ def save_task(req: TaskSaveRequest) -> JSONResponse:
     if not task_text:
         raise HTTPException(status_code=422, detail="task_text must not be empty")
 
-    path = _user_task_path(user_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    existing: Dict[str, Any] = {}
-    if path.exists():
-        try:
-            parsed = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(parsed, dict):
-                existing = parsed
-        except Exception:
-            existing = {}
-
-    tasks = existing.get("tasks")
-    if not isinstance(tasks, list):
-        tasks = []
+    existing = _load_tasks_memory_for_user(user_id)
+    tasks = existing.get("tasks") if isinstance(existing.get("tasks"), list) else []
+    next_id = max((int(t.get("id") or 0) for t in tasks), default=0) + 1
 
     task_entry = {
-        "id": len(tasks) + 1,
+        "id": next_id,
+        "title": task_text[:80],
         "text": task_text,
         "planned_steps": planned_steps,
         "planned_steps_text": _planned_steps_block(planned_steps),
         "created_at": _now_iso(),
+        "dialog": [],
+        "reruns": [],
     }
     tasks.append(task_entry)
-    payload = {
-        "version": 1,
-        "updated_at": _now_iso(),
-        "tasks": tasks,
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_tasks_memory_for_user(user_id, tasks)
     return JSONResponse({"ok": True, "user_id": user_id, "saved": task_entry})
+
+
+@app.post("/api/tasks/rename")
+def rename_task(req: TaskRenameRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    title = req.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="title must not be empty")
+
+    memory = _load_tasks_memory_for_user(user_id)
+    tasks = memory.get("tasks") if isinstance(memory.get("tasks"), list) else []
+    updated: Optional[Dict[str, Any]] = None
+    for task in tasks:
+        if int(task.get("id") or 0) == req.task_id:
+            task["title"] = title
+            updated = task
+            break
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    _write_tasks_memory_for_user(user_id, tasks)
+    return JSONResponse({"ok": True, "user_id": user_id, "task": updated})
+
+
+@app.post("/api/tasks/update")
+def update_task(req: TaskUpdateRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    memory = _load_tasks_memory_for_user(user_id)
+    tasks = memory.get("tasks") if isinstance(memory.get("tasks"), list) else []
+    updated: Optional[Dict[str, Any]] = None
+
+    clean_steps = [str(s).strip() for s in (req.planned_steps or []) if str(s).strip()]
+    clean_text = str(req.text or "").strip()
+    clean_dialog = []
+    for m in (req.dialog or []):
+        if not isinstance(m, dict):
+            continue
+        text = str(m.get("text") or "").strip()
+        if not text:
+            continue
+        role = "user" if str(m.get("role") or "").strip().lower() == "user" else "bot"
+        clean_dialog.append(
+            {
+                "role": role,
+                "text": text,
+                "timestamp": str(m.get("timestamp") or ""),
+            }
+        )
+
+    for task in tasks:
+        if int(task.get("id") or 0) != req.task_id:
+            continue
+        task["planned_steps"] = clean_steps
+        task["planned_steps_text"] = _planned_steps_block(clean_steps)
+        if clean_text:
+            task["text"] = clean_text
+        task["dialog"] = clean_dialog
+        updated = task
+        break
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    _write_tasks_memory_for_user(user_id, tasks)
+    return JSONResponse({"ok": True, "user_id": user_id, "task": updated})
+
+
+@app.post("/api/tasks/replan")
+def replan_task(req: TaskReplanRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    settings = _load_settings_for_user(user_id)
+    run_url = _agent_run_url_from_ask_url(settings.get("ask_ionos_url", ""))
+    api_key = settings.get("api_key", "").strip()
+    if not run_url:
+        raise HTTPException(status_code=422, detail="Ungültige askIonos URL.")
+
+    current_steps = [str(s).strip() for s in (req.planned_steps or []) if str(s).strip()]
+    if not current_steps:
+        raise HTTPException(status_code=422, detail="planned_steps must not be empty")
+    change_request = str(req.change_request or "").strip()
+    if not change_request:
+        raise HTTPException(status_code=422, detail="change_request must not be empty")
+
+    source_text = (
+        "AKTUELLER PLAN:\n"
+        + "\n".join(current_steps)
+        + "\n\nÄNDERUNGSWUNSCH:\n"
+        + change_request
+    )
+    instruction = (
+        "Überarbeite den Plan gemäß Änderungswunsch. "
+        "Gib ausschließlich nummerierte PLANNED STEPS zurück, eine Zeile pro Schritt. "
+        "Format strikt: 1. tool=<toolname> args=<json>. "
+        "Kein Fließtext, keine Einleitung, keine Codeblöcke."
+    )
+
+    headers: Dict[str, str] = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    payload = {
+        "steps": [
+            {
+                "tool": "llm_compose",
+                "args": {
+                    "text": source_text,
+                    "instruction": instruction,
+                    "goal": "Aktualisiere nur die geplanten Schritte",
+                    "max_chars": 2200,
+                },
+            }
+        ]
+    }
+
+    try:
+        resp = requests.post(run_url, headers=headers, json=payload, timeout=90)
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"API request failed: {exc}") from exc
+
+    if resp.status_code >= 400:
+        snippet = resp.text[:500]
+        raise HTTPException(status_code=resp.status_code, detail=f"API error: {snippet}")
+
+    data: Dict[str, Any] = resp.json() if resp.content else {}
+    outputs = data.get("outputs")
+    raw_text = ""
+    if isinstance(outputs, list) and outputs:
+        payload0 = outputs[0].get("payload") if isinstance(outputs[0], dict) else {}
+        if isinstance(payload0, dict):
+            val = payload0.get("composed_text") or payload0.get("text")
+            if isinstance(val, str):
+                raw_text = val.strip()
+
+    if not raw_text:
+        raise HTTPException(status_code=422, detail="Replanning returned no text")
+
+    planned_steps: List[str] = []
+    for line in raw_text.splitlines():
+        trimmed = line.strip()
+        if re.match(r"^\d+\.\s*tool=.+\s+args=.+$", trimmed):
+            planned_steps.append(trimmed)
+
+    if not planned_steps:
+        raise HTTPException(status_code=422, detail="Replanning returned no valid planned steps")
+
+    return JSONResponse({"ok": True, "planned_steps": planned_steps, "raw_text": raw_text})
+
+
+@app.post("/api/tasks/delete")
+def delete_task(req: TaskDeleteRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    memory = _load_tasks_memory_for_user(user_id)
+    tasks = memory.get("tasks") if isinstance(memory.get("tasks"), list) else []
+    kept: List[Dict[str, Any]] = []
+    deleted = False
+    for task in tasks:
+        if int(task.get("id") or 0) == req.task_id:
+            deleted = True
+            continue
+        kept.append(task)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    _write_tasks_memory_for_user(user_id, kept)
+    return JSONResponse({"ok": True, "user_id": user_id, "task_id": req.task_id})
+
+
+@app.post("/api/tasks/rerun")
+def rerun_task(req: TaskRerunRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    settings = _load_settings_for_user(user_id)
+    ask_url = settings.get("ask_ionos_url", "").strip()
+    run_url = _agent_run_url_from_ask_url(ask_url)
+    api_key = settings.get("api_key", "").strip()
+    if not run_url:
+        raise HTTPException(status_code=422, detail="Ungültige askIonos URL.")
+
+    clean_steps = [str(s).strip() for s in (req.planned_steps or []) if str(s).strip()]
+    if not clean_steps:
+        raise HTTPException(status_code=422, detail="planned_steps must not be empty")
+    explicit_steps = _parse_planned_steps_lines(clean_steps)
+    if not explicit_steps:
+        raise HTTPException(status_code=422, detail="planned_steps contain no executable steps")
+
+    headers: Dict[str, str] = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    try:
+        resp = requests.post(run_url, headers=headers, json={"steps": explicit_steps}, timeout=180)
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"API request failed: {exc}") from exc
+
+    if resp.status_code >= 400:
+        snippet = resp.text[:500]
+        raise HTTPException(status_code=resp.status_code, detail=f"API error: {snippet}")
+
+    data: Dict[str, Any] = resp.json() if resp.content else {}
+    answer = _extract_rerun_answer(data)
+
+    memory = _load_tasks_memory_for_user(user_id)
+    tasks = memory.get("tasks") if isinstance(memory.get("tasks"), list) else []
+    updated: Optional[Dict[str, Any]] = None
+    for task in tasks:
+        if int(task.get("id") or 0) != req.task_id:
+            continue
+        reruns = task.get("reruns")
+        if not isinstance(reruns, list):
+            reruns = []
+        reruns.append({"answer": str(answer or "").strip(), "created_at": _now_iso()})
+        task["reruns"] = reruns
+        updated = task
+        break
+
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    _write_tasks_memory_for_user(user_id, tasks)
+    return JSONResponse({"ok": True, "answer": answer, "raw": data, "task": updated})
+
+
+@app.post("/api/tasks/rerun/delete")
+def delete_task_rerun(req: TaskRerunDeleteRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    memory = _load_tasks_memory_for_user(user_id)
+    tasks = memory.get("tasks") if isinstance(memory.get("tasks"), list) else []
+    updated: Optional[Dict[str, Any]] = None
+    for task in tasks:
+        if int(task.get("id") or 0) != req.task_id:
+            continue
+        reruns = task.get("reruns")
+        if not isinstance(reruns, list):
+            raise HTTPException(status_code=404, detail="Rerun not found")
+        if req.rerun_index < 0 or req.rerun_index >= len(reruns):
+            raise HTTPException(status_code=404, detail="Rerun not found")
+        reruns.pop(req.rerun_index)
+        task["reruns"] = reruns
+        updated = task
+        break
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    _write_tasks_memory_for_user(user_id, tasks)
+    return JSONResponse({"ok": True, "user_id": user_id, "task": updated})
 
 
 if __name__ == "__main__":

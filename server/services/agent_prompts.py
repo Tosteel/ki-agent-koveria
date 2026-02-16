@@ -36,6 +36,11 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
                 "Nutze ausschließlich die Tool-Outputs. Erfinde nichts.\n"
                 "Priorität: Richte die Antwort primär nach dem LETZTEN erfolgreichen Tool-Schritt aus.\n"
                 "Wiederhole keine veralteten Inhalte aus früheren Schritten, wenn sie nicht im letzten Schritt enthalten sind.\n"
+                "Wenn send_mail oder answer_mail in den Tool-Outputs vorkommt: "
+                "nenne IMMER den tatsächlichen Versandstatus aus den Outputs "
+                "(gesendet vs. fehlgeschlagen) und formuliere das als Ergebnis, nicht als Entwurf.\n"
+                "Wenn ein Mail-Schritt fehlgeschlagen ist, darfst du NICHT so formulieren, als wäre die Mail versendet worden.\n"
+                "Wenn ein Mail-Schritt erfolgreich war, bestätige knapp den Versand (inkl. Empfänger/Betreff, falls vorhanden).\n"
                 "Wenn Daten fehlen: benenne das klar.\n"
             ),
             "clarification_system": (
@@ -68,6 +73,10 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
                 "You are an assistant. Answer succinctly using tool outputs only. "
                 "Priority: base the response primarily on the LAST successful tool step. "
                 "Do not repeat stale details from earlier steps unless they are present in the last step. "
+                "If send_mail or answer_mail appears in tool outputs, always report the actual delivery status "
+                "(sent vs failed) from outputs, as an execution result, not as a draft. "
+                "If a mail step failed, do not phrase it as if it was sent. "
+                "If a mail step succeeded, confirm sending briefly (include recipient/subject if available). "
                 "If data is missing, state that clearly."
             ),
             "clarification_system": (

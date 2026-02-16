@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "updated_at": "2026-02-15T11:45:52Z",
+  "chats": [
+    {
+      "id": 4,
+      "title": "python client/gui_web.py fsdgffgfdg",
+      "messages": [
+        {
+          "role": "bot",
+          "text": "Hallo! Wie kann ich Ihnen heute helfen?",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "timestamp": "2026-02-15T11:43:16.083Z"
+        },
+        {
+          "role": "user",
+          "text": "suche in meinem Wissen nach Preise für Deckenabhängungen. Sende den Preis per PDF an tobias_stahl@outlook.de",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "timestamp": "2026-02-15T11:45:43.097Z"
+        },
+        {
+          "role": "bot",
+          "text": "Ich habe nach Preisen für Deckenabhängungen in meinem Wissen gesucht, aber leider keine Ergebnisse gefunden. Die Anfrage, den Preis per PDF an tobias_stahl@outlook.de zu senden, konnte nicht ausgeführt werden, da der Pfad für die PDF-Datei fehlt.",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "timestamp": "2026-02-15T11:45:52.085Z"
+        }
+      ],
+      "created_at": "2026-02-15T11:43:16.083Z",
+      "updated_at": "2026-02-15T11:45:52.085Z"
+    }
+  ],
+  "active_chat_id": 4
+}

@@ -2,16 +2,20 @@
 from __future__ import annotations
 
 import json
-from fastapi import FastAPI, Depends
-from typing import Any, Dict
+from datetime import datetime, timezone
+from fastapi import FastAPI, Depends, HTTPException
+from typing import Any, Dict, List, Optional
+from uuid import uuid4
+from pathlib import Path
 
 from .core.logging import setup_logging
-from .core.settings import Settings
+from .core.settings import Settings, get_settings
 from .core.models import (
     AgentRunRequest, AgentRunResponse,
     AgentAskRequest, AgentAskResponse,
 )
 from .deps import get_current_user, settings as dep_settings
+from .auth import get_token_for_user
 
 from .tools.rag_knowledgebase.models import RagQueryRequest
 from .tools.filesystem.models import FileReadRequest, FileReadResponse, FileWriteRequest, FileWriteResponse
@@ -26,14 +30,126 @@ from .tools.pdf import export_text_pdf
 from .tools.powerpoint import export_text_pptx
 from .tools.mail import send_mail
 from .tools.loader import register_all_tools
+from .triggers import TriggerRegistry, TriggerRuntime, register_all_triggers
+from .triggers.store import load_user_triggers, save_user_triggers
 
 from .agent.tool_registry import ToolRegistry, ToolContext
 from .agent.orchestrator import Orchestrator
+from pydantic import BaseModel, Field
 
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 security = HTTPBearer(auto_error=False)
 
 app = FastAPI(title="ki-agent-koveria", version="0.1.0")
+
+
+class TriggerCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+    trigger_type: str = Field(..., min_length=1)
+    task_id: int = Field(..., ge=1)
+    config: Dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = True
+
+
+class TriggerUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    task_id: Optional[int] = Field(default=None, ge=1)
+    config: Optional[Dict[str, Any]] = None
+    enabled: Optional[bool] = None
+
+
+class TaskMemorySyncRequest(BaseModel):
+    tasks: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _user_tasks_memory_path(s: Settings, user_id: str) -> Path:
+    return s.user_dir(user_id) / "tasks_memory.json"
+
+
+def _normalize_tasks_payload(raw: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    tasks: List[Dict[str, Any]] = []
+    for t in raw:
+        if not isinstance(t, dict):
+            continue
+        task_id = int(t.get("id") or 0)
+        text = str(t.get("text") or "").strip()
+        if task_id <= 0 or not text:
+            continue
+        reruns_raw = t.get("reruns")
+        reruns: List[Dict[str, Any]] = []
+        if isinstance(reruns_raw, list):
+            for r in reruns_raw:
+                if not isinstance(r, dict):
+                    continue
+                answer = str(r.get("answer") or "").strip()
+                if not answer:
+                    continue
+                reruns.append(
+                    {
+                        "answer": answer,
+                        "created_at": str(r.get("created_at") or ""),
+                    }
+                )
+        dialog_raw = t.get("dialog")
+        dialog: List[Dict[str, Any]] = []
+        if isinstance(dialog_raw, list):
+            for m in dialog_raw:
+                if not isinstance(m, dict):
+                    continue
+                msg_text = str(m.get("text") or "").strip()
+                if not msg_text:
+                    continue
+                dialog.append(
+                    {
+                        "role": "user" if str(m.get("role") or "").strip().lower() == "user" else "bot",
+                        "text": msg_text,
+                        "timestamp": str(m.get("timestamp") or ""),
+                    }
+                )
+        tasks.append(
+            {
+                "id": task_id,
+                "title": str(t.get("title") or "").strip(),
+                "text": text,
+                "planned_steps": [str(s).strip() for s in (t.get("planned_steps") or []) if str(s).strip()],
+                "planned_steps_text": str(t.get("planned_steps_text") or "").strip(),
+                "created_at": str(t.get("created_at") or ""),
+                "dialog": dialog,
+                "reruns": reruns,
+            }
+        )
+    return tasks
+
+
+def _load_tasks_memory_for_user(s: Settings, user_id: str) -> Dict[str, Any]:
+    path = _user_tasks_memory_path(s, user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        return {"tasks": []}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"tasks": []}
+    if not isinstance(data, dict):
+        return {"tasks": []}
+    return {"tasks": _normalize_tasks_payload(data.get("tasks"))}
+
+
+def _save_tasks_memory_for_user(s: Settings, user_id: str, tasks: List[Dict[str, Any]]) -> None:
+    path = _user_tasks_memory_path(s, user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": 1,
+        "updated_at": _now_iso(),
+        "tasks": _normalize_tasks_payload(tasks),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _first_nonempty_str(*values: Any) -> str:
@@ -393,6 +509,18 @@ load_dotenv()
 @app.on_event("startup")
 def _startup() -> None:
     setup_logging()
+    s = get_settings()
+    trigger_registry = _build_trigger_registry()
+    runtime = TriggerRuntime(settings=s, registry=trigger_registry, step_executor=_execute_steps_for_trigger, poll_seconds=1.0)
+    runtime.start()
+    app.state.trigger_runtime = runtime
+
+
+@app.on_event("shutdown")
+def _shutdown() -> None:
+    runtime = getattr(app.state, "trigger_runtime", None)
+    if runtime is not None:
+        runtime.stop()
 
 def _ensure_user_dirs(s: Settings, user_id: str) -> None:
     s.user_work_dir(user_id).mkdir(parents=True, exist_ok=True)
@@ -408,6 +536,151 @@ def health(user_id: str = Depends(get_current_user)) -> Dict[str, str]:
 @app.get("/user")
 def user(user_id: str = Depends(get_current_user)) -> Dict[str, str]:
     return {"user_id": user_id}
+
+
+@app.get("/tasks/memory")
+def get_tasks_memory(
+    user_id: str = Depends(get_current_user),
+    s: Settings = Depends(dep_settings),
+) -> Dict[str, Any]:
+    _ensure_user_dirs(s, user_id)
+    memory = _load_tasks_memory_for_user(s, user_id)
+    return {"user_id": user_id, **memory}
+
+
+@app.post("/tasks/memory/sync")
+def sync_tasks_memory(
+    req: TaskMemorySyncRequest,
+    user_id: str = Depends(get_current_user),
+    s: Settings = Depends(dep_settings),
+) -> Dict[str, Any]:
+    _ensure_user_dirs(s, user_id)
+    tasks = _normalize_tasks_payload(req.tasks)
+    _save_tasks_memory_for_user(s, user_id, tasks)
+    return {"ok": True, "user_id": user_id, "count": len(tasks)}
+
+
+def _get_trigger_runtime() -> TriggerRuntime:
+    runtime = getattr(app.state, "trigger_runtime", None)
+    if runtime is None:
+        raise RuntimeError("trigger runtime not initialized")
+    return runtime
+
+
+@app.get("/triggers/types")
+def trigger_types() -> Dict[str, Any]:
+    reg = _build_trigger_registry()
+    return {"types": reg.available_types()}
+
+
+@app.get("/triggers")
+def list_triggers(
+    user_id: str = Depends(get_current_user),
+    s: Settings = Depends(dep_settings),
+) -> Dict[str, Any]:
+    _ensure_user_dirs(s, user_id)
+    payload = load_user_triggers(s, user_id)
+    triggers = payload.get("triggers") if isinstance(payload.get("triggers"), list) else []
+    return {"user_id": user_id, "triggers": triggers}
+
+
+@app.post("/triggers")
+def create_trigger(
+    req: TriggerCreateRequest,
+    user_id: str = Depends(get_current_user),
+    s: Settings = Depends(dep_settings),
+) -> Dict[str, Any]:
+    _ensure_user_dirs(s, user_id)
+    reg = _build_trigger_registry()
+    # validate trigger type + config upfront
+    reg.create_instance(req.trigger_type.strip(), req.config or {})
+
+    payload = load_user_triggers(s, user_id)
+    triggers = payload.get("triggers") if isinstance(payload.get("triggers"), list) else []
+    trigger_id = str(uuid4())
+    item = {
+        "id": trigger_id,
+        "name": req.name.strip(),
+        "trigger_type": req.trigger_type.strip(),
+        "task_id": int(req.task_id),
+        "config": req.config or {},
+        "enabled": bool(req.enabled),
+        "created_at": _now_iso(),
+        "last_fired_at": "",
+        "last_error": "",
+    }
+    triggers.append(item)
+    save_user_triggers(s, user_id, triggers)
+    return {"ok": True, "trigger": item}
+
+
+@app.patch("/triggers/{trigger_id}")
+def update_trigger(
+    trigger_id: str,
+    req: TriggerUpdateRequest,
+    user_id: str = Depends(get_current_user),
+    s: Settings = Depends(dep_settings),
+) -> Dict[str, Any]:
+    _ensure_user_dirs(s, user_id)
+    payload = load_user_triggers(s, user_id)
+    triggers = payload.get("triggers") if isinstance(payload.get("triggers"), list) else []
+    updated: Optional[Dict[str, Any]] = None
+    for t in triggers:
+        if str(t.get("id") or "") != trigger_id:
+            continue
+        if req.name is not None:
+            t["name"] = req.name.strip()
+        if req.task_id is not None:
+            t["task_id"] = int(req.task_id)
+        if req.config is not None:
+            # validate config for this trigger type
+            reg = _build_trigger_registry()
+            reg.create_instance(str(t.get("trigger_type") or ""), req.config or {})
+            t["config"] = req.config or {}
+        if req.enabled is not None:
+            t["enabled"] = bool(req.enabled)
+        updated = t
+        break
+    if updated is None:
+        return {"ok": False, "error": "trigger_not_found"}
+
+    save_user_triggers(s, user_id, triggers)
+    return {"ok": True, "trigger": updated}
+
+
+@app.delete("/triggers/{trigger_id}")
+def delete_trigger(
+    trigger_id: str,
+    user_id: str = Depends(get_current_user),
+    s: Settings = Depends(dep_settings),
+) -> Dict[str, Any]:
+    _ensure_user_dirs(s, user_id)
+    payload = load_user_triggers(s, user_id)
+    triggers = payload.get("triggers") if isinstance(payload.get("triggers"), list) else []
+    kept: List[Dict[str, Any]] = []
+    deleted = False
+    for t in triggers:
+        if str(t.get("id") or "") == trigger_id:
+            deleted = True
+            continue
+        kept.append(t)
+    if not deleted:
+        return {"ok": False, "error": "trigger_not_found"}
+    save_user_triggers(s, user_id, kept)
+    return {"ok": True, "trigger_id": trigger_id}
+
+
+@app.post("/triggers/{trigger_id}/run-now")
+def run_trigger_now(
+    trigger_id: str,
+    user_id: str = Depends(get_current_user),
+) -> Dict[str, Any]:
+    runtime = _get_trigger_runtime()
+    try:
+        result = runtime.run_trigger_now(user_id=user_id, trigger_id=trigger_id)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": bool(result.get("ok")), "result": result}
 
 
 # ----------------------------- Phase 1: Direct APIs -----------------------------
@@ -531,6 +804,21 @@ def mail_send(
 def _build_registry() -> ToolRegistry:
     registry = ToolRegistry()
     return register_all_tools(registry)
+
+
+def _build_trigger_registry() -> TriggerRegistry:
+    registry = TriggerRegistry()
+    return register_all_triggers(registry)
+
+
+def _execute_steps_for_trigger(user_id: str, steps: List[Dict[str, Any]], goal: str) -> List[Dict[str, Any]]:
+    s = get_settings()
+    _ensure_user_dirs(s, user_id)
+    registry = _build_registry()
+    orch = Orchestrator(registry)
+    token = get_token_for_user(user_id)
+    ctx = ToolContext(user_id=user_id, settings=s, api_key=token, goal=goal)
+    return orch.run_steps(ctx, steps)
 
 
 

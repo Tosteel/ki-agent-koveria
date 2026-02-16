@@ -16,6 +16,13 @@ API_KEYS = {
     "1923bf64-4b64-436b-808a-c538a7a0f0da": "user10",
 }
 
+
+def get_token_for_user(user_id: str) -> str:
+    for token, uid in API_KEYS.items():
+        if uid == user_id:
+            return token
+    return ""
+
 security = HTTPBearer(auto_error=False)
 
 def get_current_user(
