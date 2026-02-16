@@ -13,6 +13,8 @@ from .core.settings import Settings, get_settings
 from .core.models import (
     AgentRunRequest, AgentRunResponse,
     AgentAskRequest, AgentAskResponse,
+    AgentPlanRequest,
+    AgentPlanResponse,
 )
 from .deps import get_current_user, settings as dep_settings
 from .auth import get_token_for_user
@@ -53,6 +55,7 @@ class TriggerCreateRequest(BaseModel):
 
 class TriggerUpdateRequest(BaseModel):
     name: Optional[str] = None
+    trigger_type: Optional[str] = None
     task_id: Optional[int] = Field(default=None, ge=1)
     config: Optional[Dict[str, Any]] = None
     enabled: Optional[bool] = None
@@ -109,6 +112,17 @@ def _normalize_tasks_payload(raw: Any) -> List[Dict[str, Any]]:
                     {
                         "role": "user" if str(m.get("role") or "").strip().lower() == "user" else "bot",
                         "text": msg_text,
+                        "plannedSteps": [str(s).strip() for s in (m.get("plannedSteps") or []) if str(s).strip()],
+                        "options": [
+                            {
+                                "type": str(o.get("type") or "").strip(),
+                                "taskId": int(o.get("taskId") or 0),
+                                "created": str(o.get("created") or "").strip(),
+                                "plannedSteps": [str(s).strip() for s in (o.get("plannedSteps") or []) if str(s).strip()],
+                            }
+                            for o in (m.get("options") or [])
+                            if isinstance(o, dict) and str(o.get("type") or "").strip()
+                        ],
                         "timestamp": str(m.get("timestamp") or ""),
                     }
                 )
@@ -375,6 +389,26 @@ def _compact_tool_outputs(tool_outputs: list[Dict[str, Any]]) -> list[Dict[str, 
     return compact
 
 
+def _sanitize_execution_steps(steps: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    out: list[Dict[str, Any]] = []
+    for st in steps:
+        if not isinstance(st, dict):
+            continue
+        tool = str(st.get("tool") or "").strip()
+        args = st.get("args") if isinstance(st.get("args"), dict) else {}
+        args_out = dict(args)
+        if tool == "pdf_export":
+            output_path = str(args_out.get("output_path") or "").strip()
+            if not output_path.lower().endswith(".pdf"):
+                args_out["output_path"] = "result.pdf"
+        elif tool == "ppt_export":
+            output_path = str(args_out.get("output_path") or "").strip()
+            if not output_path.lower().endswith(".pptx"):
+                args_out["output_path"] = "result.pptx"
+        out.append({"tool": tool, "args": args_out})
+    return out
+
+
 def _outputs_for_final_answer(tool_outputs: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
     """
     Build a token-lean view for final_answer prompts.
@@ -414,6 +448,20 @@ def _outputs_for_final_answer(tool_outputs: list[Dict[str, Any]]) -> list[Dict[s
             item["error"] = o.get("error")
         lean.append(item)
     return lean
+
+
+def _extract_execution_answer(tool_outputs: list[Dict[str, Any]]) -> str:
+    for out in reversed(tool_outputs):
+        if not isinstance(out, dict) or not out.get("ok"):
+            continue
+        payload = out.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        for key in ("composed_text", "text", "summary", "answer", "message"):
+            val = payload.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+    return "Ausführung abgeschlossen."
 
 
 def _run_clarification_gate(llm: Any, goal: str) -> Dict[str, Any]:
@@ -632,6 +680,13 @@ def update_trigger(
             t["name"] = req.name.strip()
         if req.task_id is not None:
             t["task_id"] = int(req.task_id)
+        if req.trigger_type is not None:
+            trigger_type = req.trigger_type.strip()
+            reg = _build_trigger_registry()
+            cfg_to_validate = req.config if req.config is not None else (t.get("config") if isinstance(t.get("config"), dict) else {})
+            reg.create_instance(trigger_type, cfg_to_validate or {})
+            t["trigger_type"] = trigger_type
+            t["config"] = cfg_to_validate or {}
         if req.config is not None:
             # validate config for this trigger type
             reg = _build_trigger_registry()
@@ -844,9 +899,65 @@ def agent_run(
     if not req.steps:
         raise HTTPException(status_code=422, detail="steps must not be empty for /agent/run")
 
-    tool_outputs = orch.run_steps(ctx, [step.model_dump() for step in req.steps])
+    steps = _sanitize_execution_steps([step.model_dump() for step in req.steps])
+
+    log_label = (req.log_label or "").strip() or "PLANNED STEPS"
+    print(f"\n===== {log_label} =====")
+    for i, step in enumerate(steps, 1):
+        print(f"{i}. tool={step.get('tool')} args={step.get('args')}")
+    print("=========================\n")
+
+    tool_outputs = orch.run_steps(ctx, steps)
     ok = all(o.get("ok") for o in tool_outputs) if tool_outputs else True
+
+    answer = _extract_execution_answer(tool_outputs)
+    print("\n===== FINAL ANSWER =====")
+    print(answer)
+    print("========================\n")
+
     return AgentRunResponse(ok=ok, outputs=_compact_tool_outputs(tool_outputs))
+
+
+@app.post("/agent/plan", response_model=AgentPlanResponse)
+def agent_plan(
+    req: AgentPlanRequest,
+    user_id: str = Depends(get_current_user),
+    s: Settings = Depends(dep_settings),
+) -> AgentPlanResponse:
+    _ensure_user_dirs(s, user_id)
+
+    registry = _build_registry()
+    llm = IonosLLM()
+    # /agent/plan: Keine Clarification. Replan nutzt goal + bestehende planned_steps.
+    effective_goal = req.goal
+    additional_props = req.additional_props if isinstance(req.additional_props, dict) else {}
+    raw_steps = additional_props.get("planned_steps")
+    existing_steps = [str(s).strip() for s in (raw_steps or []) if str(s).strip()]
+    if existing_steps:
+        effective_goal = (
+            f"{req.goal}\n\n"
+            "Bestehende PLANNED STEPS (als Grundlage verwenden):\n"
+            + "\n".join(existing_steps)
+        )
+    planner = Planner(llm, registry)
+    steps = planner.create_steps(goal=effective_goal)
+    steps = _inject_llm_summary_before_pdf(steps, effective_goal)
+
+    print("\n===== PLANNED STEPS =====")
+    for i, step in enumerate(steps, 1):
+        print(f"{i}. tool={step.get('tool')} args={step.get('args')}")
+    print("=========================\n")
+
+    return AgentPlanResponse(
+        ok=True,
+        goal=req.goal,
+        normalized_goal=effective_goal,
+        status="ready",
+        steps=steps,
+        requires_user_input=False,
+        missing_fields=[],
+        questions=[],
+    )
 
 @app.post("/agent/askOpenAI", response_model=AgentAskResponse)
 def agent_askOpenAI(

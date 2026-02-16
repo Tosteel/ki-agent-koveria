@@ -6,16 +6,17 @@
   <title>Koveria Chat</title>
   <style>
     :root {
-      --bg: #f1f4fb;
+      --bg: #eef3fb;
       --panel: #ffffff;
-      --line: #dce3f4;
+      --line: #d7e1f2;
       --primary: #2f6de0;
       --primary-deep: #1b3ea8;
-      --primary-soft: #6ea7ff;
-      --text: #2b416b;
-      --muted: #8296bf;
+      --primary-soft: #7badff;
+      --text: #223a63;
+      --muted: #6f87b2;
       --bubble: #edf2fc;
-      --shadow: 0 18px 42px rgba(40, 76, 158, 0.20);
+      --shadow: 0 22px 54px rgba(35, 73, 148, 0.16);
+      --surface-soft: #f5f8ff;
     }
 
     * { box-sizing: border-box; }
@@ -23,9 +24,9 @@
     body {
       margin: 0;
       min-height: 100vh;
-      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      font-family: "Manrope", "Plus Jakarta Sans", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
       color: var(--text);
-      background: radial-gradient(circle at 15% 10%, #f7f9ff 0%, #edf2fb 35%, #e9eef8 100%);
+      background: #eef3fb;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -45,7 +46,7 @@
     }
 
     .sidebar {
-      background: #fff;
+      background: #ffffff;
       color: #2b416b;
       display: flex;
       flex-direction: column;
@@ -57,28 +58,41 @@
     }
 
     .brand {
-      display: block;
-      padding: 18px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 70px;
+      padding: 0 16px;
       border-bottom: 1px solid var(--line);
     }
 
     .brand img {
-      width: min(180px, 100%);
+      width: min(150px, 100%);
       height: auto;
       display: block;
     }
 
     .sidebar .search {
       margin: 14px 12px;
-      background: #f7faff;
-      border: 1px solid #d7e2f9;
-      border-radius: 8px;
-      height: 34px;
+      background-color: #f4f8ff;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238ea4ca' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: 11px center;
+      border: 1px solid #d8e5fb;
+      border-radius: 999px;
+      height: 36px;
       color: #38527f;
-      padding: 0 10px;
+      padding: 0 12px 0 32px;
+      transition: border-color 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
     }
 
     .sidebar .search::placeholder { color: #8ba0c7; }
+    .sidebar .search:focus {
+      outline: none;
+      border-color: #a8c3f6;
+      box-shadow: 0 0 0 3px rgba(74, 131, 236, 0.14);
+      background-color: #ffffff;
+    }
 
     .sidebar-modes {
       margin: 12px 12px 0;
@@ -87,17 +101,31 @@
     }
 
     .mode-btn {
-      width: 34px;
-      height: 34px;
-      border-radius: 8px;
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
       border: 1px solid #d7e2f9;
       background: #f7faff;
       color: #4d6fae;
       cursor: pointer;
       display: grid;
       place-items: center;
-      font-size: 17px;
-      line-height: 1;
+      line-height: 0;
+      transition: transform 0.16s ease, border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease;
+    }
+    .mode-btn svg {
+      width: 17px;
+      height: 17px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.9;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .mode-btn:hover {
+      transform: translateY(-1px);
+      border-color: #c0d3f7;
     }
 
     .mode-btn.active {
@@ -124,11 +152,11 @@
       max-width: 100%;
       height: 38px;
       padding: 0 8px;
-      border-radius: 8px;
+      border-radius: 10px;
       font-size: 14px;
       color: #38527f;
       background: #fff;
-      border: 1px solid #d9e4fb;
+      border: 1px solid #dce7fb;
       cursor: pointer;
       user-select: none;
       display: flex;
@@ -136,11 +164,29 @@
       gap: 8px;
       overflow: hidden;
       min-width: 0;
+      transition: background-color 0.16s ease, border-color 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
+      position: relative;
     }
 
     .item.active {
       background: #edf3ff;
-      border-color: #b5cbf5;
+      border-color: #b8cef6;
+      box-shadow: 0 8px 16px rgba(57, 103, 192, 0.10);
+    }
+    .item.active::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 7px;
+      bottom: 7px;
+      width: 3px;
+      border-radius: 3px;
+      background: linear-gradient(180deg, #5d95ff 0%, #2f6de0 100%);
+    }
+    .item:hover {
+      transform: translateY(-1px);
+      border-color: #c4d7f7;
+      background: #f4f8ff;
     }
 
     .item-label {
@@ -181,14 +227,20 @@
 
     .new-chat {
       margin: auto 12px 14px;
-      background: linear-gradient(90deg, rgba(57, 135, 255, 0.9), rgba(113, 169, 255, 0.95));
+      background: #2f6de0;
       color: #fff;
       border: 1px solid rgba(255, 255, 255, 0.35);
-      border-radius: 9px;
+      border-radius: 11px;
       height: 42px;
       font-size: 24px;
       line-height: 0;
       cursor: pointer;
+      box-shadow: 0 10px 20px rgba(56, 111, 220, 0.20);
+      transition: transform 0.16s ease, filter 0.16s ease;
+    }
+    .new-chat:hover {
+      transform: translateY(-1px);
+      filter: brightness(1.04);
     }
 
     .sidebar-sync-status {
@@ -211,8 +263,8 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 20px 0 24px;
-      background: linear-gradient(180deg, #fcfdff 0%, #f9fbff 100%);
+      padding: 0 24px;
+      background: #fcfdff;
     }
 
     .topbar-left {
@@ -224,10 +276,10 @@
 
     .topbar h1 {
       margin: 0;
-      font-size: 16px;
-      font-weight: 700;
+      font-size: 17px;
+      font-weight: 800;
       color: #223f71;
-      letter-spacing: 0.3px;
+      letter-spacing: 0.2px;
     }
 
     .topbar h1.title-editable {
@@ -242,10 +294,18 @@
       border-radius: 8px;
       width: 34px;
       height: 34px;
-      font-size: 20px;
-      line-height: 1;
+      line-height: 0;
       cursor: pointer;
       padding: 0;
+    }
+    .mobile-sidebar-toggle svg {
+      width: 16px;
+      height: 16px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
 
     .actions button {
@@ -277,9 +337,9 @@
       overflow-y: auto;
       overflow-x: hidden;
       min-height: 0;
-      padding: 20px 24px;
+      padding: 22px 24px;
       display: grid;
-      gap: 14px;
+      gap: 12px;
       align-content: start;
       background: #fbfcff;
     }
@@ -321,17 +381,19 @@
     .avatar img { width: 100%; height: 100%; object-fit: cover; }
 
     .bubble {
-      max-width: min(760px, calc(100% - 46px));
-      padding: 14px 16px;
-      border-radius: 12px;
-      background: var(--bubble);
+      max-width: min(720px, calc(100% - 46px));
+      padding: 13px 15px;
+      border-radius: 14px;
+      background: #ddebff;
       color: #2a4371;
       font-size: 16px;
-      line-height: 1.38;
-      border: 1px solid #e4ebfb;
+      line-height: 1.45;
+      border: 1px solid #cfe0fb;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
       position: relative;
+      box-shadow: 0 8px 18px rgba(48, 94, 182, 0.08);
+      animation: bubbleIn 180ms ease;
     }
 
     .message-delete {
@@ -366,11 +428,12 @@
     }
 
     .msg-time {
-      margin-top: 6px;
       font-size: 11px;
       color: #9aa8c4;
-      text-align: right;
       line-height: 1.2;
+      margin-left: auto;
+      text-align: right;
+      white-space: nowrap;
     }
 
     .message-options {
@@ -379,24 +442,33 @@
       border-top: 1px solid #e0e8fb;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
       flex-wrap: wrap;
+    }
+
+    .message-options.only-time {
+      margin-top: 6px;
+      padding-top: 0;
+      border-top: 0;
     }
 
     .option-btn {
       border: 0;
       background: transparent;
       color: #7c879f;
-      font-size: 12px;
+      font-size: 11px;
+      font-weight: 700;
       display: inline-flex;
       align-items: center;
       gap: 4px;
       cursor: pointer;
       padding: 2px 0;
+      transition: color 0.16s ease, transform 0.16s ease;
     }
 
     .option-btn:hover {
       color: #5f6c86;
+      transform: translateY(-1px);
     }
 
     .option-btn[disabled] {
@@ -423,7 +495,11 @@
 
     .user .bubble {
       background: #eef3fd;
-      border-color: #e0e8fb;
+      border-color: #e4ebfb;
+      border-radius: 14px 14px 10px 14px;
+    }
+    .row:not(.user) .bubble {
+      border-radius: 14px 14px 14px 10px;
     }
 
     .composer {
@@ -432,7 +508,7 @@
       display: flex;
       align-items: center;
       gap: 12px;
-      background: linear-gradient(180deg, #f8faff 0%, #f3f6fd 100%);
+      background: #f8fbff;
     }
 
     .composer input {
@@ -440,7 +516,7 @@
       min-width: 0;
       border: 1px solid #d8e1f6;
       background: #fff;
-      border-radius: 10px;
+      border-radius: 12px;
       padding: 12px 14px;
       font-size: 16px;
       outline: none;
@@ -453,8 +529,8 @@
       width: 50px;
       height: 50px;
       border: 0;
-      border-radius: 11px;
-      background: linear-gradient(145deg, #4b88ef, #2f6de0);
+      border-radius: 12px;
+      background: #2f6de0;
       color: white;
       font-size: 26px;
       cursor: pointer;
@@ -467,16 +543,30 @@
       width: 50px;
       height: 50px;
       border: 0;
-      border-radius: 11px;
-      background: linear-gradient(145deg, #4b88ef, #2f6de0);
+      border-radius: 12px;
+      background: #2f6de0;
       color: #ffffff;
-      font-size: 24px;
+      font-size: 0;
       cursor: pointer;
       box-shadow: 0 8px 18px rgba(51, 111, 231, 0.35);
+    }
+    .task-btn svg {
+      width: 22px;
+      height: 22px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.9;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
 
     .task-btn:hover {
       filter: brightness(1.05);
+    }
+
+    @keyframes bubbleIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
     .task-btn:disabled { opacity: 0.6; cursor: not-allowed; }
@@ -543,7 +633,7 @@
 
     .btn.primary {
       border: 1px solid #2f6de0;
-      background: linear-gradient(145deg, #4b88ef, #2f6de0);
+      background: #2f6de0;
       color: #fff;
     }
 
@@ -590,11 +680,31 @@
         <img src="/assets/logo.png" alt="Koveria" />
       </div>
       <div class="sidebar-modes">
-        <button class="mode-btn active" id="modeChatsBtn" title="Chats">💬</button>
-        <button class="mode-btn" id="modeTasksBtn" title="Aufgaben">📋</button>
-        <button class="mode-btn" id="modeTriggersBtn" title="Trigger">🕒</button>
+        <button class="mode-btn active" id="modeChatsBtn" title="Chats" aria-label="Chats">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 5.5h11a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H9.5L6 18v-2.5H4a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z"/>
+            <path d="M19.5 8.5h.5a2 2 0 0 1 2 2v4.5a2 2 0 0 1-2 2h-1.5V19l-2.5-2H15"/>
+          </svg>
+        </button>
+        <button class="mode-btn" id="modeTasksBtn" title="Aufgaben" aria-label="Aufgaben">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="5.5" y="4.5" width="13" height="15" rx="2"/>
+            <path d="M9 2.5h6v4H9z"/>
+            <path d="M8.2 11.8l1.3 1.3 2.1-2.1"/>
+            <path d="M13 13h3.5"/>
+            <path d="M8.2 15.8l1.3 1.3 2.1-2.1"/>
+            <path d="M13 17h3.5"/>
+          </svg>
+        </button>
+        <button class="mode-btn" id="modeTriggersBtn" title="Trigger" aria-label="Trigger">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="8"/>
+            <path d="M12 7.5v5l3 2.2"/>
+            <path d="M12 3.5v1.5M20.5 12h-1.5M12 20.5V19M3.5 12H5"/>
+          </svg>
+        </button>
       </div>
-      <input class="search" placeholder="Search" />
+      <input class="search" id="sidebarSearchInput" placeholder="Search" />
       <div class="menu" id="chatList"></div>
       <button class="new-chat" id="newChat" title="Neuer Chat">+</button>
       <div class="sidebar-sync-status" id="sidebarSyncStatus"></div>
@@ -603,7 +713,11 @@
     <section class="chat">
       <header class="topbar">
         <div class="topbar-left">
-          <button class="mobile-sidebar-toggle" id="sidebarToggleBtn" title="Chats">›</button>
+          <button class="mobile-sidebar-toggle" id="sidebarToggleBtn" title="Chats" aria-label="Sidebar öffnen">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 6l6 6-6 6"/>
+            </svg>
+          </button>
           <h1 id="chatTitle">Neuer Chat</h1>
         </div>
         <div class="actions">
@@ -616,7 +730,13 @@
       <footer class="composer">
         <input id="messageInput" type="text" placeholder="Nachricht eingeben..." />
         <button class="send" id="sendBtn" title="Senden">➤</button>
-        <button class="task-btn" id="taskBtn" title="Letzte Aufgabe">📋</button>
+        <button class="task-btn" id="taskBtn" title="Letzte Aufgabe" aria-label="Letzte Aufgabe">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="5.5" y="4.5" width="13" height="15" rx="2"/>
+            <path d="M9 2.5h6v4H9z"/>
+            <path d="M9 11h6M9 15h4"/>
+          </svg>
+        </button>
       </footer>
     </section>
   </div>
@@ -648,6 +768,7 @@
     const modeChatsBtn = document.getElementById('modeChatsBtn');
     const modeTasksBtn = document.getElementById('modeTasksBtn');
     const modeTriggersBtn = document.getElementById('modeTriggersBtn');
+    const sidebarSearchInput = document.getElementById('sidebarSearchInput');
     const chatListEl = document.getElementById('chatList');
     const chatTitleEl = document.getElementById('chatTitle');
     const sidebarSyncStatusEl = document.getElementById('sidebarSyncStatus');
@@ -680,6 +801,9 @@
     let activeTriggerId = '';
     const pendingChats = new Set();
     const pendingTasks = new Set();
+    const pendingTriggers = new Set();
+    const triggerDialogs = {};
+    let sidebarSearchQuery = '';
 
     function setSidebarSyncStatus(status) {
       if (!sidebarSyncStatusEl) return;
@@ -829,16 +953,10 @@
         link.setAttribute('download', '');
         bubble.appendChild(link);
       }
-      if (meta.timestamp) {
-        const timeEl = document.createElement('div');
-        timeEl.className = 'msg-time';
-        timeEl.textContent = formatTimestampDisplay(meta.timestamp);
-        bubble.appendChild(timeEl);
-      }
-
+      let optionsRow = null;
       const options = Array.isArray(meta.options) ? meta.options : [];
       if (role === 'bot' && options.length > 0) {
-        const optionsRow = document.createElement('div');
+        optionsRow = document.createElement('div');
         optionsRow.className = 'message-options';
         options.forEach((opt) => {
           const type = String(opt?.type || '').trim();
@@ -932,6 +1050,20 @@
             optionsRow.appendChild(btn);
           }
         });
+      }
+      if (meta.timestamp || (optionsRow && optionsRow.childElementCount > 0)) {
+        if (!optionsRow) {
+          optionsRow = document.createElement('div');
+          optionsRow.className = 'message-options only-time';
+        } else if (optionsRow.childElementCount === 0) {
+          optionsRow.classList.add('only-time');
+        }
+        if (meta.timestamp) {
+          const timeEl = document.createElement('div');
+          timeEl.className = 'msg-time';
+          timeEl.textContent = formatTimestampDisplay(meta.timestamp);
+          optionsRow.appendChild(timeEl);
+        }
         if (optionsRow.childElementCount > 0) {
           bubble.appendChild(optionsRow);
         }
@@ -984,6 +1116,14 @@
       if (!text) return 'Aufgabe';
       const single = text.replace(/\s+/g, ' ');
       return single.length > 36 ? `${single.slice(0, 36)}...` : single;
+    }
+
+    function taskTitleById(taskId) {
+      const id = Number(taskId);
+      if (!Number.isInteger(id) || id < 1) return '';
+      const task = taskEntries.find((t) => Number(t?.id) === id);
+      if (!task) return '';
+      return taskTitle(task);
     }
 
     function updateSidebarModeButtons() {
@@ -1039,7 +1179,10 @@
 
     function renderChatList() {
       chatListEl.innerHTML = '';
+      const q = sidebarSearchQuery.trim().toLowerCase();
       chats.forEach((chat) => {
+        const title = String(chat?.title || '');
+        if (q && !title.toLowerCase().includes(q)) return;
         const item = document.createElement('div');
         item.setAttribute('data-chat-id', String(chat.id));
         item.className = `item${chat.id === activeChatId ? ' active' : ''}`;
@@ -1073,13 +1216,16 @@
 
     function renderTaskList() {
       chatListEl.innerHTML = '';
+      const q = sidebarSearchQuery.trim().toLowerCase();
       taskEntries.forEach((task) => {
+        const labelText = taskTitle(task);
+        if (q && !labelText.toLowerCase().includes(q)) return;
         const item = document.createElement('div');
         item.setAttribute('data-task-id', String(task.id));
         item.className = `item${task.id === activeTaskId ? ' active' : ''}`;
         const label = document.createElement('span');
         label.className = 'item-label';
-        label.textContent = taskTitle(task);
+        label.textContent = labelText;
 
         const delBtn = document.createElement('button');
         delBtn.className = 'item-delete';
@@ -1111,14 +1257,17 @@
 
     function renderTriggerList() {
       chatListEl.innerHTML = '';
+      const q = sidebarSearchQuery.trim().toLowerCase();
       triggerEntries.forEach((trigger) => {
+        const labelText = triggerTitle(trigger);
+        if (q && !labelText.toLowerCase().includes(q)) return;
         const item = document.createElement('div');
         const triggerId = String(trigger?.id || '');
         item.setAttribute('data-trigger-id', triggerId);
         item.className = `item${triggerId === String(activeTriggerId || '') ? ' active' : ''}`;
         const label = document.createElement('span');
         label.className = 'item-label';
-        label.textContent = triggerTitle(trigger);
+        label.textContent = labelText;
         const delBtn = document.createElement('button');
         delBtn.className = 'item-delete';
         delBtn.type = 'button';
@@ -1198,18 +1347,52 @@
           timestamp: task.created_at || nowIso()
         })
       );
+      const timeline = [];
+      let seq = 0;
       (Array.isArray(task.dialog) ? task.dialog : []).forEach((entry) => {
-        messagesEl.appendChild(
-          createMessageElement(entry.role === 'user' ? 'user' : 'bot', String(entry.text || ''), {
-            timestamp: entry.timestamp || nowIso()
-          })
-        );
+        timeline.push({
+          seq: seq++,
+          type: 'dialog',
+          timestamp: String(entry?.timestamp || ''),
+          entry
+        });
       });
       (Array.isArray(task.reruns) ? task.reruns : []).forEach((entry, rerunIndex) => {
+        timeline.push({
+          seq: seq++,
+          type: 'rerun',
+          timestamp: String(entry?.created_at || ''),
+          entry,
+          rerunIndex
+        });
+      });
+      const tsToNum = (value) => {
+        const t = new Date(String(value || '')).getTime();
+        return Number.isNaN(t) ? Number.MAX_SAFE_INTEGER : t;
+      };
+      timeline.sort((a, b) => {
+        const ta = tsToNum(a.timestamp);
+        const tb = tsToNum(b.timestamp);
+        if (ta !== tb) return ta - tb;
+        return a.seq - b.seq;
+      });
+      timeline.forEach((item) => {
+        if (item.type === 'dialog') {
+          const entry = item.entry || {};
+          messagesEl.appendChild(
+            createMessageElement(entry.role === 'user' ? 'user' : 'bot', String(entry.text || ''), {
+              plannedSteps: Array.isArray(entry?.plannedSteps) ? entry.plannedSteps : [],
+              options: Array.isArray(entry?.options) ? entry.options : [],
+              timestamp: entry.timestamp || nowIso()
+            })
+          );
+          return;
+        }
+        const entry = item.entry || {};
         messagesEl.appendChild(
           createMessageElement('bot', String(entry.answer || ''), {
             taskId: task.id,
-            rerunIndex,
+            rerunIndex: Number(item.rerunIndex),
             timestamp: entry.created_at || nowIso()
           })
         );
@@ -1225,6 +1408,15 @@
       return triggerEntries.find((t) => String(t?.id || '') === String(activeTriggerId || '')) || null;
     }
 
+    function getTriggerDialog(triggerId) {
+      const key = String(triggerId || '').trim();
+      if (!key) return [];
+      if (!Array.isArray(triggerDialogs[key])) {
+        triggerDialogs[key] = [];
+      }
+      return triggerDialogs[key];
+    }
+
     function renderActiveTrigger() {
       const trigger = getActiveTrigger();
       chatTitleEl.textContent = 'Trigger';
@@ -1236,7 +1428,7 @@
         return;
       }
       const lines = [
-        `Name: ${String(trigger.name || '-')}`,
+        `Aufgabe: ${taskTitleById(trigger.task_id) || '-'}`,
         `Typ: ${String(trigger.trigger_type || '-')}`,
         `Task-ID: ${String(trigger.task_id || '-')}`,
         `Status: ${trigger.enabled ? 'aktiv' : 'inaktiv'}`,
@@ -1247,8 +1439,22 @@
       if (String(trigger.last_error || '').trim()) {
         lines.push(`Letzter Fehler: ${String(trigger.last_error)}`);
       }
+      if (trigger.config && typeof trigger.config === 'object' && Object.keys(trigger.config).length > 0) {
+        lines.push(`Config: ${JSON.stringify(trigger.config)}`);
+      }
       chatTitleEl.textContent = triggerTitle(trigger);
       messagesEl.appendChild(createMessageElement('bot', lines.join('\n'), { timestamp: nowIso() }));
+      const dialog = getTriggerDialog(trigger.id);
+      dialog.forEach((entry) => {
+        messagesEl.appendChild(
+          createMessageElement(entry.role === 'user' ? 'user' : 'bot', String(entry.text || ''), {
+            timestamp: entry.timestamp || nowIso()
+          })
+        );
+      });
+      if (pendingTriggers.has(String(trigger.id || ''))) {
+        messagesEl.appendChild(createMessageElement('bot', '...', { timestamp: nowIso() }));
+      }
       messagesEl.scrollTop = messagesEl.scrollHeight;
       refreshComposerState();
     }
@@ -1451,9 +1657,13 @@
     function refreshComposerState() {
       if (sidebarMode === 'triggers') {
         inputEl.placeholder = 'Auslöser bearbeiten...';
-        sendBtn.disabled = true;
+        const trigger = getActiveTrigger();
+        const triggerId = String(trigger?.id || '');
+        const isPending = !!triggerId && pendingTriggers.has(triggerId);
+        sendBtn.disabled = isPending || !trigger;
         taskBtn.disabled = true;
-        inputEl.disabled = true;
+        inputEl.disabled = isPending || !trigger;
+        if (!inputEl.disabled) inputEl.focus();
         return;
       }
       if (sidebarMode === 'tasks') {
@@ -1570,7 +1780,9 @@
       renderActiveChat();
     }
 
-    async function loadTasksMemory() {
+    async function loadTasksMemory(preferredTaskId = null) {
+      const hasPreferred = preferredTaskId !== null && preferredTaskId !== undefined && Number.isInteger(Number(preferredTaskId));
+      const desiredTaskId = hasPreferred ? Number(preferredTaskId) : Number(activeTaskId);
       taskEntries.length = 0;
       activeTaskId = null;
       if (!currentUserId) {
@@ -1600,6 +1812,15 @@
                   .map((m) => ({
                     role: m?.role === 'user' ? 'user' : 'bot',
                     text: String(m?.text || '').trim(),
+                    plannedSteps: Array.isArray(m?.plannedSteps) ? m.plannedSteps.map((s) => String(s)) : [],
+                    options: Array.isArray(m?.options)
+                      ? m.options.map((opt) => ({
+                          type: String(opt?.type || ''),
+                          taskId: Number(opt?.taskId || 0),
+                          created: String(opt?.created || ''),
+                          plannedSteps: Array.isArray(opt?.plannedSteps) ? opt.plannedSteps.map((s) => String(s)) : []
+                        }))
+                      : [],
                     timestamp: String(m?.timestamp || nowIso())
                   }))
                   .filter((m) => m.text.length > 0)
@@ -1620,11 +1841,14 @@
       }
 
       if (taskEntries.length > 0) {
-        activeTaskId = taskEntries[0].id;
+        const hasDesired = taskEntries.some((t) => Number(t.id) === desiredTaskId);
+        activeTaskId = hasDesired ? desiredTaskId : taskEntries[0].id;
       }
     }
 
-    async function loadTriggers() {
+    async function loadTriggers(preferredTriggerId = null) {
+      const hasPreferred = preferredTriggerId !== null && preferredTriggerId !== undefined && String(preferredTriggerId).trim();
+      const desiredTriggerId = hasPreferred ? String(preferredTriggerId).trim() : String(activeTriggerId || '').trim();
       triggerEntries.length = 0;
       activeTriggerId = '';
       if (!currentUserId) return;
@@ -1642,6 +1866,7 @@
             name: String(t?.name || '').trim(),
             trigger_type: String(t?.trigger_type || '').trim(),
             task_id: Number(t?.task_id || 0),
+            config: (t?.config && typeof t.config === 'object') ? t.config : {},
             enabled: Boolean(t?.enabled),
             last_fired_at: String(t?.last_fired_at || ''),
             last_error: String(t?.last_error || ''),
@@ -1651,8 +1876,14 @@
         // keep empty trigger list
       }
 
+      const validIds = new Set(triggerEntries.map((t) => String(t.id || '')));
+      Object.keys(triggerDialogs).forEach((id) => {
+        if (!validIds.has(id)) delete triggerDialogs[id];
+      });
+
       if (triggerEntries.length > 0) {
-        activeTriggerId = String(triggerEntries[0].id || '');
+        const hasDesired = triggerEntries.some((t) => String(t.id || '') === desiredTriggerId);
+        activeTriggerId = hasDesired ? desiredTriggerId : String(triggerEntries[0].id || '');
       }
     }
 
@@ -1700,6 +1931,34 @@
         return true;
       } catch (_err) {
         return false;
+      }
+    }
+
+    async function updateTrigger(triggerId, patch = {}) {
+      const cleanTriggerId = String(triggerId || '').trim();
+      if (!cleanTriggerId || !currentUserId) return { ok: false, error: 'Ungültiger Trigger.' };
+      const body = { user_id: currentUserId, trigger_id: cleanTriggerId };
+      if (Object.prototype.hasOwnProperty.call(patch, 'name')) body.name = String(patch.name || '').trim();
+      if (Object.prototype.hasOwnProperty.call(patch, 'trigger_type')) body.trigger_type = String(patch.trigger_type || '').trim();
+      if (Object.prototype.hasOwnProperty.call(patch, 'task_id')) body.task_id = Number(patch.task_id);
+      if (Object.prototype.hasOwnProperty.call(patch, 'enabled')) body.enabled = Boolean(patch.enabled);
+      if (Object.prototype.hasOwnProperty.call(patch, 'config')) body.config = patch.config || {};
+      try {
+        const resp = await fetch('/api/triggers/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await resp.json();
+        if (!resp.ok) return { ok: false, error: data.detail || 'Unbekannter Fehler' };
+        const updated = data?.trigger || {};
+        const local = triggerEntries.find((t) => String(t.id || '') === cleanTriggerId);
+        if (local && updated && typeof updated === 'object') {
+          Object.assign(local, updated);
+        }
+        return { ok: true, trigger: updated };
+      } catch (_err) {
+        return { ok: false, error: 'Verbindung zur API fehlgeschlagen.' };
       }
     }
 
@@ -1921,6 +2180,15 @@
               ? task.dialog.map((m) => ({
                   role: m.role === 'user' ? 'user' : 'bot',
                   text: String(m.text || '').trim(),
+                  plannedSteps: Array.isArray(m.plannedSteps) ? m.plannedSteps.map((s) => String(s).trim()).filter(Boolean) : [],
+                  options: Array.isArray(m.options)
+                    ? m.options.map((opt) => ({
+                        type: String(opt?.type || '').trim(),
+                        taskId: Number(opt?.taskId || 0),
+                        created: String(opt?.created || ''),
+                        plannedSteps: Array.isArray(opt?.plannedSteps) ? opt.plannedSteps.map((s) => String(s).trim()).filter(Boolean) : []
+                      })).filter((opt) => opt.type.length > 0)
+                    : [],
                   timestamp: String(m.timestamp || nowIso())
                 })).filter((m) => m.text.length > 0)
               : []
@@ -2010,6 +2278,12 @@
           await updateTaskForUser(task);
           return;
         }
+        if (data?.requires_user_input) {
+          const msg = String(data?.message || '').trim() || 'Für die Plan-Änderung fehlen noch Informationen.';
+          task.dialog.push({ role: 'bot', text: msg, timestamp: nowIso() });
+          await updateTaskForUser(task);
+          return;
+        }
         const rawReplanText = String(data?.raw_text || '');
         let newSteps = Array.isArray(data?.planned_steps) ? data.planned_steps.map((s) => String(s).trim()).filter(Boolean) : [];
         if (newSteps.length === 0) {
@@ -2024,12 +2298,24 @@
               body: JSON.stringify({ steps: newSteps, user_id: currentUserId })
             });
             const explainData = await explainResp.json();
+            const planOptions = [
+              { type: 'rerun_task', plannedSteps: newSteps, taskId: task.id },
+              { type: 'create_manual_trigger', taskId: task.id }
+            ];
             if (explainResp.ok && String(explainData?.answer || '').trim()) {
-              task.dialog.push({ role: 'bot', text: String(explainData.answer).trim(), timestamp: nowIso() });
+              task.dialog.push({
+                role: 'bot',
+                text: String(explainData.answer).trim(),
+                plannedSteps: newSteps,
+                options: planOptions,
+                timestamp: nowIso()
+              });
             } else {
               task.dialog.push({
                 role: 'bot',
                 text: 'Die geplanten Schritte wurden aktualisiert.',
+                plannedSteps: newSteps,
+                options: planOptions,
                 timestamp: nowIso()
               });
             }
@@ -2037,6 +2323,11 @@
             task.dialog.push({
               role: 'bot',
               text: 'Die geplanten Schritte wurden aktualisiert.',
+              plannedSteps: newSteps,
+              options: [
+                { type: 'rerun_task', plannedSteps: newSteps, taskId: task.id },
+                { type: 'create_manual_trigger', taskId: task.id }
+              ],
               timestamp: nowIso()
             });
           }
@@ -2068,6 +2359,142 @@
       } finally {
         pendingTasks.delete(taskId);
         renderActiveTask();
+        renderSidebarList();
+      }
+    }
+
+    function parseTriggerUpdateIntent(message, trigger) {
+      const text = String(message || '').trim();
+      const low = text.toLowerCase();
+      const patch = {};
+      const hints = [];
+
+      if (/(manually|manual)/.test(low)) {
+        patch.trigger_type = 'manually';
+        patch.config = {};
+      } else if (/(time_schedule|time scheduled|time-schedule|zeitplan|zeitgesteuert)/.test(low)) {
+        patch.trigger_type = 'time_schedule';
+        let seconds = null;
+        const minMatch = low.match(/(\d+)\s*(min|minute|minuten)\b/);
+        const secMatch = low.match(/(\d+)\s*(sek|sec|s|sekunden)\b/);
+        const rawNum = low.match(/\b(\d+)\b/);
+        if (minMatch) {
+          seconds = Number(minMatch[1]) * 60;
+        } else if (secMatch) {
+          seconds = Number(secMatch[1]);
+        } else if (rawNum) {
+          seconds = Number(rawNum[1]);
+        }
+        if (!Number.isFinite(seconds) || seconds <= 0) {
+          const current = Number(trigger?.config?.interval_seconds || 0);
+          seconds = current > 0 ? current : 300;
+          hints.push('Intervall nicht erkannt, verwende 300s.');
+        }
+        patch.config = { interval_seconds: Math.max(10, Math.min(86400, Math.trunc(seconds))) };
+      }
+
+      if (/(deaktiv|disable|aus)\b/.test(low)) {
+        patch.enabled = false;
+      } else if (/(aktiv|enable|ein)\b/.test(low)) {
+        patch.enabled = true;
+      }
+
+      const nameMatch = text.match(/name\s*[:=]\s*(.+)$/i);
+      if (nameMatch && nameMatch[1]) {
+        patch.name = String(nameMatch[1]).trim();
+      }
+
+      return { patch, hints };
+    }
+
+    async function sendTriggerMessage() {
+      const message = inputEl.value.trim();
+      if (!message) return;
+      const trigger = getActiveTrigger();
+      if (!trigger) return;
+      const triggerId = String(trigger.id || '').trim();
+      if (!triggerId) return;
+      if (pendingTriggers.has(triggerId)) return;
+
+      const dialog = getTriggerDialog(triggerId);
+      dialog.push({ role: 'user', text: message, timestamp: nowIso() });
+      inputEl.value = '';
+      pendingTriggers.add(triggerId);
+      renderActiveTrigger();
+      renderSidebarList();
+
+      try {
+        let patch = {};
+        let hints = [];
+        try {
+          const interpretResp = await fetch('/api/triggers/interpret', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              user_id: currentUserId,
+              trigger: {
+                id: trigger.id,
+                name: trigger.name,
+                trigger_type: trigger.trigger_type,
+                task_id: trigger.task_id,
+                config: trigger.config || {},
+                enabled: trigger.enabled
+              },
+              message
+            })
+          });
+          const interpretData = await interpretResp.json();
+          if (interpretResp.ok) {
+            if (interpretData?.needs_info) {
+              dialog.push({
+                role: 'bot',
+                text: String(interpretData?.question || 'Bitte präzisiere die gewünschte Trigger-Änderung.'),
+                timestamp: nowIso()
+              });
+              return;
+            }
+            if (interpretData?.action === 'update_trigger' && interpretData?.patch && typeof interpretData.patch === 'object') {
+              patch = interpretData.patch;
+            }
+          }
+        } catch (_llmErr) {
+          // fallback below
+        }
+        if (!Object.keys(patch).length) {
+          const parsed = parseTriggerUpdateIntent(message, trigger);
+          patch = parsed.patch || {};
+          hints = parsed.hints || [];
+        }
+        if (!Object.keys(patch).length) {
+          dialog.push({
+            role: 'bot',
+            text: 'Ich kann Trigger aktuell so anpassen: Typ (manually/time_schedule), Intervall (z.B. 300s oder 5 min), aktiv/deaktiv.',
+            timestamp: nowIso()
+          });
+          return;
+        }
+        const result = await updateTrigger(triggerId, patch);
+        if (!result.ok) {
+          dialog.push({ role: 'bot', text: `Trigger-Update fehlgeschlagen: ${result.error || 'Unbekannter Fehler'}`, timestamp: nowIso() });
+          return;
+        }
+        await loadTriggers(triggerId);
+        const updated = getActiveTrigger() || result.trigger || {};
+        const summary = [
+          `Trigger aktualisiert: ${String(updated.name || trigger.name || '-')}`,
+          `Typ: ${String(updated.trigger_type || trigger.trigger_type || '-')}`,
+          `Status: ${Boolean(updated.enabled) ? 'aktiv' : 'inaktiv'}`,
+          (updated.config && Object.keys(updated.config).length ? `Config: ${JSON.stringify(updated.config)}` : '')
+        ].filter(Boolean);
+        if (Array.isArray(hints) && hints.length) {
+          summary.push(hints.join(' '));
+        }
+        dialog.push({ role: 'bot', text: summary.join('\n'), timestamp: nowIso() });
+      } catch (_err) {
+        dialog.push({ role: 'bot', text: 'Trigger-Update fehlgeschlagen.', timestamp: nowIso() });
+      } finally {
+        pendingTriggers.delete(triggerId);
+        renderActiveTrigger();
         renderSidebarList();
       }
     }
@@ -2109,7 +2536,10 @@
     }
 
     async function sendMessage() {
-      if (sidebarMode === 'triggers') return;
+      if (sidebarMode === 'triggers') {
+        await sendTriggerMessage();
+        return;
+      }
       if (sidebarMode === 'tasks') {
         await sendTaskMessage();
         return;
@@ -2277,6 +2707,13 @@
       startNewChat();
       if (isMobileView()) closeSidebar();
     });
+
+    if (sidebarSearchInput) {
+      sidebarSearchInput.addEventListener('input', () => {
+        sidebarSearchQuery = String(sidebarSearchInput.value || '');
+        renderSidebarList();
+      });
+    }
 
     modeChatsBtn.addEventListener('click', async () => {
       await loadChatMemory();

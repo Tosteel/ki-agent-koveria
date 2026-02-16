@@ -89,7 +89,7 @@ class TaskUpdateRequest(BaseModel):
     task_id: int = Field(..., ge=1)
     planned_steps: List[str] = Field(default_factory=list)
     text: Optional[str] = ""
-    dialog: List[Dict[str, str]] = Field(default_factory=list)
+    dialog: List[Dict[str, Any]] = Field(default_factory=list)
     user_id: Optional[str] = ""
 
 
@@ -113,6 +113,22 @@ class TriggerDeleteRequest(BaseModel):
 class TriggerCreateManualRequest(BaseModel):
     task_id: int = Field(..., ge=1)
     name: str = Field(..., min_length=1)
+    user_id: Optional[str] = ""
+
+
+class TriggerUpdateProxyRequest(BaseModel):
+    trigger_id: str = Field(..., min_length=1)
+    name: Optional[str] = None
+    trigger_type: Optional[str] = None
+    task_id: Optional[int] = Field(default=None, ge=1)
+    config: Optional[Dict[str, Any]] = None
+    enabled: Optional[bool] = None
+    user_id: Optional[str] = ""
+
+
+class TriggerInterpretRequest(BaseModel):
+    trigger: Dict[str, Any] = Field(default_factory=dict)
+    message: str = Field(..., min_length=1)
     user_id: Optional[str] = ""
 
 
@@ -201,6 +217,16 @@ def _agent_run_url_from_ask_url(ask_url: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
 
 
+def _agent_plan_url_from_ask_url(ask_url: str) -> str:
+    raw = (ask_url or "").strip()
+    if not raw:
+        return ""
+    parsed = urlsplit(raw)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return ""
+    return urlunsplit((parsed.scheme, parsed.netloc, "/agent/plan", "", ""))
+
+
 def _compact_planned_steps(steps: List[str]) -> List[str]:
     compact: List[str] = []
     for idx, raw in enumerate(steps, start=1):
@@ -277,6 +303,29 @@ def _parse_planned_steps_lines(lines: List[str]) -> List[Dict[str, Any]]:
                     args = {}
         steps.append({"tool": tool, "args": args})
     return steps
+
+
+def _parse_json_strictish_text(text: str) -> Dict[str, Any]:
+    raw = str(text or "").strip()
+    if not raw:
+        return {}
+    if raw.startswith("```"):
+        raw = raw.strip("`").strip()
+        if raw.lower().startswith("json"):
+            raw = raw[4:].strip()
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        pass
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if not m:
+        return {}
+    try:
+        data = json.loads(m.group(0))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
 
 
 def _resolve_user_id_from_api(ask_ionos_url: str, api_key: str) -> Optional[str]:
@@ -475,6 +524,17 @@ def _load_tasks_memory_local_for_user(user_id: str) -> Dict[str, Any]:
                         {
                             "role": ("user" if str(m.get("role") or "").strip().lower() == "user" else "bot"),
                             "text": str(m.get("text") or "").strip(),
+                            "plannedSteps": [str(s).strip() for s in (m.get("plannedSteps") or []) if str(s).strip()],
+                            "options": [
+                                {
+                                    "type": str(o.get("type") or "").strip(),
+                                    "taskId": int(o.get("taskId") or 0),
+                                    "created": str(o.get("created") or "").strip(),
+                                    "plannedSteps": [str(s).strip() for s in (o.get("plannedSteps") or []) if str(s).strip()],
+                                }
+                                for o in (m.get("options") or [])
+                                if isinstance(o, dict) and str(o.get("type") or "").strip()
+                            ],
                             "timestamp": str(m.get("timestamp") or ""),
                         }
                         for m in (t.get("dialog") or [])
@@ -635,6 +695,12 @@ def chat(req: ChatRequest) -> JSONResponse:
         raise HTTPException(status_code=resp.status_code, detail=f"API error: {snippet}")
 
     data: Dict[str, Any] = resp.json() if resp.content else {}
+    print("\n===== REPLAN RAW RESPONSE =====")
+    try:
+        print(json.dumps(data, ensure_ascii=False))
+    except Exception:
+        print(str(data))
+    print("================================\n")
     answer = data.get("answer")
     if not isinstance(answer, str) or not answer.strip():
         answer = json.dumps(data, ensure_ascii=False)
@@ -672,6 +738,7 @@ def planned_task_explain(req: TaskExplainRequest) -> JSONResponse:
         headers["Authorization"] = f"Bearer {api_key}"
 
     payload = {
+        "log_label": "TEXTBASE FOR FINAL ANSWER",
         "steps": [
             {
                 "tool": "llm_compose",
@@ -869,6 +936,157 @@ def create_manual_trigger(req: TriggerCreateManualRequest) -> JSONResponse:
     return JSONResponse({"ok": True, "user_id": user_id, "trigger": trigger})
 
 
+@app.post("/api/triggers/update")
+def update_trigger_proxy(req: TriggerUpdateProxyRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    trigger_id = req.trigger_id.strip()
+    if not trigger_id:
+        raise HTTPException(status_code=422, detail="trigger_id must not be empty")
+
+    payload: Dict[str, Any] = {}
+    if req.name is not None:
+        payload["name"] = str(req.name).strip()
+    if req.trigger_type is not None:
+        payload["trigger_type"] = str(req.trigger_type).strip()
+    if req.task_id is not None:
+        payload["task_id"] = int(req.task_id)
+    if req.config is not None:
+        payload["config"] = req.config
+    if req.enabled is not None:
+        payload["enabled"] = bool(req.enabled)
+    if not payload:
+        raise HTTPException(status_code=422, detail="No update fields provided")
+
+    settings = _load_settings_for_user(user_id)
+    api_base = _extract_api_base_url(settings.get("ask_ionos_url", ""))
+    api_key = settings.get("api_key", "").strip()
+    if not api_base or not api_key:
+        raise HTTPException(status_code=422, detail="API settings missing")
+
+    try:
+        resp = requests.patch(
+            f"{api_base}/triggers/{trigger_id}",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=8,
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"API request failed: {exc}") from exc
+    if resp.status_code >= 400:
+        snippet = resp.text[:500]
+        raise HTTPException(status_code=resp.status_code, detail=f"API error: {snippet}")
+    data: Dict[str, Any] = resp.json() if resp.content else {}
+    if isinstance(data, dict) and data.get("ok") is False:
+        raise HTTPException(status_code=404, detail=str(data.get("error") or "trigger_not_found"))
+    return JSONResponse({"ok": True, "user_id": user_id, "trigger": data.get("trigger") if isinstance(data, dict) else {}})
+
+
+@app.post("/api/triggers/interpret")
+def interpret_trigger_update(req: TriggerInterpretRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    message = req.message.strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="message must not be empty")
+
+    settings = _load_settings_for_user(user_id)
+    run_url = _agent_run_url_from_ask_url(settings.get("ask_ionos_url", ""))
+    api_key = settings.get("api_key", "").strip()
+    if not run_url or not api_key:
+        raise HTTPException(status_code=422, detail="API settings missing")
+
+    trigger_ctx = req.trigger if isinstance(req.trigger, dict) else {}
+    source_text = (
+        "Aktueller Trigger (JSON):\n"
+        + json.dumps(trigger_ctx, ensure_ascii=False)
+        + "\n\nÄnderungswunsch:\n"
+        + message
+    )
+    instruction = (
+        "Analysiere den Änderungswunsch und gib AUSSCHLIESSLICH gültiges JSON zurück.\n"
+        "Schema:\n"
+        "{"
+        "\"action\":\"update_trigger|ask_user\","
+        "\"patch\":{optional: name, trigger_type, task_id, enabled, config},"
+        "\"needs_info\":true|false,"
+        "\"question\":\"...\""
+        "}\n"
+        "Regeln:\n"
+        "- trigger_type nur 'manually' oder 'time_schedule'.\n"
+        "- Für time_schedule setze config.interval_seconds (10..86400).\n"
+        "- Wenn Angaben fehlen, needs_info=true und eine kurze Rückfrage in question.\n"
+        "- Kein Fließtext, kein Markdown, nur JSON."
+    )
+    payload = {
+        "steps": [
+            {
+                "tool": "llm_compose",
+                "args": {
+                    "text": source_text,
+                    "instruction": instruction,
+                    "goal": "Interpretiere Trigger-Änderung",
+                    "max_chars": 1200,
+                },
+            }
+        ]
+    }
+    headers: Dict[str, str] = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+
+    try:
+        resp = requests.post(run_url, headers=headers, json=payload, timeout=60)
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"API request failed: {exc}") from exc
+    if resp.status_code >= 400:
+        snippet = resp.text[:500]
+        raise HTTPException(status_code=resp.status_code, detail=f"API error: {snippet}")
+
+    data: Dict[str, Any] = resp.json() if resp.content else {}
+    outputs = data.get("outputs")
+    text_out = ""
+    if isinstance(outputs, list) and outputs:
+        p0 = outputs[0].get("payload") if isinstance(outputs[0], dict) else {}
+        if isinstance(p0, dict):
+            val = p0.get("composed_text") or p0.get("text")
+            if isinstance(val, str):
+                text_out = val.strip()
+    parsed = _parse_json_strictish_text(text_out)
+    action = str(parsed.get("action") or "").strip().lower()
+    needs_info = bool(parsed.get("needs_info", False))
+    question = str(parsed.get("question") or "").strip()
+    raw_patch = parsed.get("patch") if isinstance(parsed.get("patch"), dict) else {}
+    patch: Dict[str, Any] = {}
+    if isinstance(raw_patch, dict):
+        if "name" in raw_patch:
+            patch["name"] = str(raw_patch.get("name") or "").strip()
+        if "trigger_type" in raw_patch:
+            patch["trigger_type"] = str(raw_patch.get("trigger_type") or "").strip()
+        if "task_id" in raw_patch:
+            try:
+                patch["task_id"] = int(raw_patch.get("task_id"))
+            except Exception:
+                pass
+        if "enabled" in raw_patch:
+            patch["enabled"] = bool(raw_patch.get("enabled"))
+        if "config" in raw_patch and isinstance(raw_patch.get("config"), dict):
+            patch["config"] = raw_patch.get("config")
+
+    if action not in {"update_trigger", "ask_user"}:
+        action = "ask_user"
+        needs_info = True
+        if not question:
+            question = "Wie genau soll der Trigger geändert werden? (z. B. 'auf time_schedule 300s ändern')"
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "action": action,
+            "patch": patch,
+            "needs_info": needs_info,
+            "question": question,
+            "raw_text": text_out,
+        }
+    )
+
+
 @app.post("/api/tasks/save")
 def save_task(req: TaskSaveRequest) -> JSONResponse:
     user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
@@ -939,6 +1157,17 @@ def update_task(req: TaskUpdateRequest) -> JSONResponse:
             {
                 "role": role,
                 "text": text,
+                "plannedSteps": [str(s).strip() for s in (m.get("plannedSteps") or []) if str(s).strip()],
+                "options": [
+                    {
+                        "type": str(o.get("type") or "").strip(),
+                        "taskId": int(o.get("taskId") or 0),
+                        "created": str(o.get("created") or "").strip(),
+                        "plannedSteps": [str(s).strip() for s in (o.get("plannedSteps") or []) if str(s).strip()],
+                    }
+                    for o in (m.get("options") or [])
+                    if isinstance(o, dict) and str(o.get("type") or "").strip()
+                ],
                 "timestamp": str(m.get("timestamp") or ""),
             }
         )
@@ -964,9 +1193,9 @@ def update_task(req: TaskUpdateRequest) -> JSONResponse:
 def replan_task(req: TaskReplanRequest) -> JSONResponse:
     user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
     settings = _load_settings_for_user(user_id)
-    run_url = _agent_run_url_from_ask_url(settings.get("ask_ionos_url", ""))
+    plan_url = _agent_plan_url_from_ask_url(settings.get("ask_ionos_url", ""))
     api_key = settings.get("api_key", "").strip()
-    if not run_url:
+    if not plan_url:
         raise HTTPException(status_code=422, detail="Ungültige askIonos URL.")
 
     current_steps = [str(s).strip() for s in (req.planned_steps or []) if str(s).strip()]
@@ -976,39 +1205,21 @@ def replan_task(req: TaskReplanRequest) -> JSONResponse:
     if not change_request:
         raise HTTPException(status_code=422, detail="change_request must not be empty")
 
-    source_text = (
-        "AKTUELLER PLAN:\n"
-        + "\n".join(current_steps)
-        + "\n\nÄNDERUNGSWUNSCH:\n"
-        + change_request
-    )
-    instruction = (
-        "Überarbeite den Plan gemäß Änderungswunsch. "
-        "Gib ausschließlich nummerierte PLANNED STEPS zurück, eine Zeile pro Schritt. "
-        "Format strikt: 1. tool=<toolname> args=<json>. "
-        "Kein Fließtext, keine Einleitung, keine Codeblöcke."
-    )
+    planning_goal = change_request
 
     headers: Dict[str, str] = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
     payload = {
-        "steps": [
-            {
-                "tool": "llm_compose",
-                "args": {
-                    "text": source_text,
-                    "instruction": instruction,
-                    "goal": "Aktualisiere nur die geplanten Schritte",
-                    "max_chars": 2200,
-                },
-            }
-        ]
+        "goal": planning_goal,
+        "additional_props": {
+            "planned_steps": current_steps,
+        },
     }
 
     try:
-        resp = requests.post(run_url, headers=headers, json=payload, timeout=90)
+        resp = requests.post(plan_url, headers=headers, json=payload, timeout=90)
     except requests.RequestException as exc:
         raise HTTPException(status_code=502, detail=f"API request failed: {exc}") from exc
 
@@ -1017,27 +1228,57 @@ def replan_task(req: TaskReplanRequest) -> JSONResponse:
         raise HTTPException(status_code=resp.status_code, detail=f"API error: {snippet}")
 
     data: Dict[str, Any] = resp.json() if resp.content else {}
-    outputs = data.get("outputs")
-    raw_text = ""
-    if isinstance(outputs, list) and outputs:
-        payload0 = outputs[0].get("payload") if isinstance(outputs[0], dict) else {}
-        if isinstance(payload0, dict):
-            val = payload0.get("composed_text") or payload0.get("text")
-            if isinstance(val, str):
-                raw_text = val.strip()
-
-    if not raw_text:
-        raise HTTPException(status_code=422, detail="Replanning returned no text")
-
-    planned_steps: List[str] = []
-    for line in raw_text.splitlines():
-        trimmed = line.strip()
-        if re.match(r"^\d+\.\s*tool=.+\s+args=.+$", trimmed):
-            planned_steps.append(trimmed)
-
-    if not planned_steps:
+    raw_steps = data.get("steps")
+    if not isinstance(raw_steps, list) or not raw_steps:
         raise HTTPException(status_code=422, detail="Replanning returned no valid planned steps")
 
+    planned_steps: List[str] = []
+    for idx, step in enumerate(raw_steps, start=1):
+        if isinstance(step, str):
+            line = step.strip()
+            if re.match(r"^\d+\.\s*tool=.+\s+args=.+$", line):
+                planned_steps.append(line)
+            continue
+        if not isinstance(step, dict):
+            continue
+
+        tool = str(step.get("tool") or "").strip()
+        args_raw = step.get("args")
+        args: Dict[str, Any] = {}
+        if isinstance(args_raw, dict):
+            args = args_raw
+        elif isinstance(args_raw, str):
+            txt = args_raw.strip()
+            if txt:
+                try:
+                    parsed = json.loads(txt)
+                    if isinstance(parsed, dict):
+                        args = parsed
+                except Exception:
+                    try:
+                        parsed = ast.literal_eval(txt)
+                        if isinstance(parsed, dict):
+                            args = parsed
+                    except Exception:
+                        args = {"value": txt}
+
+        if not tool:
+            continue
+        args_json = json.dumps(args, ensure_ascii=False, separators=(",", ":"))
+        planned_steps.append(f"{idx}. tool={tool} args={args_json}")
+
+    if not planned_steps:
+        print("\n===== REPLAN PARSE ERROR =====")
+        print("No valid planned_steps could be extracted from /agent/plan response.")
+        print("raw_steps=", raw_steps)
+        print("==============================\n")
+        raise HTTPException(status_code=422, detail="Replanning returned no valid planned steps")
+
+    raw_text = _planned_steps_block(planned_steps)
+    print("\n===== REPLAN PARSED STEPS =====")
+    for s in planned_steps:
+        print(s)
+    print("================================\n")
     return JSONResponse({"ok": True, "planned_steps": planned_steps, "raw_text": raw_text})
 
 
