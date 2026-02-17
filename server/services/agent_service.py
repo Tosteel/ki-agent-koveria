@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import json
+import ast
+import re
 from typing import Any, Dict, List, Tuple
+
+from pydantic import BaseModel, Field, create_model
 
 from server.core.settings import Settings
 from server.tools.loader import register_all_tools
@@ -9,6 +13,7 @@ from server.agent.tool_registry import ToolRegistry, ToolContext
 from server.agent.orchestrator import Orchestrator
 from server.services.llm_openai import LlmRuntime
 from server.services.llm_ionos import IonosLLM
+from server.services import memory_service
 
 
 def first_nonempty_str(*values: Any) -> str:
@@ -364,9 +369,222 @@ def goal_with_context(goal: str, history: Any) -> str:
     return f"Aktuelle Anfrage:\n{base}\n\nDialogverlauf (letzte 12 Nachrichten):\n{hist}"
 
 
-def build_registry() -> ToolRegistry:
+def _slugify_tool_name(title: str, agent_id: Any) -> str:
+    base = re.sub(r"[^a-z0-9]+", "_", str(title or "").strip().lower()).strip("_")
+    if not base:
+        base = f"agent_{agent_id}"
+    if not base.startswith("agent_"):
+        base = f"agent_{base}"
+    return base
+
+
+def _parse_planned_steps(steps: List[str]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for raw in steps:
+        line = str(raw or "").strip()
+        if not line:
+            continue
+        marker = "tool="
+        args_marker = " args="
+        i = line.find(marker)
+        j = line.find(args_marker)
+        if i < 0 or j < 0 or j <= i:
+            continue
+        tool = line[i + len(marker) : j].strip()
+        args_raw = line[j + len(args_marker) :].strip()
+        if not tool:
+            continue
+        args: Dict[str, Any] = {}
+        if args_raw:
+            try:
+                loaded = json.loads(args_raw)
+                if isinstance(loaded, dict):
+                    args = loaded
+            except Exception:
+                try:
+                    loaded = ast.literal_eval(args_raw)
+                    if isinstance(loaded, dict):
+                        args = loaded
+                except Exception:
+                    args = {}
+        out.append({"tool": tool, "args": args})
+    return out
+
+
+def _replace_agent_placeholders(value: Any, values: Dict[str, Any]) -> Any:
+    if isinstance(value, dict):
+        return {k: _replace_agent_placeholders(v, values) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_replace_agent_placeholders(v, values) for v in value]
+    if not isinstance(value, str):
+        return value
+
+    full = re.fullmatch(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}", value.strip())
+    if full:
+        key = full.group(1)
+        return values.get(key, value)
+
+    def repl(match: re.Match[str]) -> str:
+        key = match.group(1)
+        rep = values.get(key, match.group(0))
+        return str(rep)
+
+    return re.sub(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}", repl, value)
+
+
+def _placeholder_type_to_py(placeholder_type: str) -> Any:
+    p_type = str(placeholder_type or "").strip().lower()
+    if p_type in {"int", "integer", "number"}:
+        return int
+    if p_type in {"float", "double"}:
+        return float
+    if p_type in {"bool", "boolean"}:
+        return bool
+    return str
+
+
+def _register_user_agent_tools(registry: ToolRegistry, settings: Settings, user_id: str) -> ToolRegistry:
+    memory = memory_service.load_agents_memory_for_user(settings, user_id)
+    agents = memory.get("agents") if isinstance(memory.get("agents"), list) else []
+    used_names: set[str] = set()
+
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        agent_id = agent.get("id")
+        title = str(agent.get("title") or f"agent_{agent_id}").strip()
+        tool_name = _slugify_tool_name(title, agent_id)
+        if tool_name in used_names:
+            tool_name = f"{tool_name}_{agent_id}"
+        used_names.add(tool_name)
+
+        placeholders = agent.get("placeholders") if isinstance(agent.get("placeholders"), list) else []
+        fields: Dict[str, Any] = {}
+        for p in placeholders:
+            if not isinstance(p, dict):
+                continue
+            p_name = str(p.get("name") or "").strip()
+            if not p_name:
+                continue
+            py_type = _placeholder_type_to_py(str(p.get("type") or "string"))
+            p_required = bool(p.get("required", True))
+            p_desc = str(p.get("description") or f"Platzhalter {p_name}").strip()
+            if p_required:
+                fields[p_name] = (py_type, Field(..., description=p_desc))
+            else:
+                fields[p_name] = (py_type | None, Field(default=None, description=p_desc))
+
+        request_model = create_model(f"AgentToolRequest_{tool_name}", **fields) if fields else create_model(
+            f"AgentToolRequest_{tool_name}"
+        )
+
+        planned_steps_lines = [
+            str(s).strip() for s in (agent.get("planned_steps") or []) if str(s).strip()
+        ]
+        planned_steps = _parse_planned_steps(planned_steps_lines)
+
+        def _make_handler(
+            *,
+            _tool_name: str,
+            _agent_id: Any,
+            _agent_title: str,
+            _planned_steps: List[Dict[str, Any]],
+        ):
+            def _handler(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+                if not _planned_steps:
+                    raise RuntimeError(f"{_tool_name}: planned_steps_empty")
+
+                replaced_steps: List[Dict[str, Any]] = []
+                for step in _planned_steps:
+                    replaced_steps.append(
+                        {
+                            "tool": str(step.get("tool") or "").strip(),
+                            "args": _replace_agent_placeholders(dict(step.get("args") or {}), args),
+                        }
+                    )
+                replaced_steps = sanitize_execution_steps(replaced_steps)
+
+                inner_registry = register_all_tools(ToolRegistry())
+                inner_orch = Orchestrator(inner_registry)
+                inner_ctx = ToolContext(
+                    user_id=ctx.user_id,
+                    settings=ctx.settings,
+                    api_key=ctx.api_key,
+                    goal=ctx.goal,
+                )
+                outputs = inner_orch.run_steps(inner_ctx, replaced_steps)
+                if any(not o.get("ok") for o in outputs):
+                    last_error = next(
+                        (str(o.get("error") or "agent_substep_failed") for o in reversed(outputs) if not o.get("ok")),
+                        "agent_substep_failed",
+                    )
+                    raise RuntimeError(last_error)
+                text = extract_execution_answer(outputs)
+                last_payload = outputs[-1].get("payload") if outputs else {}
+                output_path = ""
+                if isinstance(last_payload, dict):
+                    output_path = str(last_payload.get("output_path") or "").strip()
+                return {
+                    "agent_id": _agent_id,
+                    "agent_title": _agent_title,
+                    "tool_name": _tool_name,
+                    "placeholder_values": args,
+                    "executed_steps": replaced_steps,
+                    "text": text,
+                    "output_path": output_path,
+                }
+
+            return _handler
+
+        registry.register(
+            tool_name,
+            _make_handler(
+                _tool_name=tool_name,
+                _agent_id=agent_id,
+                _agent_title=title,
+                _planned_steps=planned_steps,
+            ),
+            request_model=request_model,
+        )
+    return registry
+
+
+def append_agent_tools_hint(goal: str, settings: Settings, user_id: str) -> str:
+    base = str(goal or "").strip()
+    memory = memory_service.load_agents_memory_for_user(settings, user_id)
+    agents = memory.get("agents") if isinstance(memory.get("agents"), list) else []
+    hints: List[str] = []
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        title = str(agent.get("title") or "").strip()
+        if not title:
+            continue
+        tool_name = _slugify_tool_name(title, agent.get("id"))
+        phs = agent.get("placeholders") if isinstance(agent.get("placeholders"), list) else []
+        ph_names = [str(p.get("name") or "").strip() for p in phs if isinstance(p, dict) and str(p.get("name") or "").strip()]
+        mention = title.lower() in base.lower() or tool_name.lower() in base.lower()
+        if mention:
+            if ph_names:
+                hints.append(f"- {title} -> tool={tool_name} placeholders={ph_names}")
+            else:
+                hints.append(f"- {title} -> tool={tool_name}")
+    if not hints:
+        return base
+    return (
+        f"{base}\n\n"
+        "Hinweis: Wenn ein genannter Agent passt, nutze genau dessen Tool.\n"
+        "Verfügbare genannte Agent-Tools:\n"
+        + "\n".join(hints)
+    )
+
+
+def build_registry(*, settings: Settings | None = None, user_id: str | None = None) -> ToolRegistry:
     registry = ToolRegistry()
-    return register_all_tools(registry)
+    register_all_tools(registry)
+    if settings is not None and user_id:
+        _register_user_agent_tools(registry, settings, user_id)
+    return registry
 
 
 def provider_key(provider: str) -> str:
@@ -392,7 +610,7 @@ def run_steps_internal(
     steps: List[Dict[str, Any]],
     log_label: str = "PLANNED STEPS",
 ) -> Tuple[bool, List[Dict[str, Any]], List[Dict[str, Any]], str]:
-    registry = build_registry()
+    registry = build_registry(settings=settings, user_id=user_id)
     orch = Orchestrator(registry)
     ctx = ToolContext(user_id=user_id, settings=settings, api_key=api_key, goal=goal)
     sanitized_steps = sanitize_execution_steps(steps)

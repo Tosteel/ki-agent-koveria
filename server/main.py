@@ -280,8 +280,8 @@ def _get_trigger_runtime() -> TriggerRuntime:
 
 
 # ----------------------------- Phase 1: Agent (Tool Registry + Orchestrator) -----------------------------
-def _build_registry() -> ToolRegistry:
-    return agent_service.build_registry()
+def _build_registry(user_id: str, s: Settings) -> ToolRegistry:
+    return agent_service.build_registry(settings=s, user_id=user_id)
 
 
 def _build_trigger_registry() -> TriggerRegistry:
@@ -292,7 +292,7 @@ def _build_trigger_registry() -> TriggerRegistry:
 def _execute_steps_for_trigger(user_id: str, steps: List[Dict[str, Any]], goal: str) -> List[Dict[str, Any]]:
     s = get_settings()
     _ensure_user_dirs(s, user_id)
-    registry = _build_registry()
+    registry = _build_registry(user_id, s)
     orch = Orchestrator(registry)
     token = get_token_for_user(user_id)
     ctx = ToolContext(user_id=user_id, settings=s, api_key=token, goal=goal)
@@ -326,6 +326,10 @@ def _run_steps_internal(
     )
 
 
+def _append_agent_tools_hint(goal: str, s: Settings, user_id: str) -> str:
+    return agent_service.append_agent_tools_hint(goal, s, user_id)
+
+
 def _finalize_internal(*, provider: str, goal: str, tool_outputs_full: List[Dict[str, Any]]) -> str:
     return agent_service.finalize_internal(provider=provider, goal=goal, tool_outputs_full=tool_outputs_full)
 
@@ -347,6 +351,7 @@ app.include_router(
     create_agent_router(
         ensure_user_dirs=_ensure_user_dirs,
         build_registry=_build_registry,
+        append_agent_tools_hint=_append_agent_tools_hint,
         llm_for_provider=_llm_for_provider,
         run_clarification_gate=_run_clarification_gate,
         clarification_response=_clarification_response,

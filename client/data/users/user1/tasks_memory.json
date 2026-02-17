@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-02-17T21:00:06Z",
+  "updated_at": "2026-02-17T22:49:46Z",
   "tasks": [
     {
       "id": 4,
@@ -16,7 +16,7 @@
     },
     {
       "id": 6,
-      "title": "Suchergebnisse für Donald Trump\n\n1. Die Webseite von Tagesschau.de wird nach Inf",
+      "title": "Suchergebnisse für Donald Trump 1. Die Webseite von Tagesschau.de wird nach Inf",
       "text": "Suchergebnisse für Donald Trump\n\n1. Die Webseite von Tagesschau.de wird nach Informationen über Donald Trump durchsucht.\n2. Die Ergebnisse der Suche werden in einen Text überführt.\n3. Der Text wird als PDF-Dokument unter dem Namen \"ergebnisse.pdf\" exportiert.\n4. Das PDF-Dokument wird an die E-Mail-Adresse tobias_stahl@outlook.de mit dem Betreff \"Suchergebnisse für Donald Trump\" gesendet.",
       "planned_steps": [
         "1. tool=view_website args={\"url\":\"http://www.tagesschau.de\",\"query\":\"Donald Trump\"}",
@@ -26,6 +26,18 @@
       ],
       "planned_steps_text": "===== PLANNED STEPS =====\n1. tool=view_website args={\"url\":\"http://www.tagesschau.de\",\"query\":\"Donald Trump\"}\n2. tool=llm_compose args={\"text\":\"{steps[0].text}\"}\n3. tool=pdf_export args={\"output_path\":\"ergebnisse.pdf\",\"text\":\"{steps[1].text}\"}\n4. tool=send_mail args={\"to\":[\"tobias_stahl@outlook.de\"],\"subject\":\"Suchergebnisse für Donald Trump\",\"body\":\"Bitte finden Sie die Suchergebnisse im Anhang.\",\"attachment_paths\":[\"{steps[2].output_path}\"]}\n=========================",
       "created_at": "2026-02-17T20:59:57Z",
+      "dialog": [],
+      "reruns": []
+    },
+    {
+      "id": 7,
+      "title": "E-Mail-Versand an Tobias Stahl\n\n1. Die E-Mail-Adresse des Empfängers ist Tobias_",
+      "text": "E-Mail-Versand an Tobias Stahl\n\n1. Die E-Mail-Adresse des Empfängers ist Tobias_Stahl@outlook.de.\n2. Das Tool \"send_mail\" wird verwendet, um die E-Mail zu senden.\n3. Der Empfänger wird gebeten, einen Betreff für die E-Mail anzugeben.",
+      "planned_steps": [
+        "1. tool=send_mail args={\"to\":[\"Tobias_Stahl@outlook.de\"],\"subject\":\"Bitte um Angabe eines Betreffs\",\"body\":\"Bitte um Angabe eines E-Mail-Textes\"}"
+      ],
+      "planned_steps_text": "===== PLANNED STEPS =====\n1. tool=send_mail args={\"to\":[\"Tobias_Stahl@outlook.de\"],\"subject\":\"Bitte um Angabe eines Betreffs\",\"body\":\"Bitte um Angabe eines E-Mail-Textes\"}\n=========================",
+      "created_at": "2026-02-17T22:29:27Z",
       "dialog": [],
       "reruns": []
     }

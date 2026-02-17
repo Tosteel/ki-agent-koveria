@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, Type
 from fastapi import HTTPException
 from pydantic import BaseModel
 
-from .policies import PHASE1_ALLOWED_TOOLS
+from .policies import is_phase1_tool_allowed
 
 
 @dataclass
@@ -44,7 +44,7 @@ class ToolRegistry:
         one_of = []
 
         for tool in self._tools.values():
-            if tool.name not in PHASE1_ALLOWED_TOOLS:
+            if not is_phase1_tool_allowed(tool.name):
                 continue
 
             one_of.append(

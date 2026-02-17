@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List
 
-from ..agent.policies import PHASE1_ALLOWED_TOOLS
+from ..agent.policies import is_phase1_tool_allowed
 from ..agent.tool_registry import ToolRegistry, ToolContext
 
 
@@ -23,7 +23,7 @@ class Orchestrator:
                 args["goal"] = goal
             args = self._resolve_placeholders(args, outputs, payload)
 
-            if tool not in PHASE1_ALLOWED_TOOLS:
+            if not is_phase1_tool_allowed(tool):
                 outputs.append({"step": i, "tool": tool, "ok": False, "error": "tool_not_allowed", "payload": payload})
                 continue
 

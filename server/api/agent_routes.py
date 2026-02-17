@@ -27,7 +27,8 @@ security = HTTPBearer(auto_error=False)
 def create_agent_router(
     *,
     ensure_user_dirs: Callable[[Settings, str], None],
-    build_registry: Callable[[], Any],
+    build_registry: Callable[[str, Settings], Any],
+    append_agent_tools_hint: Callable[[str, Settings, str], str],
     llm_for_provider: Callable[[str], Any],
     run_clarification_gate: Callable[[Any, str], Dict[str, Any]],
     clarification_response: Callable[[str, Dict[str, Any]], AgentAskResponse],
@@ -75,9 +76,9 @@ def create_agent_router(
     ) -> AgentPlanResponse:
         ensure_user_dirs(s, user_id)
 
-        registry = build_registry()
+        registry = build_registry(user_id, s)
         llm = llm_for_provider('ionos')
-        effective_goal = req.goal
+        effective_goal = append_agent_tools_hint(req.goal, s, user_id)
         additional_props = req.additional_props if isinstance(req.additional_props, dict) else {}
         raw_steps = additional_props.get('planned_steps')
         existing_steps = [str(step).strip() for step in (raw_steps or []) if str(step).strip()]
@@ -87,6 +88,7 @@ def create_agent_router(
                 'Bestehende PLANNED STEPS (als Grundlage verwenden):\n'
                 + '\n'.join(existing_steps)
             )
+        effective_goal = append_agent_tools_hint(effective_goal, s, user_id)
         planner = Planner(llm, registry)
         steps = planner.create_steps(goal=effective_goal)
         steps = inject_llm_summary_before_pdf(steps, effective_goal)
@@ -178,11 +180,20 @@ def create_agent_router(
         goal_ctx = goal_with_context(req.goal, req.history)
         llm = llm_for_provider('openai')
         gate = run_clarification_gate(llm, goal_ctx)
+
+        print('\n===== CLARIFICATION =====')
+        print(f"status={gate.get('status')}")
+        print(f"normalized_goal={gate.get('normalized_goal')}")
+        print(f"missing_fields={gate.get('missing_fields')}")
+        print(f"questions={gate.get('questions')}")
+        print('=========================\n')
+
         if gate['status'] == 'needs_info':
             return clarification_response(req.goal, gate)
 
         effective_goal = str(gate.get('normalized_goal') or req.goal)
-        planner = Planner(llm, build_registry())
+        effective_goal = append_agent_tools_hint(effective_goal, s, user_id)
+        planner = Planner(llm, build_registry(user_id, s))
         steps = planner.create_steps(goal=effective_goal)
         steps = inject_llm_summary_before_pdf(steps, effective_goal)
 
@@ -227,7 +238,8 @@ def create_agent_router(
             return clarification_response(req.goal, gate)
 
         effective_goal = str(gate.get('normalized_goal') or req.goal)
-        planner = Planner(llm, build_registry())
+        effective_goal = append_agent_tools_hint(effective_goal, s, user_id)
+        planner = Planner(llm, build_registry(user_id, s))
         steps = planner.create_steps(goal=effective_goal)
         steps = inject_llm_summary_before_pdf(steps, effective_goal)
 

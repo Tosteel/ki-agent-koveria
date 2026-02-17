@@ -93,3 +93,27 @@ Vorgeschlagene Umsetzung in Phasen:
 - Phase 1: Datenmodell + DB-Migration für Chats/Tasks/Trigger.
 - Phase 2: Job-Queue + Worker für asynchrone Tool-Ausführung.
 - Phase 3: Load-Balancer + mehrere API-Instanzen + Monitoring/Autoscaling.
+
+## Idee: JSON-Dateien vs. Datenbank
+
+Kurzfazit:
+- Für den aktuellen Projektstand sind JSON-Dateien pragmatisch und ausreichend.
+- Für Wachstum (mehr Nutzer, parallele Zugriffe) ist eine Datenbank die robustere Lösung.
+
+Wann JSON sinnvoll ist:
+- Schneller Start ohne zusätzliche Infrastruktur.
+- Einfaches Debugging, da Inhalte direkt lesbar sind.
+- Geringe Last und wenige gleichzeitige Schreibzugriffe.
+
+Grenzen von JSON langfristig:
+- Race Conditions bei parallelem Schreiben.
+- Keine Transaktionen/Locking wie in einer DB.
+- Schlechtere Performance bei großen Datenmengen.
+- Eingeschränkte Such-/Filtermöglichkeiten.
+- Höherer Aufwand für Backup, Recovery und Auditing.
+
+Empfehlung:
+- Kurzfristig: JSON beibehalten.
+- Mittelfristig: Migration auf PostgreSQL für `users`, `tasks`, `agents`, `triggers`, `runs`.
+- Optional ergänzen: Redis für Queue, Caching und verteilte Locks.
+- JSON künftig nur noch für Import/Export verwenden.

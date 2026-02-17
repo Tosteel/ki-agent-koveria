@@ -17,3 +17,7 @@ PHASE1_ALLOWED_TOOLS = {
     "fetch_unanswered_mails",
     "list_skills",
 }
+
+def is_phase1_tool_allowed(tool_name: str) -> bool:
+    name = str(tool_name or "").strip()
+    return bool(name in PHASE1_ALLOWED_TOOLS or name.startswith("agent_"))
