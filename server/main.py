@@ -36,6 +36,12 @@ from .tools.mail import send_mail
 from .tools.loader import register_all_tools
 from .triggers import TriggerRegistry, TriggerRuntime, register_all_triggers
 from .triggers.store import load_user_triggers, save_user_triggers
+from .api.agent_routes import create_agent_router
+from .api.trigger_routes import create_trigger_router
+from .api.user_routes import router as user_router
+from .api.tool_routes import create_tool_router
+from .services import memory_service
+from .services import agent_service
 
 from .agent.tool_registry import ToolRegistry, ToolContext
 from .agent.orchestrator import Orchestrator
@@ -72,7 +78,7 @@ class AgentMemorySyncRequest(BaseModel):
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return memory_service.now_iso()
 
 
 def _user_tasks_memory_path(s: Settings, user_id: str) -> Path:
@@ -84,520 +90,83 @@ def _user_agents_memory_path(s: Settings, user_id: str) -> Path:
 
 
 def _normalize_tasks_payload(raw: Any) -> List[Dict[str, Any]]:
-    if not isinstance(raw, list):
-        return []
-    tasks: List[Dict[str, Any]] = []
-    for t in raw:
-        if not isinstance(t, dict):
-            continue
-        task_id = int(t.get("id") or 0)
-        text = str(t.get("text") or "").strip()
-        if task_id <= 0 or not text:
-            continue
-        reruns_raw = t.get("reruns")
-        reruns: List[Dict[str, Any]] = []
-        if isinstance(reruns_raw, list):
-            for r in reruns_raw:
-                if not isinstance(r, dict):
-                    continue
-                answer = str(r.get("answer") or "").strip()
-                if not answer:
-                    continue
-                reruns.append(
-                    {
-                        "answer": answer,
-                        "created_at": str(r.get("created_at") or ""),
-                    }
-                )
-        dialog_raw = t.get("dialog")
-        dialog: List[Dict[str, Any]] = []
-        if isinstance(dialog_raw, list):
-            for m in dialog_raw:
-                if not isinstance(m, dict):
-                    continue
-                msg_text = str(m.get("text") or "").strip()
-                if not msg_text:
-                    continue
-                dialog.append(
-                    {
-                        "role": "user" if str(m.get("role") or "").strip().lower() == "user" else "bot",
-                        "text": msg_text,
-                        "plannedSteps": [str(s).strip() for s in (m.get("plannedSteps") or []) if str(s).strip()],
-                        "options": [
-                            {
-                                "type": str(o.get("type") or "").strip(),
-                                "taskId": int(o.get("taskId") or 0),
-                                "created": str(o.get("created") or "").strip(),
-                                "plannedSteps": [str(s).strip() for s in (o.get("plannedSteps") or []) if str(s).strip()],
-                            }
-                            for o in (m.get("options") or [])
-                            if isinstance(o, dict) and str(o.get("type") or "").strip()
-                        ],
-                        "timestamp": str(m.get("timestamp") or ""),
-                    }
-                )
-        tasks.append(
-            {
-                "id": task_id,
-                "title": str(t.get("title") or "").strip(),
-                "text": text,
-                "planned_steps": [str(s).strip() for s in (t.get("planned_steps") or []) if str(s).strip()],
-                "planned_steps_text": str(t.get("planned_steps_text") or "").strip(),
-                "created_at": str(t.get("created_at") or ""),
-                "dialog": dialog,
-                "reruns": reruns,
-            }
-        )
-    return tasks
+    return memory_service.normalize_tasks_payload(raw)
 
 
 def _load_tasks_memory_for_user(s: Settings, user_id: str) -> Dict[str, Any]:
-    path = _user_tasks_memory_path(s, user_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        return {"tasks": []}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {"tasks": []}
-    if not isinstance(data, dict):
-        return {"tasks": []}
-    return {"tasks": _normalize_tasks_payload(data.get("tasks"))}
+    return memory_service.load_tasks_memory_for_user(s, user_id)
 
 
 def _save_tasks_memory_for_user(s: Settings, user_id: str, tasks: List[Dict[str, Any]]) -> None:
-    path = _user_tasks_memory_path(s, user_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "version": 1,
-        "updated_at": _now_iso(),
-        "tasks": _normalize_tasks_payload(tasks),
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    memory_service.save_tasks_memory_for_user(s, user_id, tasks)
 
 
 def _normalize_agents_payload(raw: Any) -> List[Dict[str, Any]]:
-    if not isinstance(raw, list):
-        return []
-    agents: List[Dict[str, Any]] = []
-    for a in raw:
-        if not isinstance(a, dict):
-            continue
-        agent_id = int(a.get("id") or 0)
-        text = str(a.get("text") or "").strip()
-        if agent_id <= 0 or not text:
-            continue
-        dialog_raw = a.get("dialog")
-        dialog: List[Dict[str, Any]] = []
-        if isinstance(dialog_raw, list):
-            for m in dialog_raw:
-                if not isinstance(m, dict):
-                    continue
-                msg_text = str(m.get("text") or "").strip()
-                if not msg_text:
-                    continue
-                dialog.append(
-                    {
-                        "role": "user" if str(m.get("role") or "").strip().lower() == "user" else "bot",
-                        "text": msg_text,
-                        "plannedSteps": [str(s).strip() for s in (m.get("plannedSteps") or []) if str(s).strip()],
-                        "timestamp": str(m.get("timestamp") or ""),
-                    }
-                )
-        placeholders_raw = a.get("placeholders")
-        placeholders: List[Dict[str, Any]] = []
-        if isinstance(placeholders_raw, list):
-            for p in placeholders_raw:
-                if not isinstance(p, dict):
-                    continue
-                name = str(p.get("name") or "").strip().lower()
-                if not name:
-                    continue
-                placeholders.append(
-                    {
-                        "name": name,
-                        "type": str(p.get("type") or "string").strip().lower() or "string",
-                        "required": bool(p.get("required", True)),
-                        "description": str(p.get("description") or "").strip(),
-                        "used_in": [str(u).strip() for u in (p.get("used_in") or []) if str(u).strip()],
-                    }
-                )
-        agents.append(
-            {
-                "id": agent_id,
-                "title": str(a.get("title") or "").strip(),
-                "text": text,
-                "planned_steps": [str(s).strip() for s in (a.get("planned_steps") or []) if str(s).strip()],
-                "created_at": str(a.get("created_at") or ""),
-                "source_task_id": int(a.get("source_task_id") or 0),
-                "placeholders": placeholders,
-                "dialog": dialog,
-            }
-        )
-    return agents
+    return memory_service.normalize_agents_payload(raw)
 
 
 def _load_agents_memory_for_user(s: Settings, user_id: str) -> Dict[str, Any]:
-    path = _user_agents_memory_path(s, user_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        return {"agents": []}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {"agents": []}
-    if not isinstance(data, dict):
-        return {"agents": []}
-    return {"agents": _normalize_agents_payload(data.get("agents"))}
+    return memory_service.load_agents_memory_for_user(s, user_id)
 
 
 def _save_agents_memory_for_user(s: Settings, user_id: str, agents: List[Dict[str, Any]]) -> None:
-    path = _user_agents_memory_path(s, user_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "version": 1,
-        "updated_at": _now_iso(),
-        "agents": _normalize_agents_payload(agents),
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    memory_service.save_agents_memory_for_user(s, user_id, agents)
 
 
 def _first_nonempty_str(*values: Any) -> str:
-    for v in values:
-        if isinstance(v, str) and v.strip():
-            return v.strip()
-    return ""
+    return agent_service.first_nonempty_str(*values)
 
 
 def _extract_hit_source(hit: Dict[str, Any]) -> str:
-    document_raw = hit.get("document")
-    document_str = document_raw.strip() if isinstance(document_raw, str) else ""
-    src = _first_nonempty_str(
-        hit.get("source"),
-        hit.get("file"),
-        hit.get("file_name"),
-        hit.get("filename"),
-        hit.get("document"),
-        hit.get("document_name"),
-        hit.get("document_title"),
-        hit.get("uri"),
-        hit.get("path"),
-        hit.get("link_source"),
-        hit.get("link_server"),
-        hit.get("source_url"),
-        hit.get("url"),
-        hit.get("document_id"),
-        hit.get("id"),
-    )
-    if src:
-        return src
-    if document_str:
-        return document_str
-
-    for key in ("metadata", "meta", "payload", "document", "_source"):
-        nested = hit.get(key)
-        if isinstance(nested, str) and nested.strip():
-            return nested.strip()
-        if isinstance(nested, dict):
-            src = _first_nonempty_str(
-                nested.get("source"),
-                nested.get("file"),
-                nested.get("file_name"),
-                nested.get("filename"),
-                nested.get("document"),
-                nested.get("document_name"),
-                nested.get("document_title"),
-                nested.get("uri"),
-                nested.get("path"),
-                nested.get("link_source"),
-                nested.get("link_server"),
-                nested.get("source_url"),
-                nested.get("url"),
-                nested.get("document_id"),
-                nested.get("id"),
-            )
-            if src:
-                return src
-    return "unknown"
+    return agent_service.extract_hit_source(hit)
 
 
 def _extract_hit_link(hit: Dict[str, Any]) -> str:
-    link = _first_nonempty_str(
-        hit.get("link_source"),
-        hit.get("link_server"),
-        hit.get("source_url"),
-        hit.get("url"),
-        hit.get("link"),
-    )
-    if link:
-        return link
-
-    for key in ("metadata", "meta", "payload", "document", "_source"):
-        nested = hit.get(key)
-        if isinstance(nested, dict):
-            link = _first_nonempty_str(
-                nested.get("link_source"),
-                nested.get("link_server"),
-                nested.get("source_url"),
-                nested.get("url"),
-                nested.get("link"),
-            )
-            if link:
-                return link
-    return ""
+    return agent_service.extract_hit_link(hit)
 
 
 def _extract_hit_text(hit: Dict[str, Any]) -> str:
-    txt = _first_nonempty_str(
-        hit.get("text"),
-        hit.get("snippet"),
-        hit.get("content"),
-        hit.get("chunk"),
-        hit.get("page_content"),
-        hit.get("body"),
-    )
-    if txt:
-        return txt
-
-    for key in ("metadata", "meta", "payload", "document", "_source"):
-        nested = hit.get(key)
-        if isinstance(nested, dict):
-            txt = _first_nonempty_str(
-                nested.get("text"),
-                nested.get("snippet"),
-                nested.get("content"),
-                nested.get("chunk"),
-                nested.get("page_content"),
-                nested.get("body"),
-            )
-            if txt:
-                return txt
-
-    return ""
+    return agent_service.extract_hit_text(hit)
 
 
 def _rag_result_to_text(query: str, rag_result: Dict[str, Any]) -> str:
-    lines = [f"RAG Query: {query}", ""]
-    for i, h in enumerate(rag_result.get("hits", []), start=1):
-        source = _extract_hit_source(h if isinstance(h, dict) else {})
-        link = _extract_hit_link(h if isinstance(h, dict) else {})
-        score = h.get("score") if isinstance(h, dict) else None
-        snippet = _extract_hit_text(h if isinstance(h, dict) else {})
-        lines.append(f"[{i}] source={source} score={score}")
-        if link and link != source:
-            lines.append(f"link={link}")
-        if snippet:
-            lines.append(snippet)
-        else:
-            lines.append("(kein Textausschnitt im Treffer enthalten)")
-        lines.append("")
-    return "\n".join(lines).strip() or "Kein Inhalt."
+    return agent_service.rag_result_to_text(query, rag_result)
 
 
 def _search_result_to_text(user_prompt: str, result: Dict[str, Any]) -> str:
-    if not isinstance(result, dict):
-        return str(result or "")
-
-    for key in ("text", "answer", "summary", "content", "markdown"):
-        val = result.get(key)
-        if isinstance(val, str) and val.strip():
-            return val.strip()
-
-    for key in ("rows", "results", "items", "data"):
-        val = result.get(key)
-        if isinstance(val, list) and val:
-            lines = [f"Search Prompt: {user_prompt}", ""]
-            for i, item in enumerate(val, start=1):
-                if isinstance(item, dict):
-                    lines.append(f"[{i}] " + ", ".join(f"{k}={v}" for k, v in item.items()))
-                else:
-                    lines.append(f"[{i}] {item}")
-            return "\n".join(lines).strip()
-
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    return agent_service.search_result_to_text(user_prompt, result)
 
 
 def _wants_summary(goal: str) -> bool:
-    g = (goal or "").lower()
-    return any(k in g for k in ("zusammenfass", "fasse", "summary", "kurz"))
+    return agent_service.wants_summary(goal)
 
 
 def _rewrite_summarize_to_compose(steps: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
-    out: list[Dict[str, Any]] = []
-    for st in steps:
-        tool = (st.get("tool") or "").strip()
-        if tool == "llm_summarize":
-            out.append({"tool": "llm_compose", "args": dict(st.get("args") or {})})
-        else:
-            out.append(st)
-    return out
+    return agent_service.rewrite_summarize_to_compose(steps)
 
 
 def _inject_llm_summary_before_pdf(steps: list[Dict[str, Any]], goal: str) -> list[Dict[str, Any]]:
-    # Planner kann noch llm_summarize erzeugen; wir erzwingen llm_compose.
-    steps = _rewrite_summarize_to_compose(steps)
-    if not _wants_summary(goal):
-        return steps
-    if any((s.get("tool") or "").strip() == "llm_compose" for s in steps):
-        return steps
-
-    out: list[Dict[str, Any]] = []
-    for st in steps:
-        if (st.get("tool") or "").strip() == "pdf_export":
-            args = dict(st.get("args") or {})
-            source_text = args.get("text") or "{last.text}"
-            out.append(
-                {
-                    "tool": "llm_compose",
-                    "args": {
-                        "text": source_text,
-                        "goal": goal,
-                        "instruction": f"Formuliere die relevanten Ergebnisse als kohärenten, gut lesbaren Text: {goal}",
-                        "max_chars": 1800,
-                    },
-                }
-            )
-            args["text"] = "{last.text}"
-            out.append({"tool": "pdf_export", "args": args})
-        else:
-            out.append(st)
-    return out
+    return agent_service.inject_llm_summary_before_pdf(steps, goal)
 
 
 def _compact_tool_outputs(tool_outputs: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
-    compact: list[Dict[str, Any]] = []
-    for o in tool_outputs:
-        item: Dict[str, Any] = {
-            "step": o.get("step"),
-            "tool": o.get("tool"),
-            "ok": o.get("ok"),
-        }
-        payload = o.get("payload")
-        if isinstance(payload, dict):
-            payload = dict(payload)
-        if o.get("ok"):
-            # Response kompakt halten: nur payload zurückgeben (enthält bereits die result-Felder).
-            item["payload"] = payload
-        else:
-            item["error"] = o.get("error")
-            item["payload"] = payload
-        compact.append(item)
-    return compact
+    return agent_service.compact_tool_outputs(tool_outputs)
 
 
 def _sanitize_execution_steps(steps: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
-    out: list[Dict[str, Any]] = []
-    for st in steps:
-        if not isinstance(st, dict):
-            continue
-        tool = str(st.get("tool") or "").strip()
-        args = st.get("args") if isinstance(st.get("args"), dict) else {}
-        args_out = dict(args)
-        if tool == "pdf_export":
-            output_path = str(args_out.get("output_path") or "").strip()
-            if not output_path.lower().endswith(".pdf"):
-                args_out["output_path"] = "result.pdf"
-        elif tool == "ppt_export":
-            output_path = str(args_out.get("output_path") or "").strip()
-            if not output_path.lower().endswith(".pptx"):
-                args_out["output_path"] = "result.pptx"
-        out.append({"tool": tool, "args": args_out})
-    return out
+    return agent_service.sanitize_execution_steps(steps)
 
 
 def _outputs_for_final_answer(tool_outputs: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
-    """
-    Build a token-lean view for final_answer prompts.
-    Keeps execution status + essential fields, drops verbose blobs.
-    """
-    compact = _compact_tool_outputs(tool_outputs)
-    lean: list[Dict[str, Any]] = []
-    for o in compact:
-        item: Dict[str, Any] = {
-            "step": o.get("step"),
-            "tool": o.get("tool"),
-            "ok": o.get("ok"),
-        }
-        payload = o.get("payload")
-        if not isinstance(payload, dict):
-            lean.append(item)
-            continue
-
-        p = dict(payload)
-        tool = item["tool"]
-        if tool == "rag_knowledgebase":
-            # Large snippets are expensive in prompt tokens.
-            p.pop("hits", None)
-            if isinstance(payload.get("hits"), list):
-                p["hit_count"] = len(payload["hits"])
-        elif tool == "llm_summarize":
-            # summary is enough for downstream natural-language answer.
-            p.pop("usage", None)
-            p.pop("model", None)
-        elif tool == "llm_compose":
-            # composed_text is enough for final answer.
-            p.pop("usage", None)
-            p.pop("model", None)
-
-        item["payload"] = p
-        if not o.get("ok"):
-            item["error"] = o.get("error")
-        lean.append(item)
-    return lean
+    return agent_service.outputs_for_final_answer(tool_outputs)
 
 
 def _extract_execution_answer(tool_outputs: list[Dict[str, Any]]) -> str:
-    for out in reversed(tool_outputs):
-        if not isinstance(out, dict) or not out.get("ok"):
-            continue
-        payload = out.get("payload")
-        if not isinstance(payload, dict):
-            continue
-        for key in ("composed_text", "text", "summary", "answer", "message"):
-            val = payload.get(key)
-            if isinstance(val, str) and val.strip():
-                return val.strip()
-    return "Ausführung abgeschlossen."
+    return agent_service.extract_execution_answer(tool_outputs)
 
 
 def _run_clarification_gate(llm: Any, goal: str) -> Dict[str, Any]:
-    g = (goal or "").strip().lower()
-    # Retrieval/Recherche soll nicht durch überstrenge Rückfragen blockiert werden.
-    # Bei solchen Zielen lieber best-effort planen und ausführen.
-    search_like_markers = [
-        "suche",
-        "such",
-        "recherche",
-        "finde",
-        "in meinem wissen",
-        "wissen",
-        "knowledgebase",
-        "rag",
-        "websuche",
-        "internet",
-    ]
-    if any(m in g for m in search_like_markers):
-        return {"status": "ready", "normalized_goal": goal, "missing_fields": [], "questions": []}
-
-    if not hasattr(llm, "enabled") or not llm.enabled():
-        return {"status": "ready", "normalized_goal": goal, "missing_fields": [], "questions": []}
-    if not hasattr(llm, "clarify_goal"):
-        return {"status": "ready", "normalized_goal": goal, "missing_fields": [], "questions": []}
-
-    try:
-        out = llm.clarify_goal(goal=goal)
-    except Exception:
-        return {"status": "ready", "normalized_goal": goal, "missing_fields": [], "questions": []}
-
-    status = out.get("status")
-    if status not in {"ready", "needs_info"}:
-        status = "ready"
-    return {
-        "status": status,
-        "normalized_goal": str(out.get("normalized_goal") or goal),
-        "missing_fields": list(out.get("missing_fields") or []),
-        "questions": list(out.get("questions") or []),
-    }
+    return agent_service.run_clarification_gate(llm, goal)
 
 
 def _clarification_response(req_goal: str, gate: Dict[str, Any]) -> AgentAskResponse:
@@ -618,29 +187,11 @@ def _clarification_response(req_goal: str, gate: Dict[str, Any]) -> AgentAskResp
 
 
 def _history_to_context(history: Any, max_items: int = 12) -> str:
-    if not isinstance(history, list):
-        return ""
-    lines: list[str] = []
-    for item in history[-max_items:]:
-        if not isinstance(item, dict):
-            continue
-        role_raw = str(item.get("role") or "").strip().lower()
-        text = str(item.get("text") or "").strip()
-        if not text:
-            continue
-        role = "Nutzer" if role_raw == "user" else "Assistent"
-        lines.append(f"{role}: {text}")
-    return "\n".join(lines).strip()
+    return agent_service.history_to_context(history, max_items=max_items)
 
 
 def _goal_with_context(goal: str, history: Any) -> str:
-    base = (goal or "").strip()
-    if not base:
-        return base
-    hist = _history_to_context(history, max_items=12)
-    if not hist:
-        return base
-    return f"Aktuelle Anfrage:\n{base}\n\nDialogverlauf (letzte 12 Nachrichten):\n{hist}"
+    return agent_service.goal_with_context(goal, history)
 
 from .services.llm_openai import LlmRuntime
 from server.services.llm_ionos import IonosLLM
@@ -667,19 +218,14 @@ def _shutdown() -> None:
         runtime.stop()
 
 def _ensure_user_dirs(s: Settings, user_id: str) -> None:
-    s.user_work_dir(user_id).mkdir(parents=True, exist_ok=True)
-    s.user_rag_dir(user_id).mkdir(parents=True, exist_ok=True)
-    s.user_logs_dir(user_id).mkdir(parents=True, exist_ok=True)
+    memory_service.ensure_user_dirs(s, user_id)
 
-# ----------------------------- Health / User -----------------------------
-@app.get("/health")
-def health(user_id: str = Depends(get_current_user)) -> Dict[str, str]:
-    return {"status": "ok", "user": user_id}
-
-
-@app.get("/user")
-def user(user_id: str = Depends(get_current_user)) -> Dict[str, str]:
-    return {"user_id": user_id}
+app.include_router(user_router)
+app.include_router(
+    create_tool_router(
+        ensure_user_dirs=_ensure_user_dirs,
+    )
+)
 
 
 @app.get("/tasks/memory")
@@ -733,250 +279,9 @@ def _get_trigger_runtime() -> TriggerRuntime:
     return runtime
 
 
-@app.get("/triggers/types")
-def trigger_types() -> Dict[str, Any]:
-    reg = _build_trigger_registry()
-    return {"types": reg.available_types()}
-
-
-@app.get("/triggers")
-def list_triggers(
-    user_id: str = Depends(get_current_user),
-    s: Settings = Depends(dep_settings),
-) -> Dict[str, Any]:
-    _ensure_user_dirs(s, user_id)
-    payload = load_user_triggers(s, user_id)
-    triggers = payload.get("triggers") if isinstance(payload.get("triggers"), list) else []
-    return {"user_id": user_id, "triggers": triggers}
-
-
-@app.post("/triggers")
-def create_trigger(
-    req: TriggerCreateRequest,
-    user_id: str = Depends(get_current_user),
-    s: Settings = Depends(dep_settings),
-) -> Dict[str, Any]:
-    _ensure_user_dirs(s, user_id)
-    reg = _build_trigger_registry()
-    # validate trigger type + config upfront
-    reg.create_instance(req.trigger_type.strip(), req.config or {})
-
-    payload = load_user_triggers(s, user_id)
-    triggers = payload.get("triggers") if isinstance(payload.get("triggers"), list) else []
-    trigger_id = str(uuid4())
-    item = {
-        "id": trigger_id,
-        "name": req.name.strip(),
-        "trigger_type": req.trigger_type.strip(),
-        "task_id": int(req.task_id),
-        "config": req.config or {},
-        "enabled": bool(req.enabled),
-        "created_at": _now_iso(),
-        "last_fired_at": "",
-        "last_error": "",
-    }
-    triggers.append(item)
-    save_user_triggers(s, user_id, triggers)
-    return {"ok": True, "trigger": item}
-
-
-@app.patch("/triggers/{trigger_id}")
-def update_trigger(
-    trigger_id: str,
-    req: TriggerUpdateRequest,
-    user_id: str = Depends(get_current_user),
-    s: Settings = Depends(dep_settings),
-) -> Dict[str, Any]:
-    _ensure_user_dirs(s, user_id)
-    payload = load_user_triggers(s, user_id)
-    triggers = payload.get("triggers") if isinstance(payload.get("triggers"), list) else []
-    updated: Optional[Dict[str, Any]] = None
-    for t in triggers:
-        if str(t.get("id") or "") != trigger_id:
-            continue
-        if req.name is not None:
-            t["name"] = req.name.strip()
-        if req.task_id is not None:
-            t["task_id"] = int(req.task_id)
-        if req.trigger_type is not None:
-            trigger_type = req.trigger_type.strip()
-            reg = _build_trigger_registry()
-            cfg_to_validate = req.config if req.config is not None else (t.get("config") if isinstance(t.get("config"), dict) else {})
-            reg.create_instance(trigger_type, cfg_to_validate or {})
-            t["trigger_type"] = trigger_type
-            t["config"] = cfg_to_validate or {}
-        if req.config is not None:
-            # validate config for this trigger type
-            reg = _build_trigger_registry()
-            reg.create_instance(str(t.get("trigger_type") or ""), req.config or {})
-            t["config"] = req.config or {}
-        if req.enabled is not None:
-            t["enabled"] = bool(req.enabled)
-        updated = t
-        break
-    if updated is None:
-        return {"ok": False, "error": "trigger_not_found"}
-
-    save_user_triggers(s, user_id, triggers)
-    return {"ok": True, "trigger": updated}
-
-
-@app.delete("/triggers/{trigger_id}")
-def delete_trigger(
-    trigger_id: str,
-    user_id: str = Depends(get_current_user),
-    s: Settings = Depends(dep_settings),
-) -> Dict[str, Any]:
-    _ensure_user_dirs(s, user_id)
-    payload = load_user_triggers(s, user_id)
-    triggers = payload.get("triggers") if isinstance(payload.get("triggers"), list) else []
-    kept: List[Dict[str, Any]] = []
-    deleted = False
-    for t in triggers:
-        if str(t.get("id") or "") == trigger_id:
-            deleted = True
-            continue
-        kept.append(t)
-    if not deleted:
-        return {"ok": False, "error": "trigger_not_found"}
-    save_user_triggers(s, user_id, kept)
-    return {"ok": True, "trigger_id": trigger_id}
-
-
-@app.post("/triggers/{trigger_id}/run-now")
-def run_trigger_now(
-    trigger_id: str,
-    user_id: str = Depends(get_current_user),
-) -> Dict[str, Any]:
-    runtime = _get_trigger_runtime()
-    try:
-        result = runtime.run_trigger_now(user_id=user_id, trigger_id=trigger_id)
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
-    return {"ok": bool(result.get("ok")), "result": result}
-
-
-# ----------------------------- Phase 1: Direct APIs -----------------------------
-@app.post("/rag/query")
-def rag_query(
-    req: RagQueryRequest,
-    user_id: str = Depends(get_current_user),
-    s: Settings = Depends(dep_settings),
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> Dict[str, Any]:
-    _ensure_user_dirs(s, user_id)
-
-    api_key = credentials.credentials
-    service = RagService(s.rag_base_url, api_key)
-
-    data = service.query(query=req.query, top_k=req.top_k, classification=req.classification)
-    return data
-
-
-@app.post("/search/generate_json")
-def search_generate_json(
-    req: SearchGenerateJsonRequest,
-    user_id: str = Depends(get_current_user),
-    s: Settings = Depends(dep_settings),
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> Dict[str, Any]:
-    _ensure_user_dirs(s, user_id)
-    service = SearchService(s.search_base_url, credentials.credentials)
-    return service.search_generate_json(user_prompt=req.user_prompt)
-
-
-@app.post("/files/read", response_model=FileReadResponse)
-def files_read(
-    req: FileReadRequest,
-    user_id: str = Depends(get_current_user),
-    s: Settings = Depends(dep_settings),
-) -> FileReadResponse:
-    _ensure_user_dirs(s, user_id)
-    content = read_text(s.user_work_dir(user_id), req.path, encoding=req.encoding)
-    return FileReadResponse(path=req.path, content=content)
-
-
-@app.post("/files/write", response_model=FileWriteResponse)
-def files_write(
-    req: FileWriteRequest,
-    user_id: str = Depends(get_current_user),
-    s: Settings = Depends(dep_settings),
-) -> FileWriteResponse:
-    _ensure_user_dirs(s, user_id)
-    n = write_text(
-        s.user_work_dir(user_id),
-        req.path,
-        req.content,
-        encoding=req.encoding,
-        overwrite=req.overwrite,
-    )
-    return FileWriteResponse(path=req.path, bytes_written=n)
-
-
-@app.post("/pdf/export", response_model=PdfExportResponse)
-def pdf_export(
-    req: PdfExportRequest,
-    user_id: str = Depends(get_current_user),
-    s: Settings = Depends(dep_settings),
-) -> PdfExportResponse:
-    _ensure_user_dirs(s, user_id)
-    out = (s.user_work_dir(user_id) / req.output_path.strip().lstrip("/")).resolve()
-    size = export_text_pdf(out, title=req.title, text=req.text)
-    return PdfExportResponse(output_path=req.output_path, bytes_written=size)
-
-
-@app.post("/ppt/export", response_model=PptExportResponse)
-def ppt_export(
-    req: PptExportRequest,
-    user_id: str = Depends(get_current_user),
-    s: Settings = Depends(dep_settings),
-) -> PptExportResponse:
-    _ensure_user_dirs(s, user_id)
-    out = (s.user_work_dir(user_id) / req.output_path.strip().lstrip("/")).resolve()
-    result = export_text_pptx(
-        out,
-        title=req.title,
-        text=req.text,
-        use_llm_layout=req.use_llm_layout,
-        allow_heuristic_fallback=req.allow_heuristic_fallback,
-        goal=req.goal,
-        instruction=req.instruction,
-        max_slides=req.max_slides,
-        max_boxes_per_slide=req.max_boxes_per_slide,
-    )
-    return PptExportResponse(
-        output_path=req.output_path,
-        bytes_written=int(result.get("bytes_written") or 0),
-        layout_mode=str(result.get("layout_mode") or "heuristic"),
-    )
-
-
-@app.post("/mail/send", response_model=MailSendResponse)
-def mail_send(
-    req: MailSendRequest,
-    user_id: str = Depends(get_current_user),
-    s: Settings = Depends(dep_settings),
-) -> MailSendResponse:
-    _ensure_user_dirs(s, user_id)
-    result = send_mail(
-        to=req.to,
-        subject=req.subject,
-        body=req.body,
-        attachment_paths=req.attachment_paths,
-        work_dir=s.user_work_dir(user_id),
-        cc=req.cc,
-        bcc=req.bcc,
-        from_email=req.from_email,
-        reply_to=req.reply_to,
-        is_html=req.is_html,
-    )
-    return MailSendResponse(**result)
-
-
 # ----------------------------- Phase 1: Agent (Tool Registry + Orchestrator) -----------------------------
 def _build_registry() -> ToolRegistry:
-    registry = ToolRegistry()
-    return register_all_tools(registry)
+    return agent_service.build_registry()
 
 
 def _build_trigger_registry() -> TriggerRegistry:
@@ -995,17 +300,11 @@ def _execute_steps_for_trigger(user_id: str, steps: List[Dict[str, Any]], goal: 
 
 
 def _provider_key(provider: str) -> str:
-    p = str(provider or "").strip().lower()
-    if p in {"openai", "ionos"}:
-        return p
-    return "ionos"
+    return agent_service.provider_key(provider)
 
 
 def _llm_for_provider(provider: str) -> Any:
-    p = _provider_key(provider)
-    if p == "openai":
-        return LlmRuntime()
-    return IonosLLM()
+    return agent_service.llm_for_provider(provider)
 
 
 def _run_steps_internal(
@@ -1017,240 +316,44 @@ def _run_steps_internal(
     steps: List[Dict[str, Any]],
     log_label: str = "PLANNED STEPS",
 ) -> tuple[bool, List[Dict[str, Any]], List[Dict[str, Any]], str]:
-    registry = _build_registry()
-    orch = Orchestrator(registry)
-    ctx = ToolContext(user_id=user_id, settings=settings, api_key=api_key, goal=goal)
-    sanitized_steps = _sanitize_execution_steps(steps)
-
-    print(f"\n===== {log_label} =====")
-    for i, step in enumerate(sanitized_steps, 1):
-        print(f"{i}. tool={step.get('tool')} args={step.get('args')}")
-    print("=========================\n")
-
-    tool_outputs_full = orch.run_steps(ctx, sanitized_steps)
-    tool_outputs_compact = _compact_tool_outputs(tool_outputs_full)
-    ok = all(o.get("ok") for o in tool_outputs_full) if tool_outputs_full else True
-    fallback_answer = _extract_execution_answer(tool_outputs_full)
-    return ok, tool_outputs_full, tool_outputs_compact, fallback_answer
-
-
-def _finalize_internal(*, provider: str, goal: str, tool_outputs_full: List[Dict[str, Any]]) -> str:
-    llm = _llm_for_provider(provider)
-    llm_view = _outputs_for_final_answer(tool_outputs_full)
-    if hasattr(llm, "enabled") and llm.enabled():
-        return str(llm.final_answer(goal=goal, tool_outputs=llm_view))
-    return str(llm_view)
-
-
-
-@app.post("/agent/run", response_model=AgentRunResponse)
-def agent_run(
-    req: AgentRunRequest,
-    user_id: str = Depends(get_current_user),
-    s: Settings = Depends(dep_settings),
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> AgentRunResponse:
-    _ensure_user_dirs(s, user_id)
-
-    # Nur explizite Steps ausführen; kein impliziter Default-Flow.
-    if not req.steps:
-        raise HTTPException(status_code=422, detail="steps must not be empty for /agent/run")
-
-    steps = _sanitize_execution_steps([step.model_dump() for step in req.steps])
-    log_label = (req.log_label or "").strip() or "PLANNED STEPS"
-    ok, tool_outputs_full, tool_outputs_compact, answer = _run_steps_internal(
+    return agent_service.run_steps_internal(
         user_id=user_id,
-        settings=s,
-        api_key=credentials.credentials,
-        goal="",
+        settings=settings,
+        api_key=api_key,
+        goal=goal,
         steps=steps,
         log_label=log_label,
     )
-    print("\n===== FINAL ANSWER =====")
-    print(answer)
-    print("========================\n")
-
-    return AgentRunResponse(ok=ok, outputs=tool_outputs_compact)
 
 
-@app.post("/agent/plan", response_model=AgentPlanResponse)
-def agent_plan(
-    req: AgentPlanRequest,
-    user_id: str = Depends(get_current_user),
-    s: Settings = Depends(dep_settings),
-) -> AgentPlanResponse:
-    _ensure_user_dirs(s, user_id)
+def _finalize_internal(*, provider: str, goal: str, tool_outputs_full: List[Dict[str, Any]]) -> str:
+    return agent_service.finalize_internal(provider=provider, goal=goal, tool_outputs_full=tool_outputs_full)
 
-    registry = _build_registry()
-    llm = IonosLLM()
-    # /agent/plan: Keine Clarification. Replan nutzt goal + bestehende planned_steps.
-    effective_goal = req.goal
-    additional_props = req.additional_props if isinstance(req.additional_props, dict) else {}
-    raw_steps = additional_props.get("planned_steps")
-    existing_steps = [str(s).strip() for s in (raw_steps or []) if str(s).strip()]
-    if existing_steps:
-        effective_goal = (
-            f"{req.goal}\n\n"
-            "Bestehende PLANNED STEPS (als Grundlage verwenden):\n"
-            + "\n".join(existing_steps)
-        )
-    planner = Planner(llm, registry)
-    steps = planner.create_steps(goal=effective_goal)
-    steps = _inject_llm_summary_before_pdf(steps, effective_goal)
 
-    print("\n===== PLANNED STEPS =====")
-    for i, step in enumerate(steps, 1):
-        print(f"{i}. tool={step.get('tool')} args={step.get('args')}")
-    print("=========================\n")
-
-    return AgentPlanResponse(
-        ok=True,
-        goal=req.goal,
-        normalized_goal=effective_goal,
-        status="ready",
-        steps=steps,
-        requires_user_input=False,
-        missing_fields=[],
-        questions=[],
+app.include_router(
+    create_trigger_router(
+        ensure_user_dirs=_ensure_user_dirs,
+        build_trigger_registry=_build_trigger_registry,
+        load_user_triggers=load_user_triggers,
+        save_user_triggers=save_user_triggers,
+        now_iso=_now_iso,
+        get_trigger_runtime=_get_trigger_runtime,
     )
+)
 
 
-@app.post("/agent/clarify", response_model=AgentClarifyResponse)
-def agent_clarify(
-    req: AgentClarifyRequest,
-    user_id: str = Depends(get_current_user),
-    s: Settings = Depends(dep_settings),
-) -> AgentClarifyResponse:
-    _ensure_user_dirs(s, user_id)
-    goal_ctx = _goal_with_context(req.goal, req.history)
-    llm = _llm_for_provider(req.provider)
-    gate = _run_clarification_gate(llm, goal_ctx)
 
-    print("\n===== CLARIFICATION =====")
-    print(f"provider={_provider_key(req.provider)}")
-    print(f"status={gate.get('status')}")
-    print(f"normalized_goal={gate.get('normalized_goal')}")
-    print(f"missing_fields={gate.get('missing_fields')}")
-    print(f"questions={gate.get('questions')}")
-    print("=========================\n")
-
-    if gate["status"] == "needs_info":
-        clar = _clarification_response(req.goal, gate)
-        return AgentClarifyResponse(
-            ok=True,
-            goal=req.goal,
-            status="needs_info",
-            normalized_goal=str(gate.get("normalized_goal") or req.goal),
-            requires_user_input=True,
-            missing_fields=list(gate.get("missing_fields") or []),
-            questions=list(gate.get("questions") or []),
-            answer=clar.answer,
-        )
-
-    return AgentClarifyResponse(
-        ok=True,
-        goal=req.goal,
-        status="ready",
-        normalized_goal=str(gate.get("normalized_goal") or req.goal),
-        requires_user_input=False,
-        missing_fields=[],
-        questions=[],
-        answer="",
+app.include_router(
+    create_agent_router(
+        ensure_user_dirs=_ensure_user_dirs,
+        build_registry=_build_registry,
+        llm_for_provider=_llm_for_provider,
+        run_clarification_gate=_run_clarification_gate,
+        clarification_response=_clarification_response,
+        goal_with_context=_goal_with_context,
+        inject_llm_summary_before_pdf=_inject_llm_summary_before_pdf,
+        run_steps_internal=_run_steps_internal,
+        finalize_internal=_finalize_internal,
+        sanitize_execution_steps=_sanitize_execution_steps,
     )
-
-
-@app.post("/agent/finalize", response_model=AgentFinalizeResponse)
-def agent_finalize(
-    req: AgentFinalizeRequest,
-    user_id: str = Depends(get_current_user),
-    s: Settings = Depends(dep_settings),
-) -> AgentFinalizeResponse:
-    _ensure_user_dirs(s, user_id)
-    answer = _finalize_internal(provider=req.provider, goal=req.goal, tool_outputs_full=req.tool_outputs)
-    print("\n===== FINAL ANSWER =====")
-    print(answer)
-    print("========================\n")
-    return AgentFinalizeResponse(ok=True, goal=req.goal, answer=answer)
-
-
-@app.post("/agent/askOpenAI", response_model=AgentAskResponse)
-def agent_askOpenAI(
-    req: AgentAskRequest,
-    user_id: str = Depends(get_current_user),
-    s: Settings = Depends(dep_settings),
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> AgentAskResponse:
-    _ensure_user_dirs(s, user_id)
-    goal_ctx = _goal_with_context(req.goal, req.history)
-    llm = _llm_for_provider("openai")
-    gate = _run_clarification_gate(llm, goal_ctx)
-    if gate["status"] == "needs_info":
-        return _clarification_response(req.goal, gate)
-
-    effective_goal = str(gate.get("normalized_goal") or req.goal)
-    planner = Planner(llm, _build_registry())
-    steps = planner.create_steps(goal=effective_goal)
-    steps = _inject_llm_summary_before_pdf(steps, effective_goal)
-
-    ok, tool_outputs_full, tool_outputs_compact, fallback_answer = _run_steps_internal(
-        user_id=user_id,
-        settings=s,
-        api_key=credentials.credentials,
-        goal=effective_goal,
-        steps=steps,
-        log_label="PLANNED STEPS",
-    )
-    answer = _finalize_internal(provider="openai", goal=effective_goal, tool_outputs_full=tool_outputs_full)
-    if not str(answer).strip():
-        answer = fallback_answer
-
-    print("\n===== FINAL ANSWER =====")
-    print(answer)
-    print("========================\n")
-
-    return AgentAskResponse(ok=ok, goal=req.goal, steps=steps, tool_outputs=tool_outputs_compact, answer=answer)
-
-@app.post("/agent/askIonos", response_model=AgentAskResponse)
-def agent_askIonos(
-    req: AgentAskRequest,
-    user_id: str = Depends(get_current_user),
-    s: Settings = Depends(dep_settings),
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> AgentAskResponse:
-    _ensure_user_dirs(s, user_id)
-    goal_ctx = _goal_with_context(req.goal, req.history)
-    llm = _llm_for_provider("ionos")
-    gate = _run_clarification_gate(llm, goal_ctx)
-
-    print("\n===== CLARIFICATION =====")
-    print(f"status={gate.get('status')}")
-    print(f"normalized_goal={gate.get('normalized_goal')}")
-    print(f"missing_fields={gate.get('missing_fields')}")
-    print(f"questions={gate.get('questions')}")
-    print("=========================\n")
-
-    if gate["status"] == "needs_info":
-        return _clarification_response(req.goal, gate)
-
-    effective_goal = str(gate.get("normalized_goal") or req.goal)
-    planner = Planner(llm, _build_registry())
-    steps = planner.create_steps(goal=effective_goal)
-    steps = _inject_llm_summary_before_pdf(steps, effective_goal)
-
-    ok, tool_outputs_full, tool_outputs_compact, fallback_answer = _run_steps_internal(
-        user_id=user_id,
-        settings=s,
-        api_key=credentials.credentials,
-        goal=effective_goal,
-        steps=steps,
-        log_label="PLANNED STEPS",
-    )
-    answer = _finalize_internal(provider="ionos", goal=effective_goal, tool_outputs_full=tool_outputs_full)
-    if not str(answer).strip():
-        answer = fallback_answer
-
-    print("\n===== FINAL ANSWER =====")
-    print(answer)
-    print("========================\n")
-
-    return AgentAskResponse(ok=ok, goal=req.goal, steps=steps, tool_outputs=tool_outputs_compact, answer=answer)
+)

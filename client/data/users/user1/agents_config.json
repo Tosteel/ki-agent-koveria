@@ -1,24 +1,71 @@
 {
   "version": 1,
-  "updated_at": "2026-02-17T14:11:28Z",
+  "updated_at": "2026-02-17T21:55:43Z",
   "agents": [
     {
       "id": 1,
-      "title": "Recherche-Agent",
-      "text": "\"Suchergebnisse per E-Mail\"\n\n1. Die Wissensdatenbank wird nach dem Suchbegriff durchsucht.\n2. Die Ergebnisse aus der Wissensdatenbank werden in einen Text überführt.\n3. Der Text wird per E-Mail an den Empfänger gesendet, mit dem Suchbegriff als Betreff.",
+      "title": "Tagesschau-Agent",
+      "text": "\"Zusammenfassung eines Artikels auf tagesschau.de\"\n\n1. Die Website tagesschau.de wird nach einem bestimmten Artikel durchsucht.\n2. Die Ergebnisse der Suche werden in einen kurzen Text zusammengefasst.\n3. Die Zusammenfassung wird per E-Mail an Maria Dirnberger geschickt.",
+      "planned_steps": [
+        "1. tool=view_website args={\"url\":\"https://www.tagesschau.de\",\"query\":\"{{name}}\"}",
+        "2. tool=llm_compose args={\"text\":\"{steps[0].text}\"}",
+        "3. tool=send_mail args={\"to\":[\"maria.dirnberger@ipa.fraunhofer.de\"],\"subject\":\"Zusammenfassung: {{name}} auf tagesschau.de\",\"body\":\"{steps[1].text}\"}"
+      ],
+      "created_at": "2026-02-17T15:58:30Z",
+      "source_task_id": 5,
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Platzhalter name",
+          "used_in": [
+            "steps[0].args.query",
+            "steps[2].args.subject"
+          ]
+        }
+      ],
+      "dialog": [
+        {
+          "role": "user",
+          "text": "ersetzt donald trump einen platzhalter namen",
+          "plannedSteps": [],
+          "timestamp": "2026-02-17T16:00:35.893Z"
+        },
+        {
+          "role": "bot",
+          "text": "Änderung erfolgreich durchgeführt.",
+          "plannedSteps": [],
+          "timestamp": "2026-02-17T16:00:46.457Z"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Angela Merkel - Recherche und Benach...",
+      "text": "Geplante Aufgabe: Durchsuchung und Benachrichtigung\n\n1. Die Wissensdatenbank wird nach einem bestimmten Suchbegriff durchsucht.\n2. Die Ergebnisse aus der Wissensdatenbank werden in einen Text überführt.\n3. Der Text wird per E-Mail an einen bestimmten Empfänger gesendet.",
       "planned_steps": [
         "1. tool=search_multitable args={\"user_prompt\":\"{{suchbegriff}}\"}",
-        "2. tool=llm_compose args={\"text\":\"Ausführliche Ergebnisse: {steps[0].text}\"}",
-        "3. tool=send_mail args={\"to\":[\"{{email_platzhalter}}\"],\"subject\":\"Zusammenfassung {{suchbegriff}}\",\"body\":\"{steps[1].text}\"}"
+        "2. tool=llm_compose args={\"text\":\"{steps[0].text}\"}",
+        "3. tool=send_mail args={\"to\":[\"{{empfaenger_email}}\"],\"subject\":\"{{email_betreff}}\",\"body\":\"{steps[1].text}\"}"
       ],
-      "created_at": "2026-02-17T12:48:46Z",
+      "created_at": "2026-02-17T20:41:02Z",
       "source_task_id": 3,
       "placeholders": [
         {
-          "name": "email_platzhalter",
+          "name": "email_betreff",
           "type": "email",
           "required": true,
-          "description": "Platzhalter email_platzhalter",
+          "description": "Platzhalter email_betreff",
+          "used_in": [
+            "steps[2].args.subject"
+          ]
+        },
+        {
+          "name": "empfaenger_email",
+          "type": "email",
+          "required": true,
+          "description": "Platzhalter empfaenger_email",
           "used_in": [
             "steps[2].args.to[0]"
           ]
@@ -29,47 +76,60 @@
           "required": true,
           "description": "Platzhalter suchbegriff",
           "used_in": [
-            "steps[0].args.user_prompt",
-            "steps[2].args.subject"
+            "steps[0].args.user_prompt"
           ]
         }
       ],
       "dialog": [
         {
           "role": "user",
-          "text": "bitte platzhalter für email.",
+          "text": "platzhalter für zusammenfassung",
           "plannedSteps": [],
-          "timestamp": "2026-02-17T12:48:53.889Z"
+          "timestamp": "2026-02-17T20:41:17.302Z"
         },
         {
           "role": "bot",
           "text": "Änderung erfolgreich durchgeführt.",
           "plannedSteps": [],
-          "timestamp": "2026-02-17T12:49:05.046Z"
-        },
+          "timestamp": "2026-02-17T20:41:27.261Z"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Suchergebnisse für Donald Trump\n\n1. Die Webseite von Tagesschau.de wird nach Inf",
+      "text": "Suchergebnisse für Donald Trump\n\n1. Die Website unter der angegebenen URL wird nach Informationen über Donald Trump durchsucht.\n2. Die Ergebnisse der Suche werden in einen Text überführt.\n3. Der Text wird als PDF-Dokument unter dem Namen \"ergebnisse.pdf\" exportiert.\n4. Das PDF-Dokument wird an die E-Mail-Adresse \"tobias_stahl@outlook.de\" mit dem Betreff \"Suchergebnisse für Donald Trump\" gesendet.",
+      "planned_steps": [
+        "1. tool=view_website args={\"url\":\"{{such_url}}\",\"query\":\"Donald Trump\"}",
+        "2. tool=llm_compose args={\"text\":\"{steps[0].text}\"}",
+        "3. tool=pdf_export args={\"output_path\":\"ergebnisse.pdf\",\"text\":\"{steps[1].text}\"}",
+        "4. tool=send_mail args={\"to\":[\"tobias_stahl@outlook.de\"],\"subject\":\"Suchergebnisse für Donald Trump\",\"body\":\"Bitte finden Sie die Suchergebnisse im Anhang.\",\"attachment_paths\":[\"{steps[2].output_path}\"]}"
+      ],
+      "created_at": "2026-02-17T21:00:06Z",
+      "source_task_id": 6,
+      "placeholders": [
+        {
+          "name": "such_url",
+          "type": "string",
+          "required": true,
+          "description": "Platzhalter such_url",
+          "used_in": [
+            "steps[0].args.url"
+          ]
+        }
+      ],
+      "dialog": [
         {
           "role": "user",
-          "text": "bitte platzhalter für den suchbegriff.",
+          "text": "bitte die URL durch einen Platzhalter ersetzen.",
           "plannedSteps": [],
-          "timestamp": "2026-02-17T12:49:29.964Z"
+          "timestamp": "2026-02-17T21:00:27.365Z"
         },
         {
           "role": "bot",
           "text": "Änderung erfolgreich durchgeführt.",
           "plannedSteps": [],
-          "timestamp": "2026-02-17T12:49:42.523Z"
-        },
-        {
-          "role": "user",
-          "text": "in schritt 2 bitte \"Ausführliche Ergebnisse\" mit in den Text aufnehmen.",
-          "plannedSteps": [],
-          "timestamp": "2026-02-17T12:51:46.869Z"
-        },
-        {
-          "role": "bot",
-          "text": "Änderung erfolgreich durchgeführt.",
-          "plannedSteps": [],
-          "timestamp": "2026-02-17T12:52:01.388Z"
+          "timestamp": "2026-02-17T21:00:41.426Z"
         }
       ]
     }

@@ -1,64 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-02-17T14:11:27Z",
+  "updated_at": "2026-02-17T21:00:06Z",
   "tasks": [
-    {
-      "id": 3,
-      "title": "Angela Merkel - Recherche und Benach...",
-      "text": "Erstellung einer Zusammenfassung \"Supergeil\"\n\n1. Die Wissensdatenbank wird nach Informationen zu \"Supergeil\" durchsucht.\n2. Die Ergebnisse aus der Wissensdatenbank werden in einen Text überführt.\n3. Die Zusammenfassung wird per E-Mail an Tobias Stahl (tobias_stahl@outlook.de) mit dem Betreff \"Zusammenfassung Supergeil\" gesendet.",
-      "planned_steps": [
-        "1. tool=search_multitable args={\"user_prompt\":\"Supergeil\"}",
-        "2. tool=llm_compose args={\"text\":\"{steps[0].text}\"}",
-        "3. tool=send_mail args={\"to\":[\"tobias_stahl@outlook.de\"],\"subject\":\"Zusammenfassung Supergeil\",\"body\":\"{steps[1].text}\"}"
-      ],
-      "planned_steps_text": "===== PLANNED STEPS =====\n1. tool=search_multitable args={\"user_prompt\":\"Supergeil\"}\n2. tool=llm_compose args={\"text\":\"{steps[0].text}\"}\n3. tool=send_mail args={\"to\":[\"tobias_stahl@outlook.de\"],\"subject\":\"Zusammenfassung Supergeil\",\"body\":\"{steps[1].text}\"}\n=========================",
-      "created_at": "2026-02-17T07:16:47Z",
-      "dialog": [
-        {
-          "role": "user",
-          "text": "bitte anstatt nach Angela Merkel nach donald Trump suchen.",
-          "plannedSteps": [],
-          "options": [],
-          "timestamp": "2026-02-17T10:06:22.107Z"
-        },
-        {
-          "role": "bot",
-          "text": "Änderung erfolgreich durchgeführt.",
-          "plannedSteps": [],
-          "options": [],
-          "timestamp": "2026-02-17T10:06:49.693Z"
-        },
-        {
-          "role": "user",
-          "text": "gdefgtrehz",
-          "plannedSteps": [],
-          "options": [],
-          "timestamp": "2026-02-17T10:33:48.839Z"
-        },
-        {
-          "role": "bot",
-          "text": "Änderung erfolgreich durchgeführt.",
-          "plannedSteps": [],
-          "options": [],
-          "timestamp": "2026-02-17T10:34:02.696Z"
-        },
-        {
-          "role": "user",
-          "text": "bitte nach Supergeil suchen.",
-          "plannedSteps": [],
-          "options": [],
-          "timestamp": "2026-02-17T11:44:55.134Z"
-        },
-        {
-          "role": "bot",
-          "text": "Änderung erfolgreich durchgeführt.",
-          "plannedSteps": [],
-          "options": [],
-          "timestamp": "2026-02-17T11:45:06.717Z"
-        }
-      ],
-      "reruns": []
-    },
     {
       "id": 4,
       "title": "Besuch auf Spiegel.de\n\n1. Die Website von Spiegel.de wird aufgerufen.\n2. Die URL",
@@ -68,6 +11,21 @@
       ],
       "planned_steps_text": "===== PLANNED STEPS =====\n1. tool=view_website args={\"url\":\"http://www.spiegel.de\",\"query\":\"Artikel\"}\n=========================",
       "created_at": "2026-02-17T13:04:53Z",
+      "dialog": [],
+      "reruns": []
+    },
+    {
+      "id": 6,
+      "title": "Suchergebnisse für Donald Trump\n\n1. Die Webseite von Tagesschau.de wird nach Inf",
+      "text": "Suchergebnisse für Donald Trump\n\n1. Die Webseite von Tagesschau.de wird nach Informationen über Donald Trump durchsucht.\n2. Die Ergebnisse der Suche werden in einen Text überführt.\n3. Der Text wird als PDF-Dokument unter dem Namen \"ergebnisse.pdf\" exportiert.\n4. Das PDF-Dokument wird an die E-Mail-Adresse tobias_stahl@outlook.de mit dem Betreff \"Suchergebnisse für Donald Trump\" gesendet.",
+      "planned_steps": [
+        "1. tool=view_website args={\"url\":\"http://www.tagesschau.de\",\"query\":\"Donald Trump\"}",
+        "2. tool=llm_compose args={\"text\":\"{steps[0].text}\"}",
+        "3. tool=pdf_export args={\"output_path\":\"ergebnisse.pdf\",\"text\":\"{steps[1].text}\"}",
+        "4. tool=send_mail args={\"to\":[\"tobias_stahl@outlook.de\"],\"subject\":\"Suchergebnisse für Donald Trump\",\"body\":\"Bitte finden Sie die Suchergebnisse im Anhang.\",\"attachment_paths\":[\"{steps[2].output_path}\"]}"
+      ],
+      "planned_steps_text": "===== PLANNED STEPS =====\n1. tool=view_website args={\"url\":\"http://www.tagesschau.de\",\"query\":\"Donald Trump\"}\n2. tool=llm_compose args={\"text\":\"{steps[0].text}\"}\n3. tool=pdf_export args={\"output_path\":\"ergebnisse.pdf\",\"text\":\"{steps[1].text}\"}\n4. tool=send_mail args={\"to\":[\"tobias_stahl@outlook.de\"],\"subject\":\"Suchergebnisse für Donald Trump\",\"body\":\"Bitte finden Sie die Suchergebnisse im Anhang.\",\"attachment_paths\":[\"{steps[2].output_path}\"]}\n=========================",
+      "created_at": "2026-02-17T20:59:57Z",
       "dialog": [],
       "reruns": []
     }
