@@ -476,6 +476,82 @@
       cursor: default;
     }
 
+    .agent-overview {
+      display: grid;
+      gap: 10px;
+    }
+
+    .agent-meta {
+      display: grid;
+      gap: 4px;
+      color: #2a4472;
+      font-size: 15px;
+      line-height: 1.35;
+    }
+
+    .agent-box {
+      background: #f8fbff;
+      border: 1px solid #d7e6fb;
+      border-radius: 12px;
+      padding: 10px 12px;
+      box-shadow: 0 8px 18px rgba(48, 94, 182, 0.08);
+      display: grid;
+      gap: 8px;
+    }
+
+    .agent-box-title {
+      margin: 0;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      color: #385fa0;
+    }
+
+    .agent-box-list {
+      margin: 0;
+      padding-left: 18px;
+      display: grid;
+      gap: 4px;
+      color: #294574;
+      font-size: 15px;
+      line-height: 1.4;
+    }
+
+    .agent-box-empty {
+      color: #6d82aa;
+      font-size: 14px;
+    }
+
+    .agent-placeholder-line {
+      color: #294574;
+      font-size: 15px;
+      line-height: 1.4;
+      margin: 0;
+    }
+
+    .trigger-overview {
+      display: grid;
+      gap: 10px;
+    }
+
+    .trigger-meta-line {
+      color: #2a4472;
+      font-size: 15px;
+      line-height: 1.4;
+      margin: 0;
+    }
+
+    .trigger-config-pre {
+      margin: 0;
+      color: #294574;
+      font-size: 14px;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
     .option-icon {
       font-size: 12px;
       line-height: 1;
@@ -703,6 +779,21 @@
             <path d="M12 3.5v1.5M20.5 12h-1.5M12 20.5V19M3.5 12H5"/>
           </svg>
         </button>
+        <button class="mode-btn" id="modeToolsBtn" title="Tools" aria-label="Tools">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M14 4.5l5.5 5.5-2 2-5.5-5.5z"/>
+            <path d="M6 9l9 9"/>
+            <path d="M5 19l3-3"/>
+          </svg>
+        </button>
+        <button class="mode-btn" id="modeAgentsBtn" title="Agenten" aria-label="Agenten">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="7" y="7" width="10" height="10" rx="2"/>
+            <circle cx="10" cy="11" r="1"/>
+            <circle cx="14" cy="11" r="1"/>
+            <path d="M10 14h4M12 4v3M5 10h2M17 10h2"/>
+          </svg>
+        </button>
       </div>
       <input class="search" id="sidebarSearchInput" placeholder="Search" />
       <div class="menu" id="chatList"></div>
@@ -768,6 +859,8 @@
     const modeChatsBtn = document.getElementById('modeChatsBtn');
     const modeTasksBtn = document.getElementById('modeTasksBtn');
     const modeTriggersBtn = document.getElementById('modeTriggersBtn');
+    const modeToolsBtn = document.getElementById('modeToolsBtn');
+    const modeAgentsBtn = document.getElementById('modeAgentsBtn');
     const sidebarSearchInput = document.getElementById('sidebarSearchInput');
     const chatListEl = document.getElementById('chatList');
     const chatTitleEl = document.getElementById('chatTitle');
@@ -799,9 +892,12 @@
     let activeTaskId = null;
     const triggerEntries = [];
     let activeTriggerId = '';
+    const agentEntries = [];
+    let activeAgentId = null;
     const pendingChats = new Set();
     const pendingTasks = new Set();
     const pendingTriggers = new Set();
+    const pendingAgents = new Set();
     const triggerDialogs = {};
     let sidebarSearchQuery = '';
 
@@ -1048,6 +1144,46 @@
               }
             });
             optionsRow.appendChild(btn);
+            return;
+          }
+
+          if (type === 'create_agent_placeholder') {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'option-btn';
+            btn.innerHTML = '<span class="option-icon">🤖</span><span>Agent erstellen</span>';
+            btn.addEventListener('click', async () => {
+              const taskId = Number(opt?.taskId || 0);
+              if (!Number.isInteger(taskId) || taskId < 1) return;
+              btn.disabled = true;
+              btn.innerHTML = '<span class="option-icon">🤖</span><span>Erstelle...</span>';
+              const result = await createAgentFromTask(taskId);
+              if (!result.ok) {
+                btn.disabled = false;
+                btn.innerHTML = '<span class="option-icon">🤖</span><span>Agent erstellen</span>';
+                messagesEl.appendChild(
+                  createMessageElement('bot', `Agent konnte nicht erstellt werden: ${result.error || 'Unbekannter Fehler'}`, {
+                    timestamp: nowIso()
+                  })
+                );
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+                return;
+              }
+              btn.disabled = true;
+              btn.innerHTML = '<span class="option-icon">🤖</span><span>Agent erstellt</span>';
+              messagesEl.appendChild(
+                createMessageElement('bot', `Agent erstellt: ${agentTitle(result.agent || {}) || 'Neuer Agent'}`, {
+                  timestamp: nowIso()
+                })
+              );
+              if (sidebarMode === 'agents') {
+                await loadAgentsMemory();
+                renderSidebarList();
+                renderActiveAgent();
+              }
+              messagesEl.scrollTop = messagesEl.scrollHeight;
+            });
+            optionsRow.appendChild(btn);
           }
         });
       }
@@ -1095,7 +1231,13 @@
     function truncateTitle(value) {
       const text = (value || '').trim();
       if (!text) return 'Neuer Chat';
-      return text.length > 36 ? `${text.slice(0, 36)}...` : text;
+      return text;
+    }
+
+    function truncateSidebarLabel(value, maxLen = 36) {
+      const text = String(value || '').trim();
+      if (!text) return '';
+      return text.length > maxLen ? `${text.slice(0, maxLen)}...` : text;
     }
 
     function getActiveChat() {
@@ -1114,8 +1256,7 @@
       const preferred = String(task?.title || '').trim();
       const text = preferred || String(task?.text || '').trim();
       if (!text) return 'Aufgabe';
-      const single = text.replace(/\s+/g, ' ');
-      return single.length > 36 ? `${single.slice(0, 36)}...` : single;
+      return text.replace(/\s+/g, ' ');
     }
 
     function taskTitleById(taskId) {
@@ -1130,6 +1271,8 @@
       modeChatsBtn.classList.toggle('active', sidebarMode === 'chats');
       modeTasksBtn.classList.toggle('active', sidebarMode === 'tasks');
       modeTriggersBtn.classList.toggle('active', sidebarMode === 'triggers');
+      if (modeAgentsBtn) modeAgentsBtn.classList.toggle('active', sidebarMode === 'agents');
+      if (modeToolsBtn) modeToolsBtn.classList.toggle('active', sidebarMode === 'tools');
     }
 
     function isMobileView() {
@@ -1188,7 +1331,8 @@
         item.className = `item${chat.id === activeChatId ? ' active' : ''}`;
         const label = document.createElement('span');
         label.className = 'item-label';
-        label.textContent = pendingChats.has(chat.id) ? `${chat.title} (...)` : chat.title;
+        const sidebarTitle = truncateSidebarLabel(chat.title);
+        label.textContent = pendingChats.has(chat.id) ? `${sidebarTitle} (...)` : sidebarTitle;
 
         const delBtn = document.createElement('button');
         delBtn.className = 'item-delete';
@@ -1218,7 +1362,8 @@
       chatListEl.innerHTML = '';
       const q = sidebarSearchQuery.trim().toLowerCase();
       taskEntries.forEach((task) => {
-        const labelText = taskTitle(task);
+        const fullTitle = taskTitle(task);
+        const labelText = truncateSidebarLabel(fullTitle);
         if (q && !labelText.toLowerCase().includes(q)) return;
         const item = document.createElement('div');
         item.setAttribute('data-task-id', String(task.id));
@@ -1252,14 +1397,22 @@
 
     function triggerTitle(trigger) {
       const raw = String(trigger?.name || '').trim() || `Trigger ${String(trigger?.id || '')}`;
-      return raw.length > 36 ? `${raw.slice(0, 36)}...` : raw;
+      return raw;
+    }
+
+    function agentTitle(agent) {
+      const preferred = String(agent?.title || '').trim();
+      const text = preferred || String(agent?.text || '').trim();
+      if (!text) return 'Agent';
+      return text.replace(/\s+/g, ' ');
     }
 
     function renderTriggerList() {
       chatListEl.innerHTML = '';
       const q = sidebarSearchQuery.trim().toLowerCase();
       triggerEntries.forEach((trigger) => {
-        const labelText = triggerTitle(trigger);
+        const fullTitle = triggerTitle(trigger);
+        const labelText = truncateSidebarLabel(fullTitle);
         if (q && !labelText.toLowerCase().includes(q)) return;
         const item = document.createElement('div');
         const triggerId = String(trigger?.id || '');
@@ -1291,6 +1444,43 @@
       });
     }
 
+    function renderAgentList() {
+      chatListEl.innerHTML = '';
+      const q = sidebarSearchQuery.trim().toLowerCase();
+      agentEntries.forEach((agent) => {
+        const fullTitle = agentTitle(agent);
+        const labelText = truncateSidebarLabel(fullTitle);
+        if (q && !labelText.toLowerCase().includes(q)) return;
+        const item = document.createElement('div');
+        item.setAttribute('data-agent-id', String(agent.id));
+        item.className = `item${agent.id === activeAgentId ? ' active' : ''}`;
+        const label = document.createElement('span');
+        label.className = 'item-label';
+        label.textContent = labelText;
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'item-delete';
+        delBtn.type = 'button';
+        delBtn.setAttribute('aria-label', 'Agent löschen');
+        delBtn.textContent = '×';
+        delBtn.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          await deleteAgent(agent.id);
+        });
+
+        item.appendChild(label);
+        item.appendChild(delBtn);
+        item.addEventListener('click', () => {
+          if (activeAgentId === agent.id) return;
+          activeAgentId = agent.id;
+          renderAgentList();
+          renderActiveAgent();
+          if (isMobileView()) closeSidebar();
+        });
+        chatListEl.appendChild(item);
+      });
+    }
+
     function renderSidebarList() {
       updateSidebarModeButtons();
       if (sidebarMode === 'tasks') {
@@ -1299,6 +1489,10 @@
       }
       if (sidebarMode === 'triggers') {
         renderTriggerList();
+        return;
+      }
+      if (sidebarMode === 'agents') {
+        renderAgentList();
         return;
       }
       renderChatList();
@@ -1339,7 +1533,8 @@
           options: Array.isArray(task.planned_steps) && task.planned_steps.length
             ? [
                 { type: 'rerun_task', plannedSteps: task.planned_steps, taskId: task.id },
-                { type: 'create_manual_trigger', taskId: task.id }
+                { type: 'create_manual_trigger', taskId: task.id },
+                { type: 'create_agent_placeholder', taskId: task.id }
               ]
             : [],
           taskId: task.id,
@@ -1427,23 +1622,8 @@
         refreshComposerState();
         return;
       }
-      const lines = [
-        `Aufgabe: ${taskTitleById(trigger.task_id) || '-'}`,
-        `Typ: ${String(trigger.trigger_type || '-')}`,
-        `Task-ID: ${String(trigger.task_id || '-')}`,
-        `Status: ${trigger.enabled ? 'aktiv' : 'inaktiv'}`,
-      ];
-      if (String(trigger.last_fired_at || '').trim()) {
-        lines.push(`Letzte Ausführung: ${String(trigger.last_fired_at)}`);
-      }
-      if (String(trigger.last_error || '').trim()) {
-        lines.push(`Letzter Fehler: ${String(trigger.last_error)}`);
-      }
-      if (trigger.config && typeof trigger.config === 'object' && Object.keys(trigger.config).length > 0) {
-        lines.push(`Config: ${JSON.stringify(trigger.config)}`);
-      }
       chatTitleEl.textContent = triggerTitle(trigger);
-      messagesEl.appendChild(createMessageElement('bot', lines.join('\n'), { timestamp: nowIso() }));
+      messagesEl.appendChild(createTriggerOverviewElement(trigger));
       const dialog = getTriggerDialog(trigger.id);
       dialog.forEach((entry) => {
         messagesEl.appendChild(
@@ -1459,6 +1639,199 @@
       refreshComposerState();
     }
 
+    function createTriggerOverviewElement(trigger) {
+      const row = document.createElement('div');
+      row.className = 'row';
+
+      const avatar = document.createElement('div');
+      avatar.className = 'avatar';
+      const img = document.createElement('img');
+      img.src = '/assets/bot-avatar.png';
+      img.alt = 'bot';
+      avatar.appendChild(img);
+
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+
+      const root = document.createElement('div');
+      root.className = 'trigger-overview';
+
+      const detailsBox = document.createElement('div');
+      detailsBox.className = 'agent-box';
+      const detailsTitle = document.createElement('p');
+      detailsTitle.className = 'agent-box-title';
+      detailsTitle.textContent = 'Trigger Details';
+      detailsBox.appendChild(detailsTitle);
+
+      const detailLines = [
+        `Aufgabe: ${taskTitleById(trigger.task_id) || '-'}`,
+        `Typ: ${String(trigger.trigger_type || '-')}`,
+        `Task-ID: ${String(trigger.task_id || '-')}`,
+        `Status: ${trigger.enabled ? 'aktiv' : 'inaktiv'}`,
+      ];
+      if (String(trigger.last_fired_at || '').trim()) {
+        detailLines.push(`Letzte Ausführung: ${String(trigger.last_fired_at)}`);
+      }
+      if (String(trigger.last_error || '').trim()) {
+        detailLines.push(`Letzter Fehler: ${String(trigger.last_error)}`);
+      }
+      detailLines.forEach((line) => {
+        const p = document.createElement('p');
+        p.className = 'trigger-meta-line';
+        p.textContent = line;
+        detailsBox.appendChild(p);
+      });
+      root.appendChild(detailsBox);
+
+      const configBox = document.createElement('div');
+      configBox.className = 'agent-box';
+      const configTitle = document.createElement('p');
+      configTitle.className = 'agent-box-title';
+      configTitle.textContent = 'Config';
+      configBox.appendChild(configTitle);
+      if (trigger.config && typeof trigger.config === 'object' && Object.keys(trigger.config).length > 0) {
+        const pre = document.createElement('pre');
+        pre.className = 'trigger-config-pre';
+        pre.textContent = JSON.stringify(trigger.config, null, 2);
+        configBox.appendChild(pre);
+      } else {
+        const empty = document.createElement('div');
+        empty.className = 'agent-box-empty';
+        empty.textContent = 'Keine Config gesetzt.';
+        configBox.appendChild(empty);
+      }
+      root.appendChild(configBox);
+
+      const optionsRow = document.createElement('div');
+      optionsRow.className = 'message-options only-time';
+      const timeEl = document.createElement('div');
+      timeEl.className = 'msg-time';
+      timeEl.textContent = formatTimestampDisplay(nowIso());
+      optionsRow.appendChild(timeEl);
+      root.appendChild(optionsRow);
+
+      bubble.appendChild(root);
+      row.appendChild(avatar);
+      row.appendChild(bubble);
+      return row;
+    }
+
+    function getActiveAgent() {
+      return agentEntries.find((a) => Number(a?.id) === Number(activeAgentId)) || null;
+    }
+
+    function createAgentOverviewElement(agent) {
+      const row = document.createElement('div');
+      row.className = 'row';
+
+      const avatar = document.createElement('div');
+      avatar.className = 'avatar';
+      const img = document.createElement('img');
+      img.src = '/assets/bot-avatar.png';
+      img.alt = 'bot';
+      avatar.appendChild(img);
+
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+
+      const root = document.createElement('div');
+      root.className = 'agent-overview';
+
+      const meta = document.createElement('div');
+      meta.className = 'agent-meta';
+      meta.textContent = String(agent.text || '');
+      root.appendChild(meta);
+
+      const stepsBox = document.createElement('div');
+      stepsBox.className = 'agent-box';
+      const stepsTitle = document.createElement('p');
+      stepsTitle.className = 'agent-box-title';
+      stepsTitle.textContent = 'Planned Steps';
+      stepsBox.appendChild(stepsTitle);
+      const steps = Array.isArray(agent.planned_steps) ? agent.planned_steps : [];
+      if (steps.length) {
+        const list = document.createElement('ol');
+        list.className = 'agent-box-list';
+        steps.forEach((s) => {
+          const li = document.createElement('li');
+          li.textContent = String(s).replace(/^\s*\d+\.\s*/, '');
+          list.appendChild(li);
+        });
+        stepsBox.appendChild(list);
+      } else {
+        const empty = document.createElement('div');
+        empty.className = 'agent-box-empty';
+        empty.textContent = 'Keine geplanten Schritte.';
+        stepsBox.appendChild(empty);
+      }
+      root.appendChild(stepsBox);
+
+      const placeholdersBox = document.createElement('div');
+      placeholdersBox.className = 'agent-box';
+      const placeholdersTitle = document.createElement('p');
+      placeholdersTitle.className = 'agent-box-title';
+      placeholdersTitle.textContent = 'Placeholders';
+      placeholdersBox.appendChild(placeholdersTitle);
+      const placeholders = Array.isArray(agent.placeholders) ? agent.placeholders : [];
+      if (placeholders.length) {
+        placeholders.forEach((p) => {
+          const line = document.createElement('p');
+          line.className = 'agent-placeholder-line';
+          const name = String(p?.name || '').trim();
+          const type = String(p?.type || 'string').trim() || 'string';
+          const required = p?.required === false ? 'optional' : 'required';
+          line.textContent = `- {{${name}}} (${type}, ${required})`;
+          placeholdersBox.appendChild(line);
+        });
+      } else {
+        const empty = document.createElement('div');
+        empty.className = 'agent-box-empty';
+        empty.textContent = 'Keine Platzhalter.';
+        placeholdersBox.appendChild(empty);
+      }
+      root.appendChild(placeholdersBox);
+
+      const optionsRow = document.createElement('div');
+      optionsRow.className = 'message-options only-time';
+      const timeEl = document.createElement('div');
+      timeEl.className = 'msg-time';
+      timeEl.textContent = formatTimestampDisplay(agent.created_at || nowIso());
+      optionsRow.appendChild(timeEl);
+      root.appendChild(optionsRow);
+
+      bubble.appendChild(root);
+      row.appendChild(avatar);
+      row.appendChild(bubble);
+      return row;
+    }
+
+    function renderActiveAgent() {
+      const agent = getActiveAgent();
+      chatTitleEl.textContent = 'Agenten';
+      chatTitleEl.classList.add('title-editable');
+      messagesEl.innerHTML = '';
+      if (!agent) {
+        messagesEl.appendChild(createMessageElement('bot', 'Keine Agenten vorhanden.', { timestamp: nowIso() }));
+        refreshComposerState();
+        return;
+      }
+      chatTitleEl.textContent = agentTitle(agent);
+      messagesEl.appendChild(createAgentOverviewElement(agent));
+      (Array.isArray(agent.dialog) ? agent.dialog : []).forEach((entry) => {
+        messagesEl.appendChild(
+          createMessageElement(entry.role === 'user' ? 'user' : 'bot', String(entry.text || ''), {
+            plannedSteps: Array.isArray(entry?.plannedSteps) ? entry.plannedSteps : [],
+            timestamp: entry.timestamp || nowIso()
+          })
+        );
+      });
+      if (pendingAgents.has(Number(agent.id))) {
+        messagesEl.appendChild(createMessageElement('bot', '...', { timestamp: nowIso() }));
+      }
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      refreshComposerState();
+    }
+
     function renderActivePane() {
       if (sidebarMode === 'tasks') {
         renderActiveTask();
@@ -1468,11 +1841,18 @@
         renderActiveTrigger();
         return;
       }
+      if (sidebarMode === 'agents') {
+        renderActiveAgent();
+        return;
+      }
       renderActiveChat();
     }
 
     function setSidebarMode(mode) {
-      sidebarMode = mode === 'tasks' ? 'tasks' : (mode === 'triggers' ? 'triggers' : 'chats');
+      sidebarMode =
+        mode === 'tasks' ? 'tasks' :
+        (mode === 'triggers' ? 'triggers' :
+          (mode === 'agents' ? 'agents' : 'chats'));
       newChatBtn.style.display = sidebarMode === 'chats' ? '' : 'none';
       renderSidebarList();
       renderActivePane();
@@ -1673,6 +2053,16 @@
         sendBtn.disabled = isPending || !task;
         taskBtn.disabled = true;
         inputEl.disabled = isPending || !task;
+        if (!inputEl.disabled) inputEl.focus();
+        return;
+      }
+      if (sidebarMode === 'agents') {
+        inputEl.placeholder = 'Agent bearbeiten...';
+        const agent = getActiveAgent();
+        const isPending = !!agent && pendingAgents.has(Number(agent.id));
+        sendBtn.disabled = isPending || !agent;
+        taskBtn.disabled = true;
+        inputEl.disabled = isPending || !agent;
         if (!inputEl.disabled) inputEl.focus();
         return;
       }
@@ -1887,6 +2277,79 @@
       }
     }
 
+    async function loadAgentsMemory(preferredAgentId = null) {
+      const hasPreferred = preferredAgentId !== null && preferredAgentId !== undefined && Number.isInteger(Number(preferredAgentId));
+      const desiredAgentId = hasPreferred ? Number(preferredAgentId) : Number(activeAgentId);
+      agentEntries.length = 0;
+      activeAgentId = null;
+      if (!currentUserId) return;
+      try {
+        const resp = await fetch(`/api/agents-memory?user_id=${encodeURIComponent(currentUserId)}`);
+        const data = await resp.json();
+        if (!resp.ok) throw new Error('agents-memory');
+        const rawAgents = Array.isArray(data?.agents) ? data.agents : [];
+        rawAgents.forEach((a) => {
+          const id = Number(a?.id);
+          const text = String(a?.text || '').trim();
+          if (!Number.isInteger(id) || id < 1 || !text) return;
+          agentEntries.push({
+            id,
+            title: String(a?.title || '').trim(),
+            text,
+            planned_steps: Array.isArray(a?.planned_steps) ? a.planned_steps.map((s) => String(s)) : [],
+            created_at: String(a?.created_at || nowIso()),
+            source_task_id: Number(a?.source_task_id || 0),
+            placeholders: Array.isArray(a?.placeholders)
+              ? a.placeholders
+                  .map((p) => ({
+                    name: String(p?.name || '').trim().toLowerCase(),
+                    type: String(p?.type || 'string').trim().toLowerCase() || 'string',
+                    required: p?.required !== false,
+                    description: String(p?.description || '').trim(),
+                    used_in: Array.isArray(p?.used_in) ? p.used_in.map((u) => String(u)) : []
+                  }))
+                  .filter((p) => p.name.length > 0)
+              : [],
+            dialog: Array.isArray(a?.dialog)
+              ? a.dialog
+                  .map((m) => ({
+                    role: m?.role === 'user' ? 'user' : 'bot',
+                    text: String(m?.text || '').trim(),
+                    plannedSteps: Array.isArray(m?.plannedSteps) ? m.plannedSteps.map((s) => String(s)) : [],
+                    timestamp: String(m?.timestamp || nowIso())
+                  }))
+                  .filter((m) => m.text.length > 0)
+              : []
+          });
+        });
+      } catch (_err) {
+        // keep empty agent list
+      }
+      if (agentEntries.length > 0) {
+        const hasDesired = agentEntries.some((a) => Number(a.id) === desiredAgentId);
+        activeAgentId = hasDesired ? desiredAgentId : agentEntries[0].id;
+      }
+    }
+
+    async function createAgentFromTask(taskId) {
+      const cleanTaskId = Number(taskId);
+      if (!Number.isInteger(cleanTaskId) || cleanTaskId < 1) return { ok: false, error: 'Ungültige Task-ID.' };
+      if (!currentUserId) return { ok: false, error: 'Bitte zuerst API-Key in den Einstellungen speichern.' };
+      try {
+        const resp = await fetch('/api/agents/create-from-task', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: currentUserId, task_id: cleanTaskId })
+        });
+        const data = await resp.json();
+        if (!resp.ok) return { ok: false, error: data.detail || 'Unbekannter Fehler' };
+        await loadAgentsMemory(Number(data?.agent?.id || 0));
+        return { ok: true, agent: data?.agent || null };
+      } catch (_err) {
+        return { ok: false, error: 'Verbindung zur API fehlgeschlagen.' };
+      }
+    }
+
     async function renameTask(taskId, title) {
       const cleanTitle = String(title || '').trim();
       if (!cleanTitle || !currentUserId) return false;
@@ -1928,6 +2391,30 @@
         if (!resp.ok) return false;
         const trigger = triggerEntries.find((t) => String(t.id) === cleanTriggerId);
         if (trigger) trigger.name = String(data?.trigger?.name || cleanName);
+        return true;
+      } catch (_err) {
+        return false;
+      }
+    }
+
+    async function renameAgent(agentId, title) {
+      const cleanTitle = String(title || '').trim();
+      const cleanAgentId = Number(agentId);
+      if (!cleanTitle || !Number.isInteger(cleanAgentId) || cleanAgentId < 1 || !currentUserId) return false;
+      try {
+        const resp = await fetch('/api/agents/rename', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: currentUserId,
+            agent_id: cleanAgentId,
+            title: cleanTitle
+          })
+        });
+        const data = await resp.json();
+        if (!resp.ok) return false;
+        const agent = agentEntries.find((a) => Number(a.id) === cleanAgentId);
+        if (agent) agent.title = String(data?.agent?.title || cleanTitle);
         return true;
       } catch (_err) {
         return false;
@@ -2014,6 +2501,33 @@
       }
       renderSidebarList();
       renderActiveTrigger();
+      return true;
+    }
+
+    async function deleteAgent(agentId) {
+      if (!currentUserId) return false;
+      const cleanAgentId = Number(agentId);
+      if (!Number.isInteger(cleanAgentId) || cleanAgentId < 1) return false;
+      try {
+        const resp = await fetch('/api/agents/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: currentUserId,
+            agent_id: cleanAgentId
+          })
+        });
+        if (!resp.ok) return false;
+      } catch (_err) {
+        return false;
+      }
+      const idx = agentEntries.findIndex((a) => Number(a.id) === cleanAgentId);
+      if (idx >= 0) agentEntries.splice(idx, 1);
+      if (Number(activeAgentId) === cleanAgentId) {
+        activeAgentId = agentEntries[0]?.id || null;
+      }
+      renderSidebarList();
+      renderActiveAgent();
       return true;
     }
 
@@ -2207,7 +2721,7 @@
       if (!currentUserId) return { ok: false, error: 'Bitte zuerst API-Key in den Einstellungen speichern.' };
       const task = taskEntries.find((t) => t.id === cleanTaskId);
       const nameBase = task ? taskTitle(task) : `Task ${cleanTaskId}`;
-      const name = `Manuell: ${nameBase}`;
+      const name = nameBase;
       try {
         const resp = await fetch('/api/triggers/create-manual', {
           method: 'POST',
@@ -2226,6 +2740,165 @@
         return { ok: true, name: String(data?.trigger?.name || name) };
       } catch (_err) {
         return { ok: false, error: 'Verbindung zur API fehlgeschlagen.' };
+      }
+    }
+
+    async function updateAgentForUser(agent) {
+      if (!agent || !currentUserId) return false;
+      try {
+        const resp = await fetch('/api/agents/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: currentUserId,
+            agent_id: Number(agent.id),
+            planned_steps: Array.isArray(agent.planned_steps) ? agent.planned_steps.map((s) => String(s).trim()).filter(Boolean) : [],
+            text: String(agent.text || ''),
+            placeholders: Array.isArray(agent.placeholders)
+              ? agent.placeholders.map((p) => ({
+                  name: String(p?.name || '').trim().toLowerCase(),
+                  type: String(p?.type || 'string').trim().toLowerCase() || 'string',
+                  required: p?.required !== false,
+                  description: String(p?.description || '').trim(),
+                  used_in: Array.isArray(p?.used_in) ? p.used_in.map((u) => String(u).trim()).filter(Boolean) : []
+                })).filter((p) => p.name.length > 0)
+              : [],
+            dialog: Array.isArray(agent.dialog)
+              ? agent.dialog.map((m) => ({
+                  role: m.role === 'user' ? 'user' : 'bot',
+                  text: String(m.text || '').trim(),
+                  plannedSteps: Array.isArray(m.plannedSteps) ? m.plannedSteps.map((s) => String(s).trim()).filter(Boolean) : [],
+                  timestamp: String(m.timestamp || nowIso())
+                })).filter((m) => m.text.length > 0)
+              : []
+          })
+        });
+        if (!resp.ok) return false;
+        return true;
+      } catch (_err) {
+        return false;
+      }
+    }
+
+    async function sendAgentMessage() {
+      const message = inputEl.value.trim();
+      if (!message) return;
+      const agent = getActiveAgent();
+      if (!agent) return;
+      const agentId = Number(agent.id);
+      if (!Number.isInteger(agentId) || agentId < 1) return;
+      if (pendingAgents.has(agentId)) return;
+      if (!currentUserId) {
+        messagesEl.appendChild(createMessageElement('bot', 'Bitte zuerst API-Key in den Einstellungen speichern.', { timestamp: nowIso() }));
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        return;
+      }
+
+      const currentPlannedSteps = Array.isArray(agent.planned_steps) ? agent.planned_steps : [];
+      if (!Array.isArray(agent.dialog)) agent.dialog = [];
+      agent.dialog.push({ role: 'user', text: message, timestamp: nowIso() });
+      inputEl.value = '';
+      pendingAgents.add(agentId);
+      renderActiveAgent();
+      renderSidebarList();
+
+      {
+        const okPersist = await updateAgentForUser(agent);
+        if (!okPersist) {
+          agent.dialog.push({
+            role: 'bot',
+            text: 'Hinweis: Die Änderung konnte noch nicht in agents_config gespeichert werden.',
+            timestamp: nowIso()
+          });
+        }
+      }
+
+      try {
+        const resp = await fetch('/api/agents/replan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agent_id: agentId,
+            planned_steps: currentPlannedSteps,
+            change_request: message,
+            user_id: currentUserId
+          })
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          agent.dialog.push({ role: 'bot', text: `Fehler: ${data.detail || 'Unbekannter Fehler'}`, timestamp: nowIso() });
+          await updateAgentForUser(agent);
+          return;
+        }
+        const rawReplanText = String(data?.raw_text || '');
+        let newSteps = Array.isArray(data?.planned_steps) ? data.planned_steps.map((s) => String(s).trim()).filter(Boolean) : [];
+        if (newSteps.length === 0) {
+          newSteps = extractPlannedStepsFromText(rawReplanText);
+        }
+        if (newSteps.length > 0) {
+          agent.planned_steps = newSteps;
+          agent.placeholders = Array.isArray(data?.placeholders)
+            ? data.placeholders
+                .map((p) => ({
+                  name: String(p?.name || '').trim().toLowerCase(),
+                  type: String(p?.type || 'string').trim().toLowerCase() || 'string',
+                  required: p?.required !== false,
+                  description: String(p?.description || '').trim(),
+                  used_in: Array.isArray(p?.used_in) ? p.used_in.map((u) => String(u)) : []
+                }))
+                .filter((p) => p.name.length > 0)
+            : [];
+          let updatedAgentText = '';
+          try {
+            const explainResp = await fetch('/api/planned-task-explain', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ steps: newSteps, user_id: currentUserId })
+            });
+            const explainData = await explainResp.json();
+            if (explainResp.ok && String(explainData?.answer || '').trim()) {
+              updatedAgentText = String(explainData.answer).trim();
+            }
+          } catch (_explainErr) {
+            // fallback below
+          }
+          if (updatedAgentText) {
+            agent.text = updatedAgentText;
+          }
+          agent.dialog.push({
+            role: 'bot',
+            text: 'Änderung erfolgreich durchgeführt.',
+            timestamp: nowIso()
+          });
+        } else {
+          agent.dialog.push({
+            role: 'bot',
+            text: 'Hinweis: Es wurden keine neuen geplanten Schritte erkannt. Die vorhandene Planung bleibt unverändert.',
+            timestamp: nowIso()
+          });
+        }
+        const okPersist = await updateAgentForUser(agent);
+        if (!okPersist) {
+          agent.dialog.push({
+            role: 'bot',
+            text: 'Hinweis: Die aktualisierten Schritte konnten nicht in agents_config gespeichert werden.',
+            timestamp: nowIso()
+          });
+        }
+      } catch (_err) {
+        agent.dialog.push({ role: 'bot', text: 'Verbindung zur API fehlgeschlagen.', timestamp: nowIso() });
+        const okPersist = await updateAgentForUser(agent);
+        if (!okPersist) {
+          agent.dialog.push({
+            role: 'bot',
+            text: 'Hinweis: Die Fehlermeldung konnte nicht in agents_config gespeichert werden.',
+            timestamp: nowIso()
+          });
+        }
+      } finally {
+        pendingAgents.delete(agentId);
+        renderActiveAgent();
+        renderSidebarList();
       }
     }
 
@@ -2291,6 +2964,7 @@
         }
         if (newSteps.length > 0) {
           task.planned_steps = newSteps;
+          let updatedTaskText = '';
           try {
             const explainResp = await fetch('/api/planned-task-explain', {
               method: 'POST',
@@ -2298,39 +2972,18 @@
               body: JSON.stringify({ steps: newSteps, user_id: currentUserId })
             });
             const explainData = await explainResp.json();
-            const planOptions = [
-              { type: 'rerun_task', plannedSteps: newSteps, taskId: task.id },
-              { type: 'create_manual_trigger', taskId: task.id }
-            ];
             if (explainResp.ok && String(explainData?.answer || '').trim()) {
-              task.dialog.push({
-                role: 'bot',
-                text: String(explainData.answer).trim(),
-                plannedSteps: newSteps,
-                options: planOptions,
-                timestamp: nowIso()
-              });
-            } else {
-              task.dialog.push({
-                role: 'bot',
-                text: 'Die geplanten Schritte wurden aktualisiert.',
-                plannedSteps: newSteps,
-                options: planOptions,
-                timestamp: nowIso()
-              });
+              updatedTaskText = String(explainData.answer).trim();
             }
           } catch (_explainErr) {
-            task.dialog.push({
-              role: 'bot',
-              text: 'Die geplanten Schritte wurden aktualisiert.',
-              plannedSteps: newSteps,
-              options: [
-                { type: 'rerun_task', plannedSteps: newSteps, taskId: task.id },
-                { type: 'create_manual_trigger', taskId: task.id }
-              ],
-              timestamp: nowIso()
-            });
+            // fallback below
           }
+          task.text = updatedTaskText || task.text || 'Aufgabe aktualisiert.';
+          task.dialog.push({
+            role: 'bot',
+            text: 'Änderung erfolgreich durchgeführt.',
+            timestamp: nowIso()
+          });
         } else {
           task.dialog.push({
             role: 'bot',
@@ -2425,7 +3078,6 @@
 
       try {
         let patch = {};
-        let hints = [];
         try {
           const interpretResp = await fetch('/api/triggers/interpret', {
             method: 'POST',
@@ -2463,7 +3115,6 @@
         if (!Object.keys(patch).length) {
           const parsed = parseTriggerUpdateIntent(message, trigger);
           patch = parsed.patch || {};
-          hints = parsed.hints || [];
         }
         if (!Object.keys(patch).length) {
           dialog.push({
@@ -2479,17 +3130,7 @@
           return;
         }
         await loadTriggers(triggerId);
-        const updated = getActiveTrigger() || result.trigger || {};
-        const summary = [
-          `Trigger aktualisiert: ${String(updated.name || trigger.name || '-')}`,
-          `Typ: ${String(updated.trigger_type || trigger.trigger_type || '-')}`,
-          `Status: ${Boolean(updated.enabled) ? 'aktiv' : 'inaktiv'}`,
-          (updated.config && Object.keys(updated.config).length ? `Config: ${JSON.stringify(updated.config)}` : '')
-        ].filter(Boolean);
-        if (Array.isArray(hints) && hints.length) {
-          summary.push(hints.join(' '));
-        }
-        dialog.push({ role: 'bot', text: summary.join('\n'), timestamp: nowIso() });
+        dialog.push({ role: 'bot', text: 'Änderung erfolgreich durchgeführt.', timestamp: nowIso() });
       } catch (_err) {
         dialog.push({ role: 'bot', text: 'Trigger-Update fehlgeschlagen.', timestamp: nowIso() });
       } finally {
@@ -2527,6 +3168,7 @@
         await loadChatMemory();
         await loadTasksMemory();
         await loadTriggers();
+        await loadAgentsMemory();
         renderSidebarList();
         renderActivePane();
         setTimeout(() => { overlay.classList.remove('open'); }, 350);
@@ -2542,6 +3184,10 @@
       }
       if (sidebarMode === 'tasks') {
         await sendTaskMessage();
+        return;
+      }
+      if (sidebarMode === 'agents') {
+        await sendAgentMessage();
         return;
       }
       const message = inputEl.value.trim();
@@ -2622,15 +3268,20 @@
     chatTitleEl.addEventListener('click', () => {
       const isTaskMode = sidebarMode === 'tasks';
       const isTriggerMode = sidebarMode === 'triggers';
+      const isAgentMode = sidebarMode === 'agents';
       const task = isTaskMode ? getActiveTask() : null;
       const trigger = isTriggerMode ? getActiveTrigger() : null;
-      const chat = (!isTaskMode && !isTriggerMode) ? getActiveChat() : null;
+      const agent = isAgentMode ? getActiveAgent() : null;
+      const chat = (!isTaskMode && !isTriggerMode && !isAgentMode) ? getActiveChat() : null;
       if (isTaskMode && !task) return;
       if (isTriggerMode && !trigger) return;
-      if (!isTaskMode && !isTriggerMode && !chat) return;
+      if (isAgentMode && !agent) return;
+      if (!isTaskMode && !isTriggerMode && !isAgentMode && !chat) return;
       const currentTitle = isTaskMode
         ? taskTitle(task)
-        : (isTriggerMode ? (String(trigger.name || '').trim() || `Trigger ${String(trigger.id || '')}`) : String(chat.title || 'Neuer Chat'));
+        : (isTriggerMode
+            ? (String(trigger.name || '').trim() || `Trigger ${String(trigger.id || '')}`)
+            : (isAgentMode ? agentTitle(agent) : String(chat.title || 'Neuer Chat')));
       const input = document.createElement('input');
       input.type = 'text';
       input.value = currentTitle;
@@ -2656,6 +3307,12 @@
           }
         } else if (isTriggerMode) {
           const ok = await renameTrigger(trigger.id, next);
+          if (!ok) {
+            renderActivePane();
+            return;
+          }
+        } else if (isAgentMode) {
+          const ok = await renameAgent(agent.id, next);
           if (!ok) {
             renderActivePane();
             return;
@@ -2719,6 +3376,7 @@
       await loadChatMemory();
       await loadTasksMemory();
       await loadTriggers();
+      await loadAgentsMemory();
       setSidebarMode('chats');
       if (isMobileView()) closeSidebar();
     });
@@ -2726,6 +3384,7 @@
     modeTasksBtn.addEventListener('click', async () => {
       await loadTasksMemory();
       await loadTriggers();
+      await loadAgentsMemory();
       setSidebarMode('tasks');
       if (isMobileView()) closeSidebar();
     });
@@ -2733,9 +3392,24 @@
     modeTriggersBtn.addEventListener('click', async () => {
       await loadTasksMemory();
       await loadTriggers();
+      await loadAgentsMemory();
       setSidebarMode('triggers');
       if (isMobileView()) closeSidebar();
     });
+
+    if (modeToolsBtn) {
+      modeToolsBtn.addEventListener('click', () => {
+        // Platzhalter: Tools-Ansicht folgt.
+      });
+    }
+
+    if (modeAgentsBtn) {
+      modeAgentsBtn.addEventListener('click', async () => {
+        await loadAgentsMemory();
+        setSidebarMode('agents');
+        if (isMobileView()) closeSidebar();
+      });
+    }
 
     if (sidebarToggleBtn) {
       sidebarToggleBtn.addEventListener('click', toggleSidebar);
@@ -2752,6 +3426,7 @@
       await loadChatMemory();
       await loadTasksMemory();
       await loadTriggers();
+      await loadAgentsMemory();
       setSidebarMode('chats');
     })();
   </script>

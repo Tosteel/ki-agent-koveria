@@ -52,3 +52,44 @@ Beispielregel:
 - Wenn neue unbeantwortete Mail von `*@kunde.de` und Betreff enthält „Lieferung“:
 - Aufgabe erzeugen: „Mail prüfen und Lieferstatus antworten“.
 - Optional direkt Tool-Kette vorbereiten: `fetch_unanswered_mails -> answer_mail`.
+
+## Idee: Zielarchitektur für 1000+ Nutzer
+
+Ziel: stabile Multi-User-Plattform mit horizontaler Skalierung.
+
+1. API stateless machen
+- Keine User-Zustände im Prozess halten.
+- Mehrere API-Instanzen hinter Load-Balancer betreiben.
+
+2. Persistenz zentralisieren
+- Chats, Tasks, Trigger in eine zentrale Datenbank (z. B. PostgreSQL) speichern.
+- Generierte Dateien (PDF/PPT) in Object Storage (S3-kompatibel) ablegen.
+
+3. Hintergrundjobs einführen
+- Längere Abläufe (Planner/Tools/Mail/Trigger) über Job-Queue ausführen.
+- API antwortet schnell mit Job-ID; Ergebnis wird asynchron zurückgeliefert.
+
+4. Trigger-Engine entkoppeln
+- Trigger nicht im Webserver-Thread ausführen.
+- Eigener Worker-Service für Scheduling und Trigger-Execution.
+
+5. Caching und Rate Limits
+- Redis für Cache, Session-nahe Daten und Throttling pro Nutzer/API-Key.
+- Schutz gegen Lastspitzen und Missbrauch.
+
+6. Skalierbarer Betrieb
+- Containerisierung + Orchestrierung (z. B. Kubernetes/ECS).
+- Horizontales Autoscaling für API und Worker.
+
+7. Observability
+- Zentrales Logging, Metriken, Tracing und Alerts.
+- Monitoring auf Latenz, Fehlerquote und Queue-Lag.
+
+8. Sicherheit und Tenant-Isolation
+- Strikte Mandantentrennung in allen Datenmodellen/Queries.
+- Secrets über Secret-Manager statt Klartext in `.env`.
+
+Vorgeschlagene Umsetzung in Phasen:
+- Phase 1: Datenmodell + DB-Migration für Chats/Tasks/Trigger.
+- Phase 2: Job-Queue + Worker für asynchrone Tool-Ausführung.
+- Phase 3: Load-Balancer + mehrere API-Instanzen + Monitoring/Autoscaling.

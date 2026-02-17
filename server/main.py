@@ -15,6 +15,8 @@ from .core.models import (
     AgentAskRequest, AgentAskResponse,
     AgentPlanRequest,
     AgentPlanResponse,
+    AgentClarifyRequest, AgentClarifyResponse,
+    AgentFinalizeRequest, AgentFinalizeResponse,
 )
 from .deps import get_current_user, settings as dep_settings
 from .auth import get_token_for_user
@@ -65,12 +67,20 @@ class TaskMemorySyncRequest(BaseModel):
     tasks: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+class AgentMemorySyncRequest(BaseModel):
+    agents: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _user_tasks_memory_path(s: Settings, user_id: str) -> Path:
     return s.user_dir(user_id) / "tasks_memory.json"
+
+
+def _user_agents_memory_path(s: Settings, user_id: str) -> Path:
+    return s.user_dir(user_id) / "agents_config.json"
 
 
 def _normalize_tasks_payload(raw: Any) -> List[Dict[str, Any]]:
@@ -162,6 +172,92 @@ def _save_tasks_memory_for_user(s: Settings, user_id: str, tasks: List[Dict[str,
         "version": 1,
         "updated_at": _now_iso(),
         "tasks": _normalize_tasks_payload(tasks),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _normalize_agents_payload(raw: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    agents: List[Dict[str, Any]] = []
+    for a in raw:
+        if not isinstance(a, dict):
+            continue
+        agent_id = int(a.get("id") or 0)
+        text = str(a.get("text") or "").strip()
+        if agent_id <= 0 or not text:
+            continue
+        dialog_raw = a.get("dialog")
+        dialog: List[Dict[str, Any]] = []
+        if isinstance(dialog_raw, list):
+            for m in dialog_raw:
+                if not isinstance(m, dict):
+                    continue
+                msg_text = str(m.get("text") or "").strip()
+                if not msg_text:
+                    continue
+                dialog.append(
+                    {
+                        "role": "user" if str(m.get("role") or "").strip().lower() == "user" else "bot",
+                        "text": msg_text,
+                        "plannedSteps": [str(s).strip() for s in (m.get("plannedSteps") or []) if str(s).strip()],
+                        "timestamp": str(m.get("timestamp") or ""),
+                    }
+                )
+        placeholders_raw = a.get("placeholders")
+        placeholders: List[Dict[str, Any]] = []
+        if isinstance(placeholders_raw, list):
+            for p in placeholders_raw:
+                if not isinstance(p, dict):
+                    continue
+                name = str(p.get("name") or "").strip().lower()
+                if not name:
+                    continue
+                placeholders.append(
+                    {
+                        "name": name,
+                        "type": str(p.get("type") or "string").strip().lower() or "string",
+                        "required": bool(p.get("required", True)),
+                        "description": str(p.get("description") or "").strip(),
+                        "used_in": [str(u).strip() for u in (p.get("used_in") or []) if str(u).strip()],
+                    }
+                )
+        agents.append(
+            {
+                "id": agent_id,
+                "title": str(a.get("title") or "").strip(),
+                "text": text,
+                "planned_steps": [str(s).strip() for s in (a.get("planned_steps") or []) if str(s).strip()],
+                "created_at": str(a.get("created_at") or ""),
+                "source_task_id": int(a.get("source_task_id") or 0),
+                "placeholders": placeholders,
+                "dialog": dialog,
+            }
+        )
+    return agents
+
+
+def _load_agents_memory_for_user(s: Settings, user_id: str) -> Dict[str, Any]:
+    path = _user_agents_memory_path(s, user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        return {"agents": []}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"agents": []}
+    if not isinstance(data, dict):
+        return {"agents": []}
+    return {"agents": _normalize_agents_payload(data.get("agents"))}
+
+
+def _save_agents_memory_for_user(s: Settings, user_id: str, agents: List[Dict[str, Any]]) -> None:
+    path = _user_agents_memory_path(s, user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": 1,
+        "updated_at": _now_iso(),
+        "agents": _normalize_agents_payload(agents),
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -608,6 +704,28 @@ def sync_tasks_memory(
     return {"ok": True, "user_id": user_id, "count": len(tasks)}
 
 
+@app.get("/agents/memory")
+def get_agents_memory(
+    user_id: str = Depends(get_current_user),
+    s: Settings = Depends(dep_settings),
+) -> Dict[str, Any]:
+    _ensure_user_dirs(s, user_id)
+    memory = _load_agents_memory_for_user(s, user_id)
+    return {"user_id": user_id, **memory}
+
+
+@app.post("/agents/memory/sync")
+def sync_agents_memory(
+    req: AgentMemorySyncRequest,
+    user_id: str = Depends(get_current_user),
+    s: Settings = Depends(dep_settings),
+) -> Dict[str, Any]:
+    _ensure_user_dirs(s, user_id)
+    agents = _normalize_agents_payload(req.agents)
+    _save_agents_memory_for_user(s, user_id, agents)
+    return {"ok": True, "user_id": user_id, "count": len(agents)}
+
+
 def _get_trigger_runtime() -> TriggerRuntime:
     runtime = getattr(app.state, "trigger_runtime", None)
     if runtime is None:
@@ -876,6 +994,54 @@ def _execute_steps_for_trigger(user_id: str, steps: List[Dict[str, Any]], goal: 
     return orch.run_steps(ctx, steps)
 
 
+def _provider_key(provider: str) -> str:
+    p = str(provider or "").strip().lower()
+    if p in {"openai", "ionos"}:
+        return p
+    return "ionos"
+
+
+def _llm_for_provider(provider: str) -> Any:
+    p = _provider_key(provider)
+    if p == "openai":
+        return LlmRuntime()
+    return IonosLLM()
+
+
+def _run_steps_internal(
+    *,
+    user_id: str,
+    settings: Settings,
+    api_key: str,
+    goal: str,
+    steps: List[Dict[str, Any]],
+    log_label: str = "PLANNED STEPS",
+) -> tuple[bool, List[Dict[str, Any]], List[Dict[str, Any]], str]:
+    registry = _build_registry()
+    orch = Orchestrator(registry)
+    ctx = ToolContext(user_id=user_id, settings=settings, api_key=api_key, goal=goal)
+    sanitized_steps = _sanitize_execution_steps(steps)
+
+    print(f"\n===== {log_label} =====")
+    for i, step in enumerate(sanitized_steps, 1):
+        print(f"{i}. tool={step.get('tool')} args={step.get('args')}")
+    print("=========================\n")
+
+    tool_outputs_full = orch.run_steps(ctx, sanitized_steps)
+    tool_outputs_compact = _compact_tool_outputs(tool_outputs_full)
+    ok = all(o.get("ok") for o in tool_outputs_full) if tool_outputs_full else True
+    fallback_answer = _extract_execution_answer(tool_outputs_full)
+    return ok, tool_outputs_full, tool_outputs_compact, fallback_answer
+
+
+def _finalize_internal(*, provider: str, goal: str, tool_outputs_full: List[Dict[str, Any]]) -> str:
+    llm = _llm_for_provider(provider)
+    llm_view = _outputs_for_final_answer(tool_outputs_full)
+    if hasattr(llm, "enabled") and llm.enabled():
+        return str(llm.final_answer(goal=goal, tool_outputs=llm_view))
+    return str(llm_view)
+
+
 
 @app.post("/agent/run", response_model=AgentRunResponse)
 def agent_run(
@@ -886,36 +1052,25 @@ def agent_run(
 ) -> AgentRunResponse:
     _ensure_user_dirs(s, user_id)
 
-    registry = _build_registry()
-    orch = Orchestrator(registry)
-    ctx = ToolContext(
-        user_id=user_id,
-        settings=s,
-        api_key=credentials.credentials,  # ← wichtig
-        goal="",
-    )
-
     # Nur explizite Steps ausführen; kein impliziter Default-Flow.
     if not req.steps:
         raise HTTPException(status_code=422, detail="steps must not be empty for /agent/run")
 
     steps = _sanitize_execution_steps([step.model_dump() for step in req.steps])
-
     log_label = (req.log_label or "").strip() or "PLANNED STEPS"
-    print(f"\n===== {log_label} =====")
-    for i, step in enumerate(steps, 1):
-        print(f"{i}. tool={step.get('tool')} args={step.get('args')}")
-    print("=========================\n")
-
-    tool_outputs = orch.run_steps(ctx, steps)
-    ok = all(o.get("ok") for o in tool_outputs) if tool_outputs else True
-
-    answer = _extract_execution_answer(tool_outputs)
+    ok, tool_outputs_full, tool_outputs_compact, answer = _run_steps_internal(
+        user_id=user_id,
+        settings=s,
+        api_key=credentials.credentials,
+        goal="",
+        steps=steps,
+        log_label=log_label,
+    )
     print("\n===== FINAL ANSWER =====")
     print(answer)
     print("========================\n")
 
-    return AgentRunResponse(ok=ok, outputs=_compact_tool_outputs(tool_outputs))
+    return AgentRunResponse(ok=ok, outputs=tool_outputs_compact)
 
 
 @app.post("/agent/plan", response_model=AgentPlanResponse)
@@ -959,6 +1114,65 @@ def agent_plan(
         questions=[],
     )
 
+
+@app.post("/agent/clarify", response_model=AgentClarifyResponse)
+def agent_clarify(
+    req: AgentClarifyRequest,
+    user_id: str = Depends(get_current_user),
+    s: Settings = Depends(dep_settings),
+) -> AgentClarifyResponse:
+    _ensure_user_dirs(s, user_id)
+    goal_ctx = _goal_with_context(req.goal, req.history)
+    llm = _llm_for_provider(req.provider)
+    gate = _run_clarification_gate(llm, goal_ctx)
+
+    print("\n===== CLARIFICATION =====")
+    print(f"provider={_provider_key(req.provider)}")
+    print(f"status={gate.get('status')}")
+    print(f"normalized_goal={gate.get('normalized_goal')}")
+    print(f"missing_fields={gate.get('missing_fields')}")
+    print(f"questions={gate.get('questions')}")
+    print("=========================\n")
+
+    if gate["status"] == "needs_info":
+        clar = _clarification_response(req.goal, gate)
+        return AgentClarifyResponse(
+            ok=True,
+            goal=req.goal,
+            status="needs_info",
+            normalized_goal=str(gate.get("normalized_goal") or req.goal),
+            requires_user_input=True,
+            missing_fields=list(gate.get("missing_fields") or []),
+            questions=list(gate.get("questions") or []),
+            answer=clar.answer,
+        )
+
+    return AgentClarifyResponse(
+        ok=True,
+        goal=req.goal,
+        status="ready",
+        normalized_goal=str(gate.get("normalized_goal") or req.goal),
+        requires_user_input=False,
+        missing_fields=[],
+        questions=[],
+        answer="",
+    )
+
+
+@app.post("/agent/finalize", response_model=AgentFinalizeResponse)
+def agent_finalize(
+    req: AgentFinalizeRequest,
+    user_id: str = Depends(get_current_user),
+    s: Settings = Depends(dep_settings),
+) -> AgentFinalizeResponse:
+    _ensure_user_dirs(s, user_id)
+    answer = _finalize_internal(provider=req.provider, goal=req.goal, tool_outputs_full=req.tool_outputs)
+    print("\n===== FINAL ANSWER =====")
+    print(answer)
+    print("========================\n")
+    return AgentFinalizeResponse(ok=True, goal=req.goal, answer=answer)
+
+
 @app.post("/agent/askOpenAI", response_model=AgentAskResponse)
 def agent_askOpenAI(
     req: AgentAskRequest,
@@ -968,36 +1182,33 @@ def agent_askOpenAI(
 ) -> AgentAskResponse:
     _ensure_user_dirs(s, user_id)
     goal_ctx = _goal_with_context(req.goal, req.history)
-
-    api_key = credentials.credentials
-    registry = _build_registry()           # existiert bei dir bereits
-    orch = Orchestrator(registry)          # existiert bei dir bereits
-    ctx = ToolContext(user_id=user_id, settings=s, api_key=api_key, goal=goal_ctx)
-
-    llm = LlmRuntime()
+    llm = _llm_for_provider("openai")
     gate = _run_clarification_gate(llm, goal_ctx)
     if gate["status"] == "needs_info":
         return _clarification_response(req.goal, gate)
 
-    effective_goal = gate["normalized_goal"]
-    ctx.goal = effective_goal
-    planner = Planner(llm, registry)
+    effective_goal = str(gate.get("normalized_goal") or req.goal)
+    planner = Planner(llm, _build_registry())
     steps = planner.create_steps(goal=effective_goal)
     steps = _inject_llm_summary_before_pdf(steps, effective_goal)
-    #steps = planner.create_steps(req.goal)
 
-    tool_outputs_full = orch.run_steps(ctx, steps)
-    tool_outputs = _compact_tool_outputs(tool_outputs_full)
+    ok, tool_outputs_full, tool_outputs_compact, fallback_answer = _run_steps_internal(
+        user_id=user_id,
+        settings=s,
+        api_key=credentials.credentials,
+        goal=effective_goal,
+        steps=steps,
+        log_label="PLANNED STEPS",
+    )
+    answer = _finalize_internal(provider="openai", goal=effective_goal, tool_outputs_full=tool_outputs_full)
+    if not str(answer).strip():
+        answer = fallback_answer
 
-    llm_view = _outputs_for_final_answer(tool_outputs_full)
-    if llm.enabled():
-        answer = llm.final_answer(goal=effective_goal, tool_outputs=llm_view)
-    else:
-        # Fallback: sehr kurze Antwort aus Outputs
-        answer = str(llm_view)
+    print("\n===== FINAL ANSWER =====")
+    print(answer)
+    print("========================\n")
 
-    ok = all(o.get("ok") for o in tool_outputs_full) if tool_outputs_full else True
-    return AgentAskResponse(ok=ok, goal=req.goal, steps=steps, tool_outputs=tool_outputs, answer=answer)
+    return AgentAskResponse(ok=ok, goal=req.goal, steps=steps, tool_outputs=tool_outputs_compact, answer=answer)
 
 @app.post("/agent/askIonos", response_model=AgentAskResponse)
 def agent_askIonos(
@@ -1008,13 +1219,7 @@ def agent_askIonos(
 ) -> AgentAskResponse:
     _ensure_user_dirs(s, user_id)
     goal_ctx = _goal_with_context(req.goal, req.history)
-
-    api_key = credentials.credentials
-    registry = _build_registry()           # existiert bei dir bereits
-    orch = Orchestrator(registry)          # existiert bei dir bereits
-    ctx = ToolContext(user_id=user_id, settings=s, api_key=api_key, goal=goal_ctx)
-
-    llm = IonosLLM()
+    llm = _llm_for_provider("ionos")
     gate = _run_clarification_gate(llm, goal_ctx)
 
     print("\n===== CLARIFICATION =====")
@@ -1027,31 +1232,25 @@ def agent_askIonos(
     if gate["status"] == "needs_info":
         return _clarification_response(req.goal, gate)
 
-    effective_goal = gate["normalized_goal"]
-    ctx.goal = effective_goal
-    planner = Planner(llm, registry)
+    effective_goal = str(gate.get("normalized_goal") or req.goal)
+    planner = Planner(llm, _build_registry())
     steps = planner.create_steps(goal=effective_goal)
     steps = _inject_llm_summary_before_pdf(steps, effective_goal)
 
-    print("\n===== PLANNED STEPS =====")
-    for i, s in enumerate(steps, 1):
-        print(f"{i}. tool={s.get('tool')} args={s.get('args')}")
-    print("=========================\n")
-
-    tool_outputs_full = orch.run_steps(ctx, steps)
-    tool_outputs = _compact_tool_outputs(tool_outputs_full)
-
-    llm_view = _outputs_for_final_answer(tool_outputs_full)
-    if llm.enabled():
-        answer = llm.final_answer(goal=effective_goal, tool_outputs=llm_view)
-    else:
-        # Fallback: sehr kurze Antwort aus Outputs
-        answer = str(llm_view)
+    ok, tool_outputs_full, tool_outputs_compact, fallback_answer = _run_steps_internal(
+        user_id=user_id,
+        settings=s,
+        api_key=credentials.credentials,
+        goal=effective_goal,
+        steps=steps,
+        log_label="PLANNED STEPS",
+    )
+    answer = _finalize_internal(provider="ionos", goal=effective_goal, tool_outputs_full=tool_outputs_full)
+    if not str(answer).strip():
+        answer = fallback_answer
 
     print("\n===== FINAL ANSWER =====")
     print(answer)
     print("========================\n")
 
-    ok = all(o.get("ok") for o in tool_outputs_full) if tool_outputs_full else True
-
-    return AgentAskResponse(ok=ok, goal=req.goal, steps=steps, tool_outputs=tool_outputs, answer=answer)
+    return AgentAskResponse(ok=ok, goal=req.goal, steps=steps, tool_outputs=tool_outputs_compact, answer=answer)

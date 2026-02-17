@@ -77,3 +77,32 @@ class AgentPlanResponse(BaseModel):
     requires_user_input: bool = False
     missing_fields: List[str] = Field(default_factory=list)
     questions: List[str] = Field(default_factory=list)
+
+
+class AgentClarifyRequest(BaseModel):
+    goal: str = Field(..., min_length=1)
+    history: List[Dict[str, str]] = Field(default_factory=list)
+    provider: str = "ionos"
+
+
+class AgentClarifyResponse(BaseModel):
+    ok: bool
+    goal: str
+    status: str = "ready"
+    normalized_goal: str = ""
+    requires_user_input: bool = False
+    missing_fields: List[str] = Field(default_factory=list)
+    questions: List[str] = Field(default_factory=list)
+    answer: str = ""
+
+
+class AgentFinalizeRequest(BaseModel):
+    goal: str = Field(..., min_length=1)
+    tool_outputs: List[Dict[str, Any]] = Field(default_factory=list)
+    provider: str = "ionos"
+
+
+class AgentFinalizeResponse(BaseModel):
+    ok: bool
+    goal: str
+    answer: str

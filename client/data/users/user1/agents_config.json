@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "updated_at": "2026-02-17T14:11:28Z",
+  "agents": [
+    {
+      "id": 1,
+      "title": "Recherche-Agent",
+      "text": "\"Suchergebnisse per E-Mail\"\n\n1. Die Wissensdatenbank wird nach dem Suchbegriff durchsucht.\n2. Die Ergebnisse aus der Wissensdatenbank werden in einen Text überführt.\n3. Der Text wird per E-Mail an den Empfänger gesendet, mit dem Suchbegriff als Betreff.",
+      "planned_steps": [
+        "1. tool=search_multitable args={\"user_prompt\":\"{{suchbegriff}}\"}",
+        "2. tool=llm_compose args={\"text\":\"Ausführliche Ergebnisse: {steps[0].text}\"}",
+        "3. tool=send_mail args={\"to\":[\"{{email_platzhalter}}\"],\"subject\":\"Zusammenfassung {{suchbegriff}}\",\"body\":\"{steps[1].text}\"}"
+      ],
+      "created_at": "2026-02-17T12:48:46Z",
+      "source_task_id": 3,
+      "placeholders": [
+        {
+          "name": "email_platzhalter",
+          "type": "email",
+          "required": true,
+          "description": "Platzhalter email_platzhalter",
+          "used_in": [
+            "steps[2].args.to[0]"
+          ]
+        },
+        {
+          "name": "suchbegriff",
+          "type": "string",
+          "required": true,
+          "description": "Platzhalter suchbegriff",
+          "used_in": [
+            "steps[0].args.user_prompt",
+            "steps[2].args.subject"
+          ]
+        }
+      ],
+      "dialog": [
+        {
+          "role": "user",
+          "text": "bitte platzhalter für email.",
+          "plannedSteps": [],
+          "timestamp": "2026-02-17T12:48:53.889Z"
+        },
+        {
+          "role": "bot",
+          "text": "Änderung erfolgreich durchgeführt.",
+          "plannedSteps": [],
+          "timestamp": "2026-02-17T12:49:05.046Z"
+        },
+        {
+          "role": "user",
+          "text": "bitte platzhalter für den suchbegriff.",
+          "plannedSteps": [],
+          "timestamp": "2026-02-17T12:49:29.964Z"
+        },
+        {
+          "role": "bot",
+          "text": "Änderung erfolgreich durchgeführt.",
+          "plannedSteps": [],
+          "timestamp": "2026-02-17T12:49:42.523Z"
+        },
+        {
+          "role": "user",
+          "text": "in schritt 2 bitte \"Ausführliche Ergebnisse\" mit in den Text aufnehmen.",
+          "plannedSteps": [],
+          "timestamp": "2026-02-17T12:51:46.869Z"
+        },
+        {
+          "role": "bot",
+          "text": "Änderung erfolgreich durchgeführt.",
+          "plannedSteps": [],
+          "timestamp": "2026-02-17T12:52:01.388Z"
+        }
+      ]
+    }
+  ]
+}

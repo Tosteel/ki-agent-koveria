@@ -73,6 +73,38 @@ class TaskDeleteRequest(BaseModel):
     user_id: Optional[str] = ""
 
 
+class AgentCreateFromTaskRequest(BaseModel):
+    task_id: int = Field(..., ge=1)
+    user_id: Optional[str] = ""
+
+
+class AgentDeleteRequest(BaseModel):
+    agent_id: int = Field(..., ge=1)
+    user_id: Optional[str] = ""
+
+
+class AgentRenameRequest(BaseModel):
+    agent_id: int = Field(..., ge=1)
+    title: str = Field(..., min_length=1)
+    user_id: Optional[str] = ""
+
+
+class AgentUpdateRequest(BaseModel):
+    agent_id: int = Field(..., ge=1)
+    planned_steps: List[str] = Field(default_factory=list)
+    text: Optional[str] = ""
+    dialog: List[Dict[str, Any]] = Field(default_factory=list)
+    placeholders: List[Dict[str, Any]] = Field(default_factory=list)
+    user_id: Optional[str] = ""
+
+
+class AgentReplanRequest(BaseModel):
+    agent_id: int = Field(..., ge=1)
+    planned_steps: List[str] = Field(default_factory=list)
+    change_request: str = Field(..., min_length=1)
+    user_id: Optional[str] = ""
+
+
 class TaskRerunRequest(BaseModel):
     task_id: int = Field(..., ge=1)
     planned_steps: List[str] = Field(default_factory=list)
@@ -177,6 +209,11 @@ def _user_chat_memory_path(user_id: str) -> Path:
 def _user_task_path(user_id: str) -> Path:
     safe_user_id = _sanitize_user_id(user_id)
     return USER_DATA_DIR / safe_user_id / "tasks_memory.json"
+
+
+def _user_agent_path(user_id: str) -> Path:
+    safe_user_id = _sanitize_user_id(user_id)
+    return USER_DATA_DIR / safe_user_id / "agents_config.json"
 
 
 def _planned_steps_block(steps: List[str]) -> str:
@@ -326,6 +363,71 @@ def _parse_json_strictish_text(text: str) -> Dict[str, Any]:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+_PLACEHOLDER_PATTERN = re.compile(r"\{\{([a-z0-9_]+)\}\}")
+_PLACEHOLDER_SINGLE_PATTERN = re.compile(r"\{([a-z0-9_]+)\}")
+
+
+def _infer_placeholder_type(name: str, paths: List[str]) -> str:
+    low = (name or "").strip().lower()
+    combined = " ".join(paths).lower()
+    if "mail" in low or "email" in low or "@" in combined or ".to[" in combined:
+        return "email"
+    if "date" in low or "datum" in low:
+        return "date"
+    if any(tok in low for tok in ("count", "num", "anzahl", "limit", "top_k")):
+        return "number"
+    return "string"
+
+
+def _extract_placeholders_from_steps(steps: List[str]) -> List[Dict[str, Any]]:
+    refs: Dict[str, List[str]] = {}
+    parsed_steps = _parse_planned_steps_lines(steps)
+    for step_idx, step in enumerate(parsed_steps):
+        args = step.get("args")
+        if not isinstance(args, dict):
+            continue
+
+        def walk(value: Any, path: str) -> None:
+            if isinstance(value, str):
+                for m in _PLACEHOLDER_PATTERN.finditer(value):
+                    name = str(m.group(1) or "").strip().lower()
+                    if not name:
+                        continue
+                    refs.setdefault(name, [])
+                    if path not in refs[name]:
+                        refs[name].append(path)
+                for m in _PLACEHOLDER_SINGLE_PATTERN.finditer(value):
+                    name = str(m.group(1) or "").strip().lower()
+                    if not name or name.startswith("steps"):
+                        continue
+                    refs.setdefault(name, [])
+                    if path not in refs[name]:
+                        refs[name].append(path)
+                return
+            if isinstance(value, dict):
+                for k, v in value.items():
+                    walk(v, f"{path}.{k}")
+                return
+            if isinstance(value, list):
+                for i, v in enumerate(value):
+                    walk(v, f"{path}[{i}]")
+
+        walk(args, f"steps[{step_idx}].args")
+
+    out: List[Dict[str, Any]] = []
+    for name in sorted(refs.keys()):
+        out.append(
+            {
+                "name": name,
+                "type": _infer_placeholder_type(name, refs[name]),
+                "required": True,
+                "description": f"Platzhalter {name}",
+                "used_in": refs[name],
+            }
+        )
+    return out
 
 
 def _resolve_user_id_from_api(ask_ionos_url: str, api_key: str) -> Optional[str]:
@@ -583,6 +685,160 @@ def _write_tasks_memory_for_user(user_id: str, tasks: List[Dict[str, Any]]) -> N
         pass
 
 
+def _load_agents_for_user(user_id: str) -> Dict[str, Any]:
+    local_memory = _load_agents_local_for_user(user_id)
+    settings = _load_settings_for_user(user_id)
+    api_base = _extract_api_base_url(settings.get("ask_ionos_url", ""))
+    api_key = settings.get("api_key", "").strip()
+    if not api_base or not api_key:
+        return {"agents": local_memory.get("agents", []), "sync_status": "offline_cache"}
+    try:
+        resp = requests.get(
+            f"{api_base}/agents/memory",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=8,
+        )
+        if resp.status_code >= 400:
+            return {"agents": local_memory.get("agents", []), "sync_status": "offline_cache"}
+        data = resp.json() if resp.content else {}
+        raw_agents = data.get("agents") if isinstance(data, dict) else []
+        if isinstance(raw_agents, list):
+            local_agents = local_memory.get("agents") if isinstance(local_memory.get("agents"), list) else []
+            if not raw_agents and local_agents:
+                _write_agents_for_user(user_id, local_agents)
+                return {"agents": local_agents, "sync_status": "synchronized"}
+            _write_agents_local_for_user(user_id, raw_agents)
+            refreshed = _load_agents_local_for_user(user_id)
+            return {"agents": refreshed.get("agents", []), "sync_status": "synchronized"}
+    except Exception:
+        return {"agents": local_memory.get("agents", []), "sync_status": "offline_cache"}
+    return {"agents": local_memory.get("agents", []), "sync_status": "offline_cache"}
+
+
+def _load_agents_local_for_user(user_id: str) -> Dict[str, Any]:
+    path = _user_agent_path(user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        return {"agents": []}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"agents": []}
+    if not isinstance(data, dict):
+        return {"agents": []}
+    raw_agents = data.get("agents")
+    if not isinstance(raw_agents, list):
+        return {"agents": []}
+    agents: List[Dict[str, Any]] = []
+    for a in raw_agents:
+        if not isinstance(a, dict):
+            continue
+        agent_id = int(a.get("id") or 0)
+        text = str(a.get("text") or "").strip()
+        if agent_id < 1 or not text:
+            continue
+        agents.append(
+            {
+                "id": agent_id,
+                "title": str(a.get("title") or "").strip(),
+                "text": text,
+                "planned_steps": [str(s).strip() for s in (a.get("planned_steps") or []) if str(s).strip()],
+                "created_at": str(a.get("created_at") or ""),
+                "source_task_id": int(a.get("source_task_id") or 0),
+                "placeholders": [
+                    {
+                        "name": str(p.get("name") or "").strip().lower(),
+                        "type": str(p.get("type") or "string").strip().lower() or "string",
+                        "required": bool(p.get("required", True)),
+                        "description": str(p.get("description") or "").strip(),
+                        "used_in": [str(u).strip() for u in (p.get("used_in") or []) if str(u).strip()],
+                    }
+                    for p in (a.get("placeholders") or [])
+                    if isinstance(p, dict) and str(p.get("name") or "").strip()
+                ] or _extract_placeholders_from_steps(
+                    [str(s).strip() for s in (a.get("planned_steps") or []) if str(s).strip()]
+                ),
+                "dialog": [
+                    {
+                        "role": ("user" if str(m.get("role") or "").strip().lower() == "user" else "bot"),
+                        "text": str(m.get("text") or "").strip(),
+                        "plannedSteps": [str(s).strip() for s in (m.get("plannedSteps") or []) if str(s).strip()],
+                        "timestamp": str(m.get("timestamp") or ""),
+                    }
+                    for m in (a.get("dialog") or [])
+                    if isinstance(m, dict) and str(m.get("text") or "").strip()
+                ],
+            }
+        )
+    return {"agents": agents}
+
+
+def _write_agents_for_user(user_id: str, agents: List[Dict[str, Any]]) -> None:
+    _write_agents_local_for_user(user_id, agents)
+    settings = _load_settings_for_user(user_id)
+    api_base = _extract_api_base_url(settings.get("ask_ionos_url", ""))
+    api_key = settings.get("api_key", "").strip()
+    if not api_base or not api_key:
+        return
+    try:
+        requests.post(
+            f"{api_base}/agents/memory/sync",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"agents": agents},
+            timeout=8,
+        )
+    except Exception:
+        pass
+
+
+def _write_agents_local_for_user(user_id: str, agents: List[Dict[str, Any]]) -> None:
+    path = _user_agent_path(user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    cleaned: List[Dict[str, Any]] = []
+    for a in (agents or []):
+        if not isinstance(a, dict):
+            continue
+        agent_id = int(a.get("id") or 0)
+        text = str(a.get("text") or "").strip()
+        if agent_id < 1 or not text:
+            continue
+        cleaned.append(
+            {
+                "id": agent_id,
+                "title": str(a.get("title") or "").strip(),
+                "text": text,
+                "planned_steps": [str(s).strip() for s in (a.get("planned_steps") or []) if str(s).strip()],
+                "created_at": str(a.get("created_at") or _now_iso()),
+                "source_task_id": int(a.get("source_task_id") or 0),
+                "placeholders": [
+                    {
+                        "name": str(p.get("name") or "").strip().lower(),
+                        "type": str(p.get("type") or "string").strip().lower() or "string",
+                        "required": bool(p.get("required", True)),
+                        "description": str(p.get("description") or "").strip(),
+                        "used_in": [str(u).strip() for u in (p.get("used_in") or []) if str(u).strip()],
+                    }
+                    for p in (a.get("placeholders") or [])
+                    if isinstance(p, dict) and str(p.get("name") or "").strip()
+                ] or _extract_placeholders_from_steps(
+                    [str(s).strip() for s in (a.get("planned_steps") or []) if str(s).strip()]
+                ),
+                "dialog": [
+                    {
+                        "role": ("user" if str(m.get("role") or "").strip().lower() == "user" else "bot"),
+                        "text": str(m.get("text") or "").strip(),
+                        "plannedSteps": [str(s).strip() for s in (m.get("plannedSteps") or []) if str(s).strip()],
+                        "timestamp": str(m.get("timestamp") or ""),
+                    }
+                    for m in (a.get("dialog") or [])
+                    if isinstance(m, dict) and str(m.get("text") or "").strip()
+                ],
+            }
+        )
+    payload = {"version": 1, "updated_at": _now_iso(), "agents": cleaned}
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 app = FastAPI(title="Koveria Web GUI", version="0.1.0")
 MAX_HISTORY_ITEMS = 12
 
@@ -800,6 +1056,15 @@ def get_tasks_memory(user_id: str = Query("")) -> JSONResponse:
         return JSONResponse({"user_id": "", "tasks": []})
     resolved_user_id = _sanitize_user_id(user_id)
     memory = _load_tasks_memory_for_user(resolved_user_id)
+    return JSONResponse({"user_id": resolved_user_id, **memory})
+
+
+@app.get("/api/agents-memory")
+def get_agents_memory(user_id: str = Query("")) -> JSONResponse:
+    if not user_id.strip():
+        return JSONResponse({"user_id": "", "agents": []})
+    resolved_user_id = _sanitize_user_id(user_id)
+    memory = _load_agents_for_user(resolved_user_id)
     return JSONResponse({"user_id": resolved_user_id, **memory})
 
 
@@ -1205,7 +1470,11 @@ def replan_task(req: TaskReplanRequest) -> JSONResponse:
     if not change_request:
         raise HTTPException(status_code=422, detail="change_request must not be empty")
 
-    planning_goal = change_request
+    planning_goal = (
+        f"{change_request}\n\n"
+        "Wenn Eingaben zur Laufzeit variabel sein sollen, verwende ausschließlich das Format "
+        "{{placeholder_name}} mit Kleinbuchstaben, Zahlen und Unterstrich."
+    )
 
     headers: Dict[str, str] = {"Content-Type": "application/json"}
     if api_key:
@@ -1215,6 +1484,7 @@ def replan_task(req: TaskReplanRequest) -> JSONResponse:
         "goal": planning_goal,
         "additional_props": {
             "planned_steps": current_steps,
+            "placeholder_syntax": "{{placeholder_name}}",
         },
     }
 
@@ -1378,6 +1648,266 @@ def delete_task_rerun(req: TaskRerunDeleteRequest) -> JSONResponse:
 
     _write_tasks_memory_for_user(user_id, tasks)
     return JSONResponse({"ok": True, "user_id": user_id, "task": updated})
+
+
+@app.post("/api/agents/create-from-task")
+def create_agent_from_task(req: AgentCreateFromTaskRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    task_memory = _load_tasks_memory_for_user(user_id)
+    tasks = task_memory.get("tasks") if isinstance(task_memory.get("tasks"), list) else []
+    src_task: Optional[Dict[str, Any]] = None
+    for t in tasks:
+        if int(t.get("id") or 0) == req.task_id:
+            src_task = t
+            break
+    if src_task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    text = str(src_task.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="Task text is empty")
+    title = str(src_task.get("title") or "").strip() or text[:80]
+    planned_steps = [str(s).strip() for s in (src_task.get("planned_steps") or []) if str(s).strip()]
+
+    agents_memory = _load_agents_for_user(user_id)
+    agents = agents_memory.get("agents") if isinstance(agents_memory.get("agents"), list) else []
+    next_id = max((int(a.get("id") or 0) for a in agents), default=0) + 1
+    created = {
+        "id": next_id,
+        "title": title,
+        "text": text,
+        "planned_steps": planned_steps,
+        "created_at": _now_iso(),
+        "source_task_id": int(src_task.get("id") or 0),
+        "placeholders": _extract_placeholders_from_steps(planned_steps),
+        "dialog": [],
+    }
+    agents.append(created)
+    _write_agents_for_user(user_id, agents)
+    return JSONResponse({"ok": True, "user_id": user_id, "agent": created})
+
+
+@app.post("/api/agents/delete")
+def delete_agent(req: AgentDeleteRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    memory = _load_agents_for_user(user_id)
+    agents = memory.get("agents") if isinstance(memory.get("agents"), list) else []
+    kept: List[Dict[str, Any]] = []
+    deleted = False
+    for a in agents:
+        if int(a.get("id") or 0) == req.agent_id:
+            deleted = True
+            continue
+        kept.append(a)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    _write_agents_for_user(user_id, kept)
+    return JSONResponse({"ok": True, "user_id": user_id, "agent_id": req.agent_id})
+
+
+@app.post("/api/agents/rename")
+def rename_agent(req: AgentRenameRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    title = str(req.title or "").strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="title must not be empty")
+    memory = _load_agents_for_user(user_id)
+    agents = memory.get("agents") if isinstance(memory.get("agents"), list) else []
+    updated: Optional[Dict[str, Any]] = None
+    for a in agents:
+        if int(a.get("id") or 0) != req.agent_id:
+            continue
+        a["title"] = title
+        updated = a
+        break
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    _write_agents_for_user(user_id, agents)
+    return JSONResponse({"ok": True, "user_id": user_id, "agent": updated})
+
+
+@app.post("/api/agents/update")
+def update_agent(req: AgentUpdateRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    memory = _load_agents_for_user(user_id)
+    agents = memory.get("agents") if isinstance(memory.get("agents"), list) else []
+    updated: Optional[Dict[str, Any]] = None
+
+    clean_steps = [str(s).strip() for s in (req.planned_steps or []) if str(s).strip()]
+    clean_text = str(req.text or "").strip()
+    clean_dialog = []
+    clean_placeholders = []
+    for p in (req.placeholders or []):
+        if not isinstance(p, dict):
+            continue
+        name = str(p.get("name") or "").strip().lower()
+        if not name or not re.match(r"^[a-z0-9_]+$", name):
+            continue
+        clean_placeholders.append(
+            {
+                "name": name,
+                "type": str(p.get("type") or "string").strip().lower() or "string",
+                "required": bool(p.get("required", True)),
+                "description": str(p.get("description") or "").strip(),
+                "used_in": [str(u).strip() for u in (p.get("used_in") or []) if str(u).strip()],
+            }
+        )
+    for m in (req.dialog or []):
+        if not isinstance(m, dict):
+            continue
+        text = str(m.get("text") or "").strip()
+        if not text:
+            continue
+        role = "user" if str(m.get("role") or "").strip().lower() == "user" else "bot"
+        clean_dialog.append(
+            {
+                "role": role,
+                "text": text,
+                "plannedSteps": [str(s).strip() for s in (m.get("plannedSteps") or []) if str(s).strip()],
+                "timestamp": str(m.get("timestamp") or ""),
+            }
+        )
+    if not clean_placeholders:
+        clean_placeholders = _extract_placeholders_from_steps(clean_steps)
+
+    for agent in agents:
+        if int(agent.get("id") or 0) != req.agent_id:
+            continue
+        agent["planned_steps"] = clean_steps
+        if clean_text:
+            agent["text"] = clean_text
+        agent["dialog"] = clean_dialog
+        agent["placeholders"] = clean_placeholders
+        updated = agent
+        break
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    _write_agents_for_user(user_id, agents)
+    return JSONResponse({"ok": True, "user_id": user_id, "agent": updated})
+
+
+@app.post("/api/agents/replan")
+def replan_agent(req: AgentReplanRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    settings = _load_settings_for_user(user_id)
+    plan_url = _agent_plan_url_from_ask_url(settings.get("ask_ionos_url", ""))
+    api_key = settings.get("api_key", "").strip()
+    if not plan_url:
+        raise HTTPException(status_code=422, detail="Ungültige askIonos URL.")
+
+    current_steps = [str(s).strip() for s in (req.planned_steps or []) if str(s).strip()]
+    if not current_steps:
+        raise HTTPException(status_code=422, detail="planned_steps must not be empty")
+    change_request = str(req.change_request or "").strip()
+    if not change_request:
+        raise HTTPException(status_code=422, detail="change_request must not be empty")
+
+    planning_goal = (
+        f"{change_request}\n\n"
+        "WICHTIGE FORMATREGELN FUER PLATZHALTER:\n"
+        "1) Verwende Platzhalter AUSSCHLIESSLICH als {{placeholder_name}}.\n"
+        "2) Erlaubte Zeichen im Namen: a-z, 0-9, _. Keine Leerzeichen.\n"
+        "3) Einfache Klammern sind VERBOTEN: {placeholder_name}.\n"
+        "4) Step-Referenzen bleiben unveraendert, z. B. {steps[0].text}.\n"
+        "5) Wenn ein statischer Wert variabel sein soll, ersetze ihn durch {{...}}.\n"
+        "Beispiele:\n"
+        "- Falsch: {email_platzhalter}\n"
+        "- Richtig: {{email_platzhalter}}\n"
+        "- Richtig: {steps[0].text}\n"
+    )
+    headers: Dict[str, str] = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    payload = {
+        "goal": planning_goal,
+        "additional_props": {
+            "planned_steps": current_steps,
+            "placeholder_syntax": "{{placeholder_name}}",
+        },
+    }
+
+    try:
+        resp = requests.post(plan_url, headers=headers, json=payload, timeout=90)
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"API request failed: {exc}") from exc
+
+    if resp.status_code >= 400:
+        snippet = resp.text[:500]
+        raise HTTPException(status_code=resp.status_code, detail=f"API error: {snippet}")
+
+    data: Dict[str, Any] = resp.json() if resp.content else {}
+    raw_steps = data.get("steps")
+    if not isinstance(raw_steps, list) or not raw_steps:
+        raise HTTPException(status_code=422, detail="Replanning returned no valid planned steps")
+
+    planned_steps: List[str] = []
+    for idx, step in enumerate(raw_steps, start=1):
+        if isinstance(step, str):
+            line = step.strip()
+            m_line = re.match(r"^\s*\d+\.\s*tool=([^\s]+)\s+args=(.+)$", line)
+            if m_line:
+                tool = str(m_line.group(1) or "").strip()
+                args_raw = str(m_line.group(2) or "").strip()
+                args_obj: Dict[str, Any] = {}
+                if args_raw:
+                    try:
+                        parsed = json.loads(args_raw)
+                        if isinstance(parsed, dict):
+                            args_obj = parsed
+                    except Exception:
+                        try:
+                            parsed = ast.literal_eval(args_raw)
+                            if isinstance(parsed, dict):
+                                args_obj = parsed
+                        except Exception:
+                            args_obj = {}
+                args_json = json.dumps(args_obj, ensure_ascii=False, separators=(",", ":"))
+                planned_steps.append(f"{idx}. tool={tool} args={args_json}")
+            continue
+        if not isinstance(step, dict):
+            continue
+
+        tool = str(step.get("tool") or "").strip()
+        args_raw = step.get("args")
+        args: Dict[str, Any] = {}
+        if isinstance(args_raw, dict):
+            args = args_raw
+        elif isinstance(args_raw, str):
+            txt = args_raw.strip()
+            if txt:
+                try:
+                    parsed = json.loads(txt)
+                    if isinstance(parsed, dict):
+                        args = parsed
+                except Exception:
+                    try:
+                        parsed = ast.literal_eval(txt)
+                        if isinstance(parsed, dict):
+                            args = parsed
+                    except Exception:
+                        args = {"value": txt}
+
+        if not tool:
+            continue
+        args_json = json.dumps(args, ensure_ascii=False, separators=(",", ":"))
+        planned_steps.append(f"{idx}. tool={tool} args={args_json}")
+
+    if not planned_steps:
+        raise HTTPException(status_code=422, detail="Replanning returned no valid planned steps")
+
+    raw_text = _planned_steps_block(planned_steps)
+    placeholders = _extract_placeholders_from_steps(planned_steps)
+    return JSONResponse(
+        {
+            "ok": True,
+            "planned_steps": planned_steps,
+            "raw_text": raw_text,
+            "placeholders": placeholders,
+            "placeholder_syntax": "{{placeholder_name}}",
+        }
+    )
 
 
 if __name__ == "__main__":
