@@ -11,6 +11,42 @@ from fastapi import HTTPException
 
 
 _ALLOWED_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "a", "div", "span"]
+_PREFERRED_SELECTORS = [
+    "main article",
+    "article",
+    "main h2 a",
+    "main h3 a",
+    ".teaser",
+    ".headline",
+]
+_NOISE_CONTAINER_TAGS = {"nav", "header", "footer", "aside"}
+_NOISE_CLASS_ID_HINTS = {
+    "nav",
+    "menu",
+    "footer",
+    "header",
+    "breadcrumb",
+    "cookie",
+    "consent",
+    "social",
+    "sidebar",
+    "toolbar",
+}
+_NOISE_TEXT_TOKENS = {
+    "anmelden",
+    "suche",
+    "impressum",
+    "datenschutz",
+    "kontakt",
+    "menü",
+    "live",
+    "podcasts",
+    "audiothek",
+    "mediathek",
+    "einblenden",
+    "ausblenden",
+    "wetter",
+}
 
 
 def _normalized_text(raw: str) -> str:
@@ -37,6 +73,74 @@ def _query_terms(query: str) -> List[str]:
     return [t for t in re.findall(r"[A-Za-z0-9ÄÖÜäöüß]+", query or "") if len(t) >= 3]
 
 
+def _is_noise_node(node: Any) -> bool:
+    parent = node
+    depth = 0
+    while parent is not None and depth < 4:
+        tag_name = str(getattr(parent, "name", "") or "").lower()
+        if tag_name in _NOISE_CONTAINER_TAGS:
+            return True
+        attrs = getattr(parent, "attrs", {}) or {}
+        class_raw = attrs.get("class") or []
+        if isinstance(class_raw, str):
+            class_vals = [class_raw]
+        else:
+            class_vals = [str(v) for v in class_raw]
+        id_val = str(attrs.get("id") or "")
+        hay = " ".join(class_vals + [id_val]).lower()
+        if any(h in hay for h in _NOISE_CLASS_ID_HINTS):
+            return True
+        parent = getattr(parent, "parent", None)
+        depth += 1
+    return False
+
+
+def _quality_score(text: str, href: str, query: str, terms: List[str]) -> int:
+    s = 0
+    t = (text or "").strip()
+    t_l = t.lower()
+    q_l = (query or "").lower()
+
+    if q_l and q_l in t_l:
+        s += 5
+    term_hits = sum(1 for term in terms if term.lower() in t_l)
+    s += min(4, term_hits)
+
+    if 40 <= len(t) <= 420:
+        s += 2
+    elif len(t) < 20:
+        s -= 2
+    elif len(t) > 1200:
+        s -= 3
+
+    href_l = (href or "").lower()
+    if href_l:
+        if any(x in href_l for x in ("/article", "/politik", "/ausland", "/inland", "/wirtschaft")):
+            s += 2
+        if any(x in href_l for x in ("/video", "/audio", "/live")):
+            s -= 1
+
+    noise_hits = sum(1 for tok in _NOISE_TEXT_TOKENS if tok in t_l)
+    if noise_hits >= 3:
+        s -= 3
+    elif noise_hits >= 1:
+        s -= 1
+    return s
+
+
+def _select_scopes(soup: BeautifulSoup, selector: str) -> List[Any]:
+    if selector and selector != "body":
+        scopes = soup.select(selector)
+        if scopes:
+            return scopes
+    scopes: List[Any] = []
+    for css in _PREFERRED_SELECTORS:
+        found = soup.select(css)
+        if found:
+            scopes.extend(found)
+    return scopes or [soup]
+
+
 def _collect_matches_from_html(
     html: str,
     *,
@@ -46,18 +150,18 @@ def _collect_matches_from_html(
     context_chars: int,
 ) -> List[Dict[str, str]]:
     soup = BeautifulSoup(html, "html.parser")
-    scopes = soup.select(selector) if selector else [soup]
-    if not scopes:
-        scopes = [soup]
+    scopes = _select_scopes(soup, selector)
 
     pattern = re.compile(re.escape(query), flags=re.IGNORECASE)
     terms = _query_terms(query)
     seen: set[str] = set()
-    exact: List[Dict[str, str]] = []
-    fuzzy: List[Dict[str, str]] = []
+    exact: List[Tuple[int, Dict[str, str]]] = []
+    fuzzy: List[Tuple[int, Dict[str, str]]] = []
 
     for scope in scopes:
         for node in scope.find_all(_ALLOWED_TAGS):
+            if _is_noise_node(node):
+                continue
             text = _normalized_text(node.get_text(" ", strip=True))
             if not text or text in seen:
                 continue
@@ -71,29 +175,31 @@ def _collect_matches_from_html(
                 if first_link:
                     href = str(first_link.get("href") or "").strip()
 
-            item = {
+            item: Dict[str, str] = {
                 "tag": str(node.name or ""),
                 "text": text,
                 "snippet": _snippet(text, query, context_chars),
                 "href": href,
             }
+            score = _quality_score(text, href, query, terms)
 
             if pattern.search(text):
-                exact.append(item)
-                if len(exact) >= max_matches:
-                    return exact
+                exact.append((score, item))
+                if len(exact) >= max_matches * 2:
+                    break
                 continue
 
             if terms:
                 text_l = text.lower()
                 if any(t.lower() in text_l for t in terms):
-                    fuzzy.append(item)
-                    if len(fuzzy) >= max_matches:
+                    fuzzy.append((score, item))
+                    if len(fuzzy) >= max_matches * 2:
                         break
 
-    if exact:
-        return exact[:max_matches]
-    return fuzzy[:max_matches]
+    source = exact if exact else fuzzy
+    source.sort(key=lambda x: x[0], reverse=True)
+    ranked = [item for score, item in source if score >= 2]
+    return ranked[:max_matches]
 
 
 def _build_text_block(
@@ -115,6 +221,10 @@ def _build_text_block(
     if visited_urls:
         lines.append(f"Visited Pages: {len(visited_urls)}")
     lines.append("")
+
+    if not matches:
+        lines.append("Keine verwertbaren Artikeltreffer gefunden.")
+        lines.append("")
 
     for i, item in enumerate(matches, start=1):
         lines.append(f"[{i}] <{item['tag']}> {item['snippet']}")

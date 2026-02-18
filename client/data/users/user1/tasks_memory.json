@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-02-17T22:49:46Z",
+  "updated_at": "2026-02-18T18:15:15Z",
   "tasks": [
     {
       "id": 4,
@@ -38,6 +38,20 @@
       ],
       "planned_steps_text": "===== PLANNED STEPS =====\n1. tool=send_mail args={\"to\":[\"Tobias_Stahl@outlook.de\"],\"subject\":\"Bitte um Angabe eines Betreffs\",\"body\":\"Bitte um Angabe eines E-Mail-Textes\"}\n=========================",
       "created_at": "2026-02-17T22:29:27Z",
+      "dialog": [],
+      "reruns": []
+    },
+    {
+      "id": 8,
+      "title": "\"Suche nach Patientenakten auf Tagesschau.de\"\n\n1. Die Webseite von Tagesschau.de",
+      "text": "\"Suche nach Patientenakten auf Tagesschau.de\"\n\n1. Die Webseite von Tagesschau.de wird nach Informationen über Patientenakten durchsucht.\n2. Die Ergebnisse der Suche werden in einen Text überführt.\n3. Der Text wird per E-Mail an Paul Schmidhaeuser vom Fraunhofer-Institut IPA gesendet.",
+      "planned_steps": [
+        "1. tool=view_website args={\"url\":\"http://www.tagesschau.de\",\"query\":\"Patientenakte\"}",
+        "2. tool=llm_compose args={\"text\":\"{steps[0].text}\"}",
+        "3. tool=send_mail args={\"to\":[\"paul.schmidhaeuser@ipa.fraunhofer.de\"],\"subject\":\"Suchergebnisse Patientenakte\",\"body\":\"{steps[1].text}\"}"
+      ],
+      "planned_steps_text": "===== PLANNED STEPS =====\n1. tool=view_website args={\"url\":\"http://www.tagesschau.de\",\"query\":\"Patientenakte\"}\n2. tool=llm_compose args={\"text\":\"{steps[0].text}\"}\n3. tool=send_mail args={\"to\":[\"paul.schmidhaeuser@ipa.fraunhofer.de\"],\"subject\":\"Suchergebnisse Patientenakte\",\"body\":\"{steps[1].text}\"}\n=========================",
+      "created_at": "2026-02-18T14:48:35Z",
       "dialog": [],
       "reruns": []
     }

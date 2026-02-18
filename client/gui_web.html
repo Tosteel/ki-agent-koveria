@@ -836,8 +836,14 @@
   <div class="overlay" id="settingsOverlay">
     <div class="modal">
       <h2>API Einstellungen</h2>
-      <label for="apiUrl">askIonos Endpoint URL</label>
-      <input id="apiUrl" type="text" placeholder="http://127.0.0.1:8012/agent/askIonos" />
+      <label for="apiUrl">Agent Ask Endpoint URL</label>
+      <input id="apiUrl" type="text" placeholder="http://127.0.0.1:8012/agent/ask" />
+
+      <label for="modelProvider">KI-Modell</label>
+      <select id="modelProvider">
+        <option value="ionos">IONOS (Standard)</option>
+        <option value="openai">OpenAI</option>
+      </select>
 
       <label for="apiKey">API Key (Bearer, optional)</label>
       <input id="apiKey" type="password" placeholder="Token" />
@@ -875,6 +881,7 @@
     const saveSettings = document.getElementById('saveSettings');
     const apiUrlEl = document.getElementById('apiUrl');
     const apiKeyEl = document.getElementById('apiKey');
+    const modelProviderEl = document.getElementById('modelProvider');
     const settingsStatus = document.getElementById('settingsStatus');
 
     const BOT_WELCOME = 'Hallo! Wie kann ich Ihnen heute helfen?';
@@ -991,7 +998,8 @@
       const profiles = loadProfilesCache();
       profiles[cleanUserId] = {
         ask_ionos_url: String(profile?.ask_ionos_url || '').trim(),
-        api_key: String(profile?.api_key || '').trim()
+        api_key: String(profile?.api_key || '').trim(),
+        provider: (String(profile?.provider || 'ionos').trim().toLowerCase() === 'openai') ? 'openai' : 'ionos'
       };
       saveProfilesCache(profiles);
     }
@@ -1004,7 +1012,8 @@
       if (!profile || typeof profile !== 'object') return null;
       return {
         ask_ionos_url: String(profile.ask_ionos_url || '').trim(),
-        api_key: String(profile.api_key || '').trim()
+        api_key: String(profile.api_key || '').trim(),
+        provider: (String(profile.provider || 'ionos').trim().toLowerCase() === 'openai') ? 'openai' : 'ionos'
       };
     }
 
@@ -2082,6 +2091,7 @@
         currentUserId = '';
         apiUrlEl.value = '';
         apiKeyEl.value = '';
+        modelProviderEl.value = 'ionos';
         return;
       }
       const profile = loadUserProfile(activeUser);
@@ -2089,11 +2099,13 @@
         currentUserId = '';
         apiUrlEl.value = '';
         apiKeyEl.value = '';
+        modelProviderEl.value = 'ionos';
         return;
       }
       currentUserId = activeUser;
       apiUrlEl.value = profile.ask_ionos_url || '';
       apiKeyEl.value = profile.api_key || '';
+      modelProviderEl.value = profile.provider === 'openai' ? 'openai' : 'ionos';
     }
 
     function applyLoadedChats(memory) {
@@ -3146,6 +3158,7 @@
         const payload = {
           ask_ionos_url: apiUrlEl.value.trim(),
           api_key: apiKeyEl.value.trim(),
+          provider: modelProviderEl.value === 'openai' ? 'openai' : 'ionos',
           user_id: currentUserId
         };
         const resp = await fetch('/api/settings', {
@@ -3161,7 +3174,8 @@
         currentUserId = String(data.user_id || '').trim();
         saveUserProfile(currentUserId, {
           ask_ionos_url: apiUrlEl.value.trim(),
-          api_key: apiKeyEl.value.trim()
+          api_key: apiKeyEl.value.trim(),
+          provider: modelProviderEl.value === 'openai' ? 'openai' : 'ionos'
         });
         setActiveUserInSession(currentUserId);
         settingsStatus.textContent = 'Gespeichert.';

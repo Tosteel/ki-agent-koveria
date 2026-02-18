@@ -49,6 +49,7 @@ class AgentRunResponse(BaseModel):
 class AgentAskRequest(BaseModel):
     goal: str = Field(..., min_length=1)
     history: List[Dict[str, str]] = Field(default_factory=list)
+    provider: str = "ionos"
 
 
 class AgentPlanRequest(BaseModel):

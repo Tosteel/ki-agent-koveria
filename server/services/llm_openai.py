@@ -11,7 +11,7 @@ from .agent_prompts import (
     get_planner_system_prompt,
 )
 
-OPENAI_URL = "https://api.openai.com/v1/responses"
+OPENAI_URL = os.getenv("OPENAI_URL", "https://api.openai.com/v1/responses").strip() or "https://api.openai.com/v1/responses"
 
 
 class LlmRuntime:

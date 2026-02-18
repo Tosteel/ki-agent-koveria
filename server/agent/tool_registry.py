@@ -40,6 +40,35 @@ class ToolRegistry:
             raise HTTPException(status_code=400, detail=f"Unknown tool: {name}")
         return tool.handler(ctx, args)
 
+    def expected_input(self, name: str) -> Dict[str, Any]:
+        tool = self._tools.get(name)
+        if tool is None:
+            return {}
+        try:
+            schema = tool.request_model.model_json_schema()
+        except Exception:
+            return {}
+        props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+        required = schema.get("required") if isinstance(schema.get("required"), list) else []
+        required_set = {str(x) for x in required}
+        fields: Dict[str, Dict[str, Any]] = {}
+        for key, val in props.items():
+            if not isinstance(val, dict):
+                continue
+            v_type = val.get("type")
+            if isinstance(v_type, list):
+                type_name = "|".join(str(t) for t in v_type)
+            else:
+                type_name = str(v_type or "")
+            fields[str(key)] = {
+                "type": type_name,
+                "required": str(key) in required_set,
+            }
+        return {
+            "required": [str(x) for x in required],
+            "fields": fields,
+        }
+
     def planner_schema(self) -> dict:
         one_of = []
 

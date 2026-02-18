@@ -27,7 +27,6 @@ def llm_compose_text(
     if not raw:
         empty = "Keine Daten zur Ausformulierung vorhanden."
         return {
-            "composed_text": empty,
             "text": empty,
             "fallback_used": True,
             "model": "",
@@ -38,7 +37,6 @@ def llm_compose_text(
     if not client.enabled():
         composed = _fallback_compose(raw, max_chars)
         return {
-            "composed_text": composed,
             "text": composed,
             "fallback_used": True,
             "model": "",
@@ -51,7 +49,12 @@ def llm_compose_text(
         "- Das Nutzerziel ist verbindlich und hat Vorrang.\n"
         "- Nutze ausschließlich Informationen aus dem Input.\n"
         "- Keine Halluzinationen.\n"
+        "- Bei Web-/Suchergebnissen darfst du nur Inhalte aus konkreten Matches/Snippets zusammenfassen.\n"
+        "- Wenn keine belastbaren Matches/Snippets vorliegen (z.B. Matches: 0 oder nur Navigations-/Boilerplate-Text), schreibe explizit: 'Keine belastbaren Treffer gefunden.'\n"
+        "- In diesem Fall keine allgemeinen Hintergrundinformationen aus Vorwissen ergänzen.\n"
         "- Keine Meta-Hinweise zum Prozess ausgeben (z.B. keine Sätze über PDF-Erstellung oder Anfragehinweise).\n"
+        "- Schreibe niemals über Systemfähigkeiten oder Tool-Limits (z.B. niemals 'ich kann keine PDF erstellen' oder 'ich kann keine E-Mail senden').\n"
+        "- Liefere ausschließlich die inhaltliche Zusammenfassung der bereitgestellten Daten.\n"
         "- Erhalte Fakten, Zahlen, Namen und Quellenhinweise präzise.\n"
         "- Wenn das Ziel 'mit Quelle' verlangt, integriere Quellen direkt im Text.\n"
         "- Schreibe natürlich, klar und professionell auf Deutsch.\n"
@@ -83,7 +86,6 @@ def llm_compose_text(
         composed = composed[: max(0, max_chars - 1)].rstrip() + "…"
 
     return {
-        "composed_text": composed,
         "text": composed,
         "fallback_used": fallback_used,
         "model": getattr(client.cfg, "model", ""),

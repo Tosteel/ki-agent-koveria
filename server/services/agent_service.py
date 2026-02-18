@@ -343,6 +343,57 @@ def run_clarification_gate(llm: Any, goal: str) -> Dict[str, Any]:
     }
 
 
+def _goal_requires_mail(goal: str) -> bool:
+    g = str(goal or "").lower()
+    if re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", g):
+        return True
+    return any(k in g for k in ("mail", "e-mail", "email", "sende", "versend", "schick", "antworte", "beantworte"))
+
+
+def _goal_requires_pdf(goal: str) -> bool:
+    g = str(goal or "").lower()
+    return "pdf" in g
+
+
+def _goal_requires_ppt(goal: str) -> bool:
+    g = str(goal or "").lower()
+    return "ppt" in g or "powerpoint" in g or "präsentation" in g
+
+
+def run_planner_guard(goal: str, steps: List[Dict[str, Any]]) -> Dict[str, Any]:
+    steps_safe = [s for s in steps if isinstance(s, dict)]
+    tools = [str(s.get("tool") or "").strip() for s in steps_safe]
+    missing: List[str] = []
+    reasons: List[str] = []
+
+    if not steps_safe:
+        missing.append("steps")
+        reasons.append("Es wurden keine Schritte geplant.")
+
+    if _goal_requires_mail(goal) and not any(t in {"send_mail", "answer_mail"} for t in tools):
+        missing.append("mail_step")
+        reasons.append("Ziel enthält E-Mail-Versand, aber send_mail/answer_mail fehlt.")
+
+    if _goal_requires_pdf(goal) and "pdf_export" not in tools:
+        missing.append("pdf_step")
+        reasons.append("Ziel enthält PDF-Anforderung, aber pdf_export fehlt.")
+
+    if _goal_requires_ppt(goal) and "ppt_export" not in tools:
+        missing.append("ppt_step")
+        reasons.append("Ziel enthält Präsentationsanforderung, aber ppt_export fehlt.")
+
+    status = "ready" if not missing else "replan"
+    instructions = ""
+    if status == "replan":
+        instructions = "WICHTIGE PLANUNGSREGELN (müssen erfüllt sein):\n- " + "\n- ".join(reasons)
+    return {
+        "status": status,
+        "missing": missing,
+        "reasons": reasons,
+        "instructions": instructions,
+    }
+
+
 def history_to_context(history: Any, max_items: int = 12) -> str:
     if not isinstance(history, list):
         return ""
@@ -627,9 +678,91 @@ def run_steps_internal(
     return ok, tool_outputs_full, tool_outputs_compact, fallback_answer
 
 
+def _execution_facts(tool_outputs_full: List[Dict[str, Any]]) -> Dict[str, Any]:
+    facts: Dict[str, Any] = {
+        "pdf_created": False,
+        "pdf_output_paths": [],
+        "mail_sent": False,
+        "mail_recipients": [],
+    }
+    pdf_paths: List[str] = []
+    recipients: List[str] = []
+
+    for out in tool_outputs_full:
+        if not isinstance(out, dict) or not out.get("ok"):
+            continue
+        tool = str(out.get("tool") or "").strip()
+        payload = out.get("payload") if isinstance(out.get("payload"), dict) else {}
+
+        if tool == "pdf_export":
+            path = str(payload.get("output_path") or "").strip()
+            if path:
+                pdf_paths.append(path)
+            facts["pdf_created"] = True
+
+        if tool in {"send_mail", "answer_mail"}:
+            sent_flag = payload.get("sent")
+            if sent_flag is True or tool == "answer_mail":
+                facts["mail_sent"] = True
+                rcpts = payload.get("recipients")
+                if isinstance(rcpts, list):
+                    for r in rcpts:
+                        rs = str(r).strip()
+                        if rs:
+                            recipients.append(rs)
+
+    facts["pdf_output_paths"] = pdf_paths
+    facts["mail_recipients"] = recipients
+    return facts
+
+
+def _enforce_fact_consistency(answer: str, facts: Dict[str, Any]) -> str:
+    text = str(answer or "").strip()
+    if not text:
+        return text
+    lower = text.lower()
+
+    pdf_created = bool(facts.get("pdf_created"))
+    mail_sent = bool(facts.get("mail_sent"))
+    pdf_paths = [str(p).strip() for p in (facts.get("pdf_output_paths") or []) if str(p).strip()]
+    recipients = [str(r).strip() for r in (facts.get("mail_recipients") or []) if str(r).strip()]
+
+    pdf_negative_tokens = (
+        "keine pdf",
+        "nicht als pdf",
+        "pdf konnte nicht",
+        "pdf wurde nicht",
+        "keine zusammenfassung als pdf",
+    )
+    if pdf_created and any(tok in lower for tok in pdf_negative_tokens):
+        suffix = f" ({pdf_paths[-1]})" if pdf_paths else ""
+        return f"Das PDF wurde erfolgreich erstellt{suffix}."
+
+    mail_negative_tokens = (
+        "mail konnte nicht",
+        "e-mail konnte nicht",
+        "nicht gesendet",
+        "wurde nicht gesendet",
+        "konnte nicht an",
+    )
+    if mail_sent and any(tok in lower for tok in mail_negative_tokens):
+        if recipients:
+            return f"Die E-Mail wurde erfolgreich gesendet an: {', '.join(recipients)}."
+        return "Die E-Mail wurde erfolgreich gesendet."
+
+    return text
+
+
 def finalize_internal(*, provider: str, goal: str, tool_outputs_full: List[Dict[str, Any]]) -> str:
     llm = llm_for_provider(provider)
     llm_view = outputs_for_final_answer(tool_outputs_full)
+    facts = _execution_facts(tool_outputs_full)
+    goal_for_final = (
+        f"{goal}\n\n"
+        "Execution facts (ground truth, must be respected):\n"
+        + json.dumps(facts, ensure_ascii=False)
+    )
     if hasattr(llm, "enabled") and llm.enabled():
-        return str(llm.final_answer(goal=goal, tool_outputs=llm_view))
+        raw = str(llm.final_answer(goal=goal_for_final, tool_outputs=llm_view))
+        return _enforce_fact_consistency(raw, facts)
     return str(llm_view)

@@ -35,14 +35,14 @@ class LlmComposeToolTests(unittest.TestCase):
             goal="Formuliere einen zusammenhängenden Text mit Quelle.",
             llm=fake,
         )
-        self.assertEqual(res["composed_text"], "Kohärenter Text.")
+        self.assertEqual(res["text"], "Kohärenter Text.")
         self.assertFalse(res["fallback_used"])
         self.assertIn("Formuliere einen zusammenhängenden Text", fake.last_messages[1]["content"])
 
     def test_fallback_when_disabled(self):
         res = llm_compose_text("- A\n- B", llm=_FakeLlm(enabled=False))
         self.assertTrue(res["fallback_used"])
-        self.assertIn("A", res["composed_text"])
+        self.assertIn("A", res["text"])
 
 
 if __name__ == "__main__":

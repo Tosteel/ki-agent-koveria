@@ -31,6 +31,7 @@ def create_agent_router(
     append_agent_tools_hint: Callable[[str, Settings, str], str],
     llm_for_provider: Callable[[str], Any],
     run_clarification_gate: Callable[[Any, str], Dict[str, Any]],
+    run_planner_guard: Callable[[str, List[Dict[str, Any]]], Dict[str, Any]],
     clarification_response: Callable[[str, Dict[str, Any]], AgentAskResponse],
     goal_with_context: Callable[[str, Any], str],
     inject_llm_summary_before_pdf: Callable[[List[Dict[str, Any]], str], List[Dict[str, Any]]],
@@ -39,6 +40,27 @@ def create_agent_router(
     sanitize_execution_steps: Callable[[List[Dict[str, Any]]], List[Dict[str, Any]]],
 ) -> APIRouter:
     router = APIRouter()
+
+    def _apply_planner_guard(planner: Planner, goal: str, steps: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        gate = run_planner_guard(goal, steps)
+        print('\n===== PLANNER GUARD =====')
+        print(f"status={gate.get('status')}")
+        print(f"missing={gate.get('missing')}")
+        print(f"reasons={gate.get('reasons')}")
+        print('=========================\n')
+        if gate.get("status") != "replan":
+            return steps, gate
+
+        guarded_goal = f"{goal}\n\n{gate.get('instructions') or ''}".strip()
+        replanned = planner.create_steps(goal=guarded_goal)
+        replanned = inject_llm_summary_before_pdf(replanned, guarded_goal)
+        gate2 = run_planner_guard(goal, replanned)
+        print('\n===== PLANNER GUARD (REPLAN) =====')
+        print(f"status={gate2.get('status')}")
+        print(f"missing={gate2.get('missing')}")
+        print(f"reasons={gate2.get('reasons')}")
+        print('==================================\n')
+        return replanned, gate2
 
     @router.post('/agent/run', response_model=AgentRunResponse)
     def agent_run(
@@ -169,8 +191,8 @@ def create_agent_router(
         print('========================\n')
         return AgentFinalizeResponse(ok=True, goal=req.goal, answer=answer)
 
-    @router.post('/agent/askOpenAI', response_model=AgentAskResponse)
-    def agent_askOpenAI(
+    @router.post('/agent/ask', response_model=AgentAskResponse)
+    def agent_ask(
         req: AgentAskRequest,
         user_id: str = Depends(get_current_user),
         s: Settings = Depends(dep_settings),
@@ -178,10 +200,14 @@ def create_agent_router(
     ) -> AgentAskResponse:
         ensure_user_dirs(s, user_id)
         goal_ctx = goal_with_context(req.goal, req.history)
-        llm = llm_for_provider('openai')
+        provider = str(req.provider or "ionos").strip().lower()
+        if provider not in {"ionos", "openai"}:
+            provider = "ionos"
+        llm = llm_for_provider(provider)
         gate = run_clarification_gate(llm, goal_ctx)
 
         print('\n===== CLARIFICATION =====')
+        print(f"provider={provider}")
         print(f"status={gate.get('status')}")
         print(f"normalized_goal={gate.get('normalized_goal')}")
         print(f"missing_fields={gate.get('missing_fields')}")
@@ -196,6 +222,22 @@ def create_agent_router(
         planner = Planner(llm, build_registry(user_id, s))
         steps = planner.create_steps(goal=effective_goal)
         steps = inject_llm_summary_before_pdf(steps, effective_goal)
+        steps, plan_gate = _apply_planner_guard(planner, effective_goal, steps)
+        if plan_gate.get("status") != "ready":
+            missing = [str(x) for x in (plan_gate.get("missing") or [])]
+            questions = [f"Bitte ergänze die Planung: {r}" for r in (plan_gate.get("reasons") or [])]
+            if not questions:
+                questions = ["Bitte präzisiere das Ziel, damit ein vollständiger Plan erstellt werden kann."]
+            return AgentAskResponse(
+                ok=False,
+                goal=req.goal,
+                steps=steps,
+                tool_outputs=[],
+                answer="Planung unvollständig. Ich brauche eine kurze Präzisierung, bevor ich starte.",
+                requires_user_input=True,
+                missing_fields=missing,
+                questions=questions,
+            )
 
         ok, tool_outputs_full, tool_outputs_compact, fallback_answer = run_steps_internal(
             user_id=user_id,
@@ -205,53 +247,7 @@ def create_agent_router(
             steps=steps,
             log_label='PLANNED STEPS',
         )
-        answer = finalize_internal(provider='openai', goal=effective_goal, tool_outputs_full=tool_outputs_full)
-        if not str(answer).strip():
-            answer = fallback_answer
-
-        print('\n===== FINAL ANSWER =====')
-        print(answer)
-        print('========================\n')
-
-        return AgentAskResponse(ok=ok, goal=req.goal, steps=steps, tool_outputs=tool_outputs_compact, answer=answer)
-
-    @router.post('/agent/askIonos', response_model=AgentAskResponse)
-    def agent_askIonos(
-        req: AgentAskRequest,
-        user_id: str = Depends(get_current_user),
-        s: Settings = Depends(dep_settings),
-        credentials: HTTPAuthorizationCredentials = Depends(security),
-    ) -> AgentAskResponse:
-        ensure_user_dirs(s, user_id)
-        goal_ctx = goal_with_context(req.goal, req.history)
-        llm = llm_for_provider('ionos')
-        gate = run_clarification_gate(llm, goal_ctx)
-
-        print('\n===== CLARIFICATION =====')
-        print(f"status={gate.get('status')}")
-        print(f"normalized_goal={gate.get('normalized_goal')}")
-        print(f"missing_fields={gate.get('missing_fields')}")
-        print(f"questions={gate.get('questions')}")
-        print('=========================\n')
-
-        if gate['status'] == 'needs_info':
-            return clarification_response(req.goal, gate)
-
-        effective_goal = str(gate.get('normalized_goal') or req.goal)
-        effective_goal = append_agent_tools_hint(effective_goal, s, user_id)
-        planner = Planner(llm, build_registry(user_id, s))
-        steps = planner.create_steps(goal=effective_goal)
-        steps = inject_llm_summary_before_pdf(steps, effective_goal)
-
-        ok, tool_outputs_full, tool_outputs_compact, fallback_answer = run_steps_internal(
-            user_id=user_id,
-            settings=s,
-            api_key=credentials.credentials,
-            goal=effective_goal,
-            steps=steps,
-            log_label='PLANNED STEPS',
-        )
-        answer = finalize_internal(provider='ionos', goal=effective_goal, tool_outputs_full=tool_outputs_full)
+        answer = finalize_internal(provider=provider, goal=effective_goal, tool_outputs_full=tool_outputs_full)
         if not str(answer).strip():
             answer = fallback_answer
 

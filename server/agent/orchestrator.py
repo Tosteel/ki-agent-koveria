@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Dict, List
 
@@ -22,17 +23,25 @@ class Orchestrator:
             if goal and "goal" not in args:
                 args["goal"] = goal
             args = self._resolve_placeholders(args, outputs, payload)
+            expected = self.registry.expected_input(tool)
+            self._log_step_input(i, tool, args, expected)
 
             if not is_phase1_tool_allowed(tool):
-                outputs.append({"step": i, "tool": tool, "ok": False, "error": "tool_not_allowed", "payload": payload})
+                entry = {"step": i, "tool": tool, "ok": False, "error": "tool_not_allowed", "payload": payload}
+                outputs.append(entry)
+                self._log_step_output(entry)
                 continue
 
             try:
                 res = self.registry.dispatch(tool, ctx, args)
                 payload = self._as_payload(res, i, tool)
-                outputs.append({"step": i, "tool": tool, "ok": True, "result": res, "payload": payload})
+                entry = {"step": i, "tool": tool, "ok": True, "result": res, "payload": payload}
+                outputs.append(entry)
+                self._log_step_output(entry)
             except Exception as e:
-                outputs.append({"step": i, "tool": tool, "ok": False, "error": str(e), "payload": payload})
+                entry = {"step": i, "tool": tool, "ok": False, "error": str(e), "payload": payload}
+                outputs.append(entry)
+                self._log_step_output(entry)
 
         return outputs
 
@@ -191,3 +200,45 @@ class Orchestrator:
                     continue
             return None
         return cur
+
+    @staticmethod
+    def _log_step_output(entry: Dict[str, Any]) -> None:
+        step = entry.get("step")
+        tool = entry.get("tool")
+        ok = bool(entry.get("ok"))
+        print(f"----- STEP OUTPUT {step} -----")
+        print(f"tool={tool} ok={ok}")
+        if not ok:
+            print(f"error={entry.get('error')}")
+        payload = entry.get("payload")
+        if isinstance(payload, dict):
+            try:
+                payload_str = json.dumps(payload, ensure_ascii=False)
+            except Exception:
+                payload_str = str(payload)
+            if len(payload_str) > 4000:
+                payload_str = payload_str[:4000] + "...(truncated)"
+            print(f"payload={payload_str}")
+        else:
+            print(f"payload={payload}")
+        print("---------------------------")
+
+    @staticmethod
+    def _log_step_input(step: int, tool: str, args: Dict[str, Any], expected: Dict[str, Any]) -> None:
+        print(f"----- STEP INPUT {step} -----")
+        print(f"tool={tool}")
+        try:
+            args_str = json.dumps(args, ensure_ascii=False)
+        except Exception:
+            args_str = str(args)
+        if len(args_str) > 4000:
+            args_str = args_str[:4000] + "...(truncated)"
+        print(f"args={args_str}")
+        try:
+            expected_str = json.dumps(expected, ensure_ascii=False)
+        except Exception:
+            expected_str = str(expected)
+        if len(expected_str) > 4000:
+            expected_str = expected_str[:4000] + "...(truncated)"
+        print(f"expected={expected_str}")
+        print("--------------------------")

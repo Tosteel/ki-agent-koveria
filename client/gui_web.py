@@ -29,8 +29,9 @@ DEFAULT_USER_ID = "user1"
 SERVER_DATA_DIR = APP_DIR.parent / "server" / "data"
 
 DEFAULT_SETTINGS: Dict[str, str] = {
-    "ask_ionos_url": "http://127.0.0.1:8012/agent/askIonos",
+    "ask_ionos_url": "http://127.0.0.1:8012/agent/ask",
     "api_key": "",
+    "provider": "ionos",
 }
 
 
@@ -48,6 +49,7 @@ class ChatHistoryMessage(BaseModel):
 class SettingsRequest(BaseModel):
     ask_ionos_url: str = Field(..., min_length=1)
     api_key: Optional[str] = ""
+    provider: str = "ionos"
     user_id: Optional[str] = ""
 
 
@@ -235,6 +237,26 @@ def _extract_api_base_url(ask_ionos_url: str) -> Optional[str]:
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         return None
     return urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+
+
+def _normalize_ask_url(raw_url: str) -> str:
+    raw = (raw_url or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urlsplit(raw)
+    except Exception:
+        return raw
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return raw
+    path = parsed.path or ""
+    if path.endswith("/agent/askIonos"):
+        path = path[: -len("/agent/askIonos")] + "/agent/ask"
+    elif path.endswith("/agent/askOpenAI"):
+        path = path[: -len("/agent/askOpenAI")] + "/agent/ask"
+    elif not path.endswith("/agent/ask"):
+        path = "/agent/ask"
+    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
 
 
 def _agent_run_url_from_ask_url(ask_url: str) -> str:
@@ -466,10 +488,13 @@ def _merge_settings(data: Any) -> Dict[str, str]:
         parsed = {}
     merged = dict(DEFAULT_SETTINGS)
     if isinstance(parsed, dict):
-        for k in ("ask_ionos_url", "api_key"):
+        for k in ("ask_ionos_url", "api_key", "provider"):
             v = parsed.get(k)
             if isinstance(v, str):
                 merged[k] = v
+    merged["ask_ionos_url"] = _normalize_ask_url(merged.get("ask_ionos_url", ""))
+    provider = str(merged.get("provider", "ionos")).strip().lower()
+    merged["provider"] = provider if provider in {"ionos", "openai"} else "ionos"
     return merged
 
 
@@ -910,9 +935,12 @@ def get_settings(user_id: str = Query("")) -> JSONResponse:
 @app.post("/api/settings")
 def set_settings(req: SettingsRequest) -> JSONResponse:
     settings = {
-        "ask_ionos_url": req.ask_ionos_url.strip(),
+        "ask_ionos_url": _normalize_ask_url(req.ask_ionos_url),
         "api_key": (req.api_key or "").strip(),
+        "provider": str(req.provider or "ionos").strip().lower(),
     }
+    if settings["provider"] not in {"ionos", "openai"}:
+        settings["provider"] = "ionos"
     if not settings["ask_ionos_url"]:
         raise HTTPException(status_code=422, detail="ask_ionos_url must not be empty")
 
@@ -933,6 +961,9 @@ def chat(req: ChatRequest) -> JSONResponse:
     settings = _load_settings_for_user(user_id)
     url = settings["ask_ionos_url"].strip()
     api_key = settings.get("api_key", "").strip()
+    provider = str(settings.get("provider", "ionos")).strip().lower()
+    if provider not in {"ionos", "openai"}:
+        provider = "ionos"
 
     headers: Dict[str, str] = {"Content-Type": "application/json"}
     if api_key:
@@ -942,7 +973,12 @@ def chat(req: ChatRequest) -> JSONResponse:
     history_payload = _build_history_payload(req.history)
 
     try:
-        resp = requests.post(url, headers=headers, json={"goal": goal, "history": history_payload}, timeout=180)
+        resp = requests.post(
+            url,
+            headers=headers,
+            json={"goal": goal, "history": history_payload, "provider": provider},
+            timeout=180,
+        )
     except requests.RequestException as exc:
         raise HTTPException(status_code=502, detail=f"API request failed: {exc}") from exc
 
@@ -971,7 +1007,7 @@ def planned_task_explain(req: TaskExplainRequest) -> JSONResponse:
     run_url = _agent_run_url_from_ask_url(settings.get("ask_ionos_url", ""))
     api_key = settings.get("api_key", "").strip()
     if not run_url:
-        raise HTTPException(status_code=422, detail="Ungültige askIonos URL.")
+        raise HTTPException(status_code=422, detail="Ungültige Agent-Ask URL.")
 
     steps = [str(s).strip() for s in (req.steps or []) if str(s).strip()]
     if not steps:
@@ -1461,7 +1497,7 @@ def replan_task(req: TaskReplanRequest) -> JSONResponse:
     plan_url = _agent_plan_url_from_ask_url(settings.get("ask_ionos_url", ""))
     api_key = settings.get("api_key", "").strip()
     if not plan_url:
-        raise HTTPException(status_code=422, detail="Ungültige askIonos URL.")
+        raise HTTPException(status_code=422, detail="Ungültige Agent-Ask URL.")
 
     current_steps = [str(s).strip() for s in (req.planned_steps or []) if str(s).strip()]
     if not current_steps:
@@ -1579,7 +1615,7 @@ def rerun_task(req: TaskRerunRequest) -> JSONResponse:
     run_url = _agent_run_url_from_ask_url(ask_url)
     api_key = settings.get("api_key", "").strip()
     if not run_url:
-        raise HTTPException(status_code=422, detail="Ungültige askIonos URL.")
+        raise HTTPException(status_code=422, detail="Ungültige Agent-Ask URL.")
 
     clean_steps = [str(s).strip() for s in (req.planned_steps or []) if str(s).strip()]
     if not clean_steps:
@@ -1794,7 +1830,7 @@ def replan_agent(req: AgentReplanRequest) -> JSONResponse:
     plan_url = _agent_plan_url_from_ask_url(settings.get("ask_ionos_url", ""))
     api_key = settings.get("api_key", "").strip()
     if not plan_url:
-        raise HTTPException(status_code=422, detail="Ungültige askIonos URL.")
+        raise HTTPException(status_code=422, detail="Ungültige Agent-Ask URL.")
 
     current_steps = [str(s).strip() for s in (req.planned_steps or []) if str(s).strip()]
     if not current_steps:

@@ -13,7 +13,6 @@ class LlmComposeRequest(BaseModel):
 
 
 class LlmComposeResponse(BaseModel):
-    composed_text: str
     text: str
     fallback_used: bool = False
     model: str = ""

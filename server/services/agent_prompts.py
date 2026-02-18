@@ -30,6 +30,8 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
                 "Nachfolgende Schritte erhalten automatisch den Payload des vorherigen Schritts als zusätzliche Args.\n"
                 "Plane daher so, dass Ergebnisfelder (z.B. text) von Schritt N direkt von Schritt N+1 genutzt werden können.\n"
                 "Platzhalter nur als {steps[0].text}, {{steps.1.result.text}} oder {last.text}; niemals mit führendem $.\n"
+                "Für llm_compose MUSS args.text immer aus einem vorherigen Step kommen (z.B. {last.text} oder {steps[n].text}).\n"
+                "Nutze in llm_compose.text niemals statischen Beispieltext oder erfundene Platzhalter wie 'Hier kommt ...'.\n"
             ),
             "final_system": (
                 "Du bist ein Assistent. Antworte sachlich und knapp.\n"
@@ -67,7 +69,8 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
                 "Use fetch_unanswered_mails to retrieve unanswered emails only. "
                 "Use send_mail when sending to an email address and no specific inbox message is referenced. "
                 "Use answer_mail only when replying to an existing inbox message (mail_id/uid or explicit reference like 'reply to this email'). "
-                "For answer_mail.mail_id use {steps[0].mail_id} or {steps[0].emails[0].uid}."
+                "For answer_mail.mail_id use {steps[0].mail_id} or {steps[0].emails[0].uid}. "
+                "For llm_compose, args.text must always reference a previous step output (e.g. {last.text} or {steps[n].text}), never static invented text."
             ),
             "final_system": (
                 "You are an assistant. Answer succinctly using tool outputs only. "

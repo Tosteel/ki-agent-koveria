@@ -169,6 +169,10 @@ def _run_clarification_gate(llm: Any, goal: str) -> Dict[str, Any]:
     return agent_service.run_clarification_gate(llm, goal)
 
 
+def _run_planner_guard(goal: str, steps: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return agent_service.run_planner_guard(goal, steps)
+
+
 def _clarification_response(req_goal: str, gate: Dict[str, Any]) -> AgentAskResponse:
     questions = [str(q).strip() for q in (gate.get("questions") or []) if str(q).strip()]
     if not questions:
@@ -354,6 +358,7 @@ app.include_router(
         append_agent_tools_hint=_append_agent_tools_hint,
         llm_for_provider=_llm_for_provider,
         run_clarification_gate=_run_clarification_gate,
+        run_planner_guard=_run_planner_guard,
         clarification_response=_clarification_response,
         goal_with_context=_goal_with_context,
         inject_llm_summary_before_pdf=_inject_llm_summary_before_pdf,
