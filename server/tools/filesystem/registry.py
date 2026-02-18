@@ -11,7 +11,12 @@ from .models import FileReadRequest, FileReadResponse, FileWriteRequest, FileWri
 def register(registry: ToolRegistry) -> None:
     def tool_read_file(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = FileReadRequest(**args)
-        content = read_text(ctx.settings.user_work_dir(ctx.user_id), req.path, encoding=req.encoding)
+        content = read_text(
+            ctx.settings.user_work_dir(ctx.user_id),
+            req.path,
+            encoding=req.encoding,
+            uploads_dir=ctx.settings.user_dir(ctx.user_id) / "uploads",
+        )
         return FileReadResponse(path=req.path, content=content).model_dump()
 
     def tool_write_file(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:

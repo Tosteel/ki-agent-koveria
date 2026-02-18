@@ -337,6 +337,9 @@ def run_clarification_gate(llm: Any, goal: str) -> Dict[str, Any]:
     ]
     if any(m in g for m in search_like_markers):
         return {"status": "ready", "normalized_goal": goal, "missing_fields": [], "questions": []}
+    # If an explicit file path/file type is present, keep goal verbatim (avoid lossy normalization).
+    if ".pdf" in g or "uploads/" in g or "work/" in g:
+        return {"status": "ready", "normalized_goal": goal, "missing_fields": [], "questions": []}
 
     if not hasattr(llm, "enabled") or not llm.enabled():
         return {"status": "ready", "normalized_goal": goal, "missing_fields": [], "questions": []}
@@ -429,7 +432,8 @@ def _llm_planner_guard(llm: Any, provider: str, goal: str, steps: List[Dict[str,
         f"Geplante Schritte:\n{json.dumps(compact_steps, ensure_ascii=False)}\n\n"
         "Prüfkriterien:\n"
         "- Wenn Ziel E-Mail-Versand verlangt, muss send_mail oder answer_mail enthalten sein.\n"
-        "- Wenn Ziel PDF verlangt, muss pdf_export enthalten sein.\n"
+        "- Wenn Ziel eine PDF lesen/analysieren/zusammenfassen will, muss read_pdf enthalten sein (nicht read_file).\n"
+        "- Wenn Ziel eine neue PDF erstellen/exportieren will, muss pdf_export enthalten sein.\n"
         "- Wenn Ziel Präsentation/PPT verlangt, muss ppt_export enthalten sein.\n"
         "- Referenzen wie {steps[i].text} müssen zu existierenden Steps und sinnvollen Output-Feldern passen.\n"
         "- Pflichtargumente pro Tool müssen erkennbar gesetzt sein.\n"
@@ -439,10 +443,12 @@ def _llm_planner_guard(llm: Any, provider: str, goal: str, steps: List[Dict[str,
         "- status=replan nur mit KONKRETEN missing/reasons.\n"
         "- missing enthält maschinenlesbare Tokens, z.B.:\n"
         "  missing_tool:send_mail\n"
+        "  missing_tool:read_pdf\n"
         "  missing_tool:pdf_export\n"
         "  bad_reference:steps[1].summary\n"
         "  missing_arg:send_mail.to\n"
         "  missing_arg:answer_mail.mail_id\n"
+        "  missing_arg:read_pdf.path\n"
         "- reasons beschreibt pro missing präzise den Befund inkl. Step-Nummer/Tool."
     )
 
@@ -562,6 +568,46 @@ def run_planner_guard(llm: Any, provider: str, goal: str, steps: List[Dict[str, 
                 reasons = refined_reasons
         except Exception:
             pass
+
+    # Deterministic guard checks for common PDF-read planning failures.
+    goal_l = (goal or "").lower()
+    wants_pdf_read = (".pdf" in goal_l) and any(
+        kw in goal_l for kw in ("lies", "lese", "read", "analys", "analyse", "zusammen", "fasse")
+    )
+    if wants_pdf_read:
+        has_read_pdf = False
+        for i, step in enumerate(steps, 1):
+            if not isinstance(step, dict):
+                continue
+            tool = str(step.get("tool") or "").strip()
+            args = step.get("args") if isinstance(step.get("args"), dict) else {}
+            if tool == "read_file":
+                missing.append("missing_tool:read_pdf")
+                reasons.append(f"Step {i}: Für PDF-Inhalt muss read_pdf statt read_file verwendet werden.")
+            if tool == "read_pdf":
+                has_read_pdf = True
+                p = str(args.get("path") or "").strip()
+                if not p:
+                    missing.append("missing_arg:read_pdf.path")
+                    reasons.append(f"Step {i} (read_pdf): Pflichtfeld path fehlt.")
+                elif p.lower() in {"pdf_datei.pdf", "datei.pdf", "file.pdf"}:
+                    missing.append("invalid_path:read_pdf.path")
+                    reasons.append(f"Step {i} (read_pdf): Generischer Platzhalterpfad ist nicht zulässig ({p}).")
+        if not has_read_pdf:
+            missing.append("missing_tool:read_pdf")
+            reasons.append("Das Ziel verlangt das Lesen/Analysieren einer PDF, aber read_pdf fehlt.")
+
+    if missing:
+        missing = list(dict.fromkeys([str(x).strip() for x in missing if str(x).strip()]))
+        reasons = list(dict.fromkeys([str(x).strip() for x in reasons if str(x).strip()]))
+        if any(
+            m.startswith("missing_tool:read_pdf")
+            or m.startswith("missing_arg:read_pdf.")
+            or m.startswith("invalid_path:read_pdf.")
+            for m in missing
+        ):
+            status = "replan"
+
     if status == "replan":
         if not reasons:
             reasons = ["Der Plan passt laut Guard nicht vollständig zum Ziel."]
@@ -605,9 +651,9 @@ def build_goal_with_context(llm: Any, provider: str, goal: str, history: Any) ->
         return base
     hist = history_to_context(history, max_items=12)
     if not hist:
-        return base
+        return f"goal:\n{base}"
     if not hasattr(llm, "enabled") or not llm.enabled():
-        return f"Aktuelle Anfrage:\n{base}\n\nKontext:\n{hist}"
+        return f"goal:\n{base}\n\ngoal_context:\n{hist}"
 
     schema = {
         "type": "object",
@@ -623,8 +669,9 @@ def build_goal_with_context(llm: Any, provider: str, goal: str, history: Any) ->
     user = (
         f"Aktuelle Nutzeranfrage:\n{base}\n\n"
         f"Dialogverlauf (letzte 12 Nachrichten):\n{hist}\n\n"
-        "Erzeuge ein standalone_goal. "
-        "Falls für die Ausführung nötig, liefere 1-3 kurze Kontextpunkte in carry_context."
+        "Die aktuelle Nutzeranfrage bleibt unverändert das goal. "
+        "Liefere nur den notwendigen goal_context. "
+        "Falls nötig, liefere 1-3 kurze Kontextpunkte in carry_context."
     )
     try:
         if hasattr(llm, "chat_completions"):
@@ -647,13 +694,12 @@ def build_goal_with_context(llm: Any, provider: str, goal: str, history: Any) ->
     except Exception:
         parsed = {}
 
-    standalone_goal = str(parsed.get("standalone_goal") or base).strip() or base
     needs_context = bool(parsed.get("needs_context"))
     carry_context_raw = parsed.get("carry_context") or []
     carry_context = [str(x).strip() for x in carry_context_raw if str(x).strip()][:3]
     if not needs_context or not carry_context:
-        return standalone_goal
-    return f"Aktuelle Anfrage:\n{standalone_goal}\n\nKontext:\n" + "\n".join(f"- {c}" for c in carry_context)
+        return f"goal:\n{base}"
+    return f"goal:\n{base}\n\ngoal_context:\n" + "\n".join(f"- {c}" for c in carry_context)
 
 
 def _slugify_tool_name(title: str, agent_id: Any) -> str:

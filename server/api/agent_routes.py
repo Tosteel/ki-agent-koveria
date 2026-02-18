@@ -41,7 +41,39 @@ def create_agent_router(
 ) -> APIRouter:
     router = APIRouter()
 
-    def _apply_planner_guard(llm: Any, provider: str, planner: Planner, goal: str, steps: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    def _build_effective_goal(base_goal: str, additional_props: Dict[str, Any], s: Settings, user_id: str) -> str:
+        goal = str(base_goal or "").strip()
+        props = additional_props if isinstance(additional_props, dict) else {}
+        raw_steps = props.get('planned_steps')
+        existing_steps = [str(step).strip() for step in (raw_steps or []) if str(step).strip()]
+        if existing_steps:
+            goal = (
+                f"{goal}\n\n"
+                'Bestehende PLANNED STEPS (als Grundlage verwenden):\n'
+                + '\n'.join(existing_steps)
+            )
+        guard_missing = [str(x).strip() for x in (props.get('missing') or []) if str(x).strip()]
+        guard_reasons = [str(x).strip() for x in (props.get('reasons') or []) if str(x).strip()]
+        if guard_missing or guard_reasons:
+            lines: List[str] = []
+            if guard_missing:
+                lines.append("Guard missing:")
+                lines.extend(f"- {m}" for m in guard_missing)
+            if guard_reasons:
+                lines.append("Guard reasons:")
+                lines.extend(f"- {r}" for r in guard_reasons)
+            goal = f"{goal}\n\nZusatzhinweise fuer Replan:\n" + "\n".join(lines)
+        return append_agent_tools_hint(goal, s, user_id)
+
+    def _apply_planner_guard(
+        llm: Any,
+        provider: str,
+        planner: Planner,
+        goal: str,
+        steps: List[Dict[str, Any]],
+        s: Settings,
+        user_id: str,
+    ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
         gate = run_planner_guard(llm, provider, goal, steps)
         print('\n===== PLANNER GUARD =====')
         print(f"status={gate.get('status')}")
@@ -51,7 +83,11 @@ def create_agent_router(
         if gate.get("status") != "replan":
             return steps, gate
 
-        guarded_goal = f"{goal}\n\n{gate.get('instructions') or ''}".strip()
+        replan_additional_props = {
+            "missing": list(gate.get("missing") or []),
+            "reasons": list(gate.get("reasons") or []),
+        }
+        guarded_goal = _build_effective_goal(goal, replan_additional_props, s, user_id)
         replanned = planner.create_steps(goal=guarded_goal)
         replanned = inject_llm_summary_before_pdf(replanned, guarded_goal)
         gate2 = run_planner_guard(llm, provider, goal, replanned)
@@ -100,17 +136,8 @@ def create_agent_router(
 
         registry = build_registry(user_id, s)
         llm = llm_for_provider(req.provider)
-        effective_goal = append_agent_tools_hint(req.goal, s, user_id)
         additional_props = req.additional_props if isinstance(req.additional_props, dict) else {}
-        raw_steps = additional_props.get('planned_steps')
-        existing_steps = [str(step).strip() for step in (raw_steps or []) if str(step).strip()]
-        if existing_steps:
-            effective_goal = (
-                f"{req.goal}\n\n"
-                'Bestehende PLANNED STEPS (als Grundlage verwenden):\n'
-                + '\n'.join(existing_steps)
-            )
-        effective_goal = append_agent_tools_hint(effective_goal, s, user_id)
+        effective_goal = _build_effective_goal(req.goal, additional_props, s, user_id)
         planner = Planner(llm, registry)
         steps = planner.create_steps(goal=effective_goal)
         steps = inject_llm_summary_before_pdf(steps, effective_goal)
@@ -221,7 +248,7 @@ def create_agent_router(
         planner = Planner(llm, build_registry(user_id, s))
         steps = planner.create_steps(goal=effective_goal)
         steps = inject_llm_summary_before_pdf(steps, effective_goal)
-        steps, plan_gate = _apply_planner_guard(llm, provider, planner, effective_goal, steps)
+        steps, plan_gate = _apply_planner_guard(llm, provider, planner, effective_goal, steps, s, user_id)
         if plan_gate.get("status") != "ready":
             missing = [str(x) for x in (plan_gate.get("missing") or [])]
             questions = [f"Bitte ergänze die Planung: {r}" for r in (plan_gate.get("reasons") or [])]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import re
 from pathlib import Path
 from typing import Any, Dict
@@ -69,7 +70,12 @@ def create_tool_router(*, ensure_user_dirs):
         s: Settings = Depends(dep_settings),
     ) -> FileReadResponse:
         ensure_user_dirs(s, user_id)
-        content = read_text(s.user_work_dir(user_id), req.path, encoding=req.encoding)
+        content = read_text(
+            s.user_work_dir(user_id),
+            req.path,
+            encoding=req.encoding,
+            uploads_dir=s.user_dir(user_id) / "uploads",
+        )
         return FileReadResponse(path=req.path, content=content)
 
     @router.post('/files/write', response_model=FileWriteResponse)
@@ -97,6 +103,8 @@ def create_tool_router(*, ensure_user_dirs):
         ensure_user_dirs(s, user_id)
         uploads_dir = (s.user_dir(user_id) / "uploads").resolve()
         uploads_dir.mkdir(parents=True, exist_ok=True)
+        work_dir = s.user_work_dir(user_id).resolve()
+        work_dir.mkdir(parents=True, exist_ok=True)
 
         original_name = str(file.filename or "").strip()
         safe_name = _safe_upload_name(original_name)
@@ -124,6 +132,10 @@ def create_tool_router(*, ensure_user_dirs):
         finally:
             await file.close()
 
+        # Mirror uploaded files into work dir so tools like read_file can access them directly.
+        work_target = (work_dir / target.name).resolve()
+        shutil.copy2(target, work_target)
+
         return {
             "ok": True,
             "filename": target.name,
@@ -131,6 +143,7 @@ def create_tool_router(*, ensure_user_dirs):
             "content_type": str(file.content_type or ""),
             "upload_path": f"uploads/{target.name}",
             "storage_path": f"data/users/{user_id}/uploads/{target.name}",
+            "work_path": f"data/users/{user_id}/work/{work_target.name}",
         }
 
     @router.post('/pdf/export', response_model=PdfExportResponse)

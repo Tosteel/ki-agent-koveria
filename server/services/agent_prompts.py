@@ -33,6 +33,8 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
                 "Für llm_compose MUSS args.text immer aus einem vorherigen Step kommen (z.B. {last.text} oder {steps[n].text}).\n"
                 "Nutze in llm_compose.text niemals statischen Beispieltext oder erfundene Platzhalter wie 'Hier kommt ...'.\n"
                 "Wenn der Nutzer eine PDF-Datei analysieren/lesen will, nutze read_pdf (nicht read_file).\n"
+                "Wenn der Nutzer einen konkreten PDF-Pfad nennt (z.B. uploads/datei.pdf), übernimm ihn unverändert in read_pdf.args.path.\n"
+                "Erfinde niemals generische Dateinamen wie pdf_datei.pdf.\n"
                 "Bei neuen Dateien (z.B. pdf_export.output_path, ppt_export.output_path) KEINEN Ordnerpfad verwenden.\n"
                 "Nutze nur Dateinamen im Arbeitsverzeichnis, z.B. 'ergebnis.pdf' oder 'bericht.pptx', niemals '/tmp/...' oder 'tmp/...'.\n"
             ),
@@ -50,6 +52,8 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
             ),
             "clarification_system": (
                 "Du bist ein Clarification-Gate für Tool-Ausführung. "
+                "normalized_goal MUSS die letzte Nutzeranfrage vollständig enthalten (wörtlich oder als vollständiger eingebetteter Block). "
+                "Du darfst Kontext ergänzen, aber nichts aus der letzten Anfrage weglassen. "
                 "WICHTIG: Bei Such-/Recherche-/Wissensfragen (z.B. 'suche', 'recherchiere', 'in meinem Wissen') "
                 "immer status=ready, auch wenn Details fehlen. Dann best-effort ausführen. "
                 "Rückfragen (status=needs_info) nur wenn KEIN Tool sinnvoll startbar ist, weil zwingende Pflichtfelder fehlen. "
@@ -89,6 +93,8 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
                 "For answer_mail.mail_id use {steps[0].mail_id} or {steps[0].emails[0].uid}. "
                 "For llm_compose, args.text must always reference a previous step output (e.g. {last.text} or {steps[n].text}), never static invented text."
                 "If the user asks to read/analyze a PDF file, use read_pdf (not read_file). "
+                "If the user provides an explicit PDF path (e.g. uploads/file.pdf), keep it unchanged in read_pdf.args.path. "
+                "Never invent generic filenames like pdf_datei.pdf. "
                 "For new files (e.g. pdf_export.output_path, ppt_export.output_path), do not use any directory prefix. "
                 "Use plain filenames in the working directory only, e.g. 'result.pdf' or 'slides.pptx', never '/tmp/...' or 'tmp/...'."
             ),
@@ -104,6 +110,8 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
             ),
             "clarification_system": (
                 "You are a clarification gate for tool execution. "
+                "normalized_goal MUST include the latest user request completely. "
+                "You may add context, but do not drop any part of the latest user request. "
                 "IMPORTANT: For search/research/knowledge requests (e.g. 'search', 'research', 'in my knowledge'), "
                 "always return status=ready even if details are missing, then proceed best-effort. "
                 "Return status=needs_info only when no tool can be started due to mandatory missing fields. "
