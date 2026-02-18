@@ -643,6 +643,29 @@
     .task-btn:hover {
       filter: brightness(1.05);
     }
+    .upload-btn {
+      width: 50px;
+      height: 50px;
+      border: 1px solid #d2def7;
+      border-radius: 12px;
+      background: #f4f8ff;
+      color: #4b6faa;
+      font-size: 0;
+      cursor: pointer;
+      box-shadow: 0 8px 18px rgba(51, 111, 231, 0.12);
+    }
+    .upload-btn svg {
+      width: 22px;
+      height: 22px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.9;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .upload-btn:hover {
+      filter: brightness(1.03);
+    }
 
     @keyframes bubbleIn {
       from { opacity: 0; transform: translateY(4px); }
@@ -749,7 +772,8 @@
       .composer { padding: 10px 12px; gap: 8px; }
       .composer input { font-size: 14px; padding: 10px 10px; }
       .send,
-      .task-btn { width: 42px; height: 42px; font-size: 20px; border-radius: 10px; flex: 0 0 42px; }
+      .task-btn,
+      .upload-btn { width: 42px; height: 42px; font-size: 20px; border-radius: 10px; flex: 0 0 42px; }
     }
   </style>
 </head>
@@ -823,6 +847,13 @@
       <main id="messages" class="messages"></main>
 
       <footer class="composer">
+        <button class="upload-btn" id="uploadBtn" title="Datei hochladen" aria-label="Datei hochladen">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 16V4"/>
+            <path d="M8 8l4-4 4 4"/>
+            <path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>
+          </svg>
+        </button>
         <input id="messageInput" type="text" placeholder="Nachricht eingeben..." />
         <button class="send" id="sendBtn" title="Senden">➤</button>
         <button class="task-btn" id="taskBtn" title="Letzte Aufgabe" aria-label="Letzte Aufgabe">
@@ -832,6 +863,7 @@
             <path d="M9 11h6M9 15h4"/>
           </svg>
         </button>
+        <input id="uploadInput" type="file" style="display:none" />
       </footer>
     </section>
   </div>
@@ -863,6 +895,8 @@
   <script>
     const messagesEl = document.getElementById('messages');
     const inputEl = document.getElementById('messageInput');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const uploadInput = document.getElementById('uploadInput');
     const taskBtn = document.getElementById('taskBtn');
     const sendBtn = document.getElementById('sendBtn');
     const newChatBtn = document.getElementById('newChat');
@@ -1916,18 +1950,6 @@
       return clean.join('\n');
     }
 
-    function normalizeGoalPreview(message) {
-      const base = String(message || '').trim();
-      if (!base) return 'Aktuelle Anfrage...';
-      return `Aktuelle Anfrage: ${base}`;
-    }
-
-    function toPendingNormalizedGoal(text, fallbackMessage) {
-      const base = String(text || '').trim();
-      if (base) return `${base}...`;
-      return `${normalizeGoalPreview(fallbackMessage)}...`;
-    }
-
     function setPendingBotPlaceholder(chatId, enabled, pendingText = '...') {
       const chat = getChatById(chatId);
       if (!chat) return;
@@ -2062,6 +2084,7 @@
 
     function setSending(isSending) {
       sendBtn.disabled = isSending;
+      uploadBtn.disabled = isSending;
       taskBtn.disabled = isSending;
       inputEl.disabled = isSending;
       if (!isSending) inputEl.focus();
@@ -2074,6 +2097,7 @@
         const triggerId = String(trigger?.id || '');
         const isPending = !!triggerId && pendingTriggers.has(triggerId);
         sendBtn.disabled = isPending || !trigger;
+        uploadBtn.disabled = true;
         taskBtn.disabled = true;
         inputEl.disabled = isPending || !trigger;
         if (!inputEl.disabled) inputEl.focus();
@@ -2084,6 +2108,7 @@
         const task = getActiveTask();
         const isPending = !!task && pendingTasks.has(task.id);
         sendBtn.disabled = isPending || !task;
+        uploadBtn.disabled = true;
         taskBtn.disabled = true;
         inputEl.disabled = isPending || !task;
         if (!inputEl.disabled) inputEl.focus();
@@ -2094,6 +2119,7 @@
         const agent = getActiveAgent();
         const isPending = !!agent && pendingAgents.has(Number(agent.id));
         sendBtn.disabled = isPending || !agent;
+        uploadBtn.disabled = true;
         taskBtn.disabled = true;
         inputEl.disabled = isPending || !agent;
         if (!inputEl.disabled) inputEl.focus();
@@ -2103,9 +2129,47 @@
       inputEl.placeholder = 'Nachricht eingeben...';
       if (!chat) {
         setSending(false);
+        uploadBtn.disabled = true;
         return;
       }
+      uploadBtn.disabled = pendingChats.has(chat.id);
       setSending(pendingChats.has(chat.id));
+    }
+
+    async function uploadSelectedFile(file) {
+      if (!file) return;
+      if (!currentUserId) {
+        addMessage('bot', 'Bitte zuerst API-Key in den Einstellungen speichern.');
+        return;
+      }
+      const chat = getActiveChat();
+      if (!chat) return;
+      const targetChatId = chat.id;
+      const form = new FormData();
+      form.append('file', file, file.name);
+      uploadBtn.disabled = true;
+      try {
+        const resp = await fetch(`/api/upload?user_id=${encodeURIComponent(currentUserId)}`, {
+          method: 'POST',
+          body: form
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          addMessageToChat(targetChatId, 'bot', `Upload fehlgeschlagen: ${data.detail || 'Unbekannter Fehler'}`);
+          return;
+        }
+        const upload = data?.upload || {};
+        const filename = String(upload.filename || file.name || '').trim();
+        addMessageToChat(
+          targetChatId,
+          'bot',
+          `Datei hochgeladen: ${filename}`
+        );
+      } catch (_err) {
+        addMessageToChat(targetChatId, 'bot', 'Upload fehlgeschlagen: Verbindung zur API fehlgeschlagen.');
+      } finally {
+        uploadBtn.disabled = false;
+      }
     }
 
     async function loadSettings() {
@@ -3253,21 +3317,6 @@
       renderSidebarList();
 
       try {
-        try {
-          const clarifyResp = await fetch('/api/chat-clarify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, history, user_id: currentUserId })
-          });
-          if (clarifyResp.ok) {
-            const clarifyData = await clarifyResp.json();
-            const normalizedGoal = String(clarifyData?.normalized_goal || '').trim();
-            setPendingBotPlaceholder(targetChatId, true, toPendingNormalizedGoal(normalizedGoal, message));
-          }
-        } catch (e) {
-          // ignore clarify preview failure; keep existing pending text
-        }
-
         const resp = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -3317,6 +3366,19 @@
     });
 
     sendBtn.addEventListener('click', sendMessage);
+    uploadBtn.addEventListener('click', () => {
+      if (sidebarMode !== 'chats') return;
+      if (uploadBtn.disabled) return;
+      uploadInput.value = '';
+      uploadInput.click();
+    });
+    uploadInput.addEventListener('change', async () => {
+      const file = uploadInput.files && uploadInput.files[0] ? uploadInput.files[0] : null;
+      if (!file) return;
+      await uploadSelectedFile(file);
+      uploadInput.value = '';
+      refreshComposerState();
+    });
     taskBtn.addEventListener('click', showLastPlannedTask);
     chatTitleEl.addEventListener('click', () => {
       const isTaskMode = sidebarMode === 'tasks';

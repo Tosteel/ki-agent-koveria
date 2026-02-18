@@ -45,3 +45,49 @@ def export_text_pdf(output_file: Path, title: str, text: str) -> int:
 
     c.save()
     return output_file.stat().st_size
+
+
+def read_pdf_text(pdf_file: Path, max_chars: int = 20000) -> tuple[str, int]:
+    if pdf_file.suffix.lower() != ".pdf":
+        raise HTTPException(status_code=400, detail="path must end with .pdf")
+    if not pdf_file.exists() or not pdf_file.is_file():
+        raise HTTPException(status_code=404, detail="PDF not found")
+
+    reader_obj = None
+    try:
+        from pypdf import PdfReader  # type: ignore
+
+        reader_obj = PdfReader(str(pdf_file))
+    except Exception:
+        try:
+            from PyPDF2 import PdfReader  # type: ignore
+
+            reader_obj = PdfReader(str(pdf_file))
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="PDF reader not available. Install 'pypdf' (or PyPDF2).",
+            ) from exc
+
+    pages = 0
+    chunks: list[str] = []
+    remaining = max(0, int(max_chars))
+    for page in reader_obj.pages:
+        pages += 1
+        try:
+            txt = page.extract_text() or ""
+        except Exception:
+            txt = ""
+        if not txt:
+            continue
+        if len(txt) > remaining:
+            chunks.append(txt[:remaining])
+            remaining = 0
+            break
+        chunks.append(txt)
+        remaining -= len(txt)
+        if remaining <= 0:
+            break
+
+    text = "\n".join(chunks).strip()
+    return text, pages

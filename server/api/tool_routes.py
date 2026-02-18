@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from server.core.settings import Settings
@@ -10,14 +12,14 @@ from server.deps import get_current_user, settings as dep_settings
 
 from server.tools.rag_knowledgebase.models import RagQueryRequest
 from server.tools.filesystem.models import FileReadRequest, FileReadResponse, FileWriteRequest, FileWriteResponse
-from server.tools.pdf.models import PdfExportRequest, PdfExportResponse
+from server.tools.pdf.models import PdfExportRequest, PdfExportResponse, PdfReadRequest, PdfReadResponse
 from server.tools.powerpoint.models import PptExportRequest, PptExportResponse
 from server.tools.mail.models import MailSendRequest, MailSendResponse
 from server.tools.search_multitable.models import SearchGenerateJsonRequest
 from server.tools.rag_knowledgebase import RagService
 from server.tools.search_multitable import SearchService
 from server.tools.filesystem import read_text, write_text
-from server.tools.pdf import export_text_pdf
+from server.tools.pdf import export_text_pdf, read_pdf_text
 from server.tools.powerpoint import export_text_pptx
 from server.tools.mail import send_mail
 
@@ -26,6 +28,13 @@ security = HTTPBearer(auto_error=False)
 
 def create_tool_router(*, ensure_user_dirs):
     router = APIRouter()
+
+    def _safe_upload_name(raw_name: str) -> str:
+        name = Path(str(raw_name or "").strip()).name
+        if not name:
+            name = "upload.bin"
+        name = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
+        return name or "upload.bin"
 
     @router.post('/rag/query')
     def rag_query(
@@ -79,6 +88,51 @@ def create_tool_router(*, ensure_user_dirs):
         )
         return FileWriteResponse(path=req.path, bytes_written=n)
 
+    @router.post('/files/upload')
+    async def files_upload(
+        file: UploadFile = File(...),
+        user_id: str = Depends(get_current_user),
+        s: Settings = Depends(dep_settings),
+    ) -> Dict[str, Any]:
+        ensure_user_dirs(s, user_id)
+        uploads_dir = (s.user_dir(user_id) / "uploads").resolve()
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+
+        original_name = str(file.filename or "").strip()
+        safe_name = _safe_upload_name(original_name)
+        if not safe_name:
+            raise HTTPException(status_code=422, detail="Invalid filename")
+
+        target = uploads_dir / safe_name
+        stem = Path(safe_name).stem
+        suffix = Path(safe_name).suffix
+        idx = 1
+        while target.exists():
+            candidate = f"{stem}_{idx}{suffix}"
+            target = uploads_dir / candidate
+            idx += 1
+
+        size = 0
+        try:
+            with target.open("wb") as f:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    size += len(chunk)
+        finally:
+            await file.close()
+
+        return {
+            "ok": True,
+            "filename": target.name,
+            "bytes_written": size,
+            "content_type": str(file.content_type or ""),
+            "upload_path": f"uploads/{target.name}",
+            "storage_path": f"data/users/{user_id}/uploads/{target.name}",
+        }
+
     @router.post('/pdf/export', response_model=PdfExportResponse)
     def pdf_export(
         req: PdfExportRequest,
@@ -89,6 +143,45 @@ def create_tool_router(*, ensure_user_dirs):
         out = (s.user_work_dir(user_id) / req.output_path.strip().lstrip('/')).resolve()
         size = export_text_pdf(out, title=req.title, text=req.text)
         return PdfExportResponse(output_path=req.output_path, bytes_written=size)
+
+    @router.post('/pdf/read', response_model=PdfReadResponse)
+    def pdf_read(
+        req: PdfReadRequest,
+        user_id: str = Depends(get_current_user),
+        s: Settings = Depends(dep_settings),
+    ) -> PdfReadResponse:
+        ensure_user_dirs(s, user_id)
+        user_root = s.user_dir(user_id).resolve()
+        work_root = s.user_work_dir(user_id).resolve()
+        uploads_root = (user_root / "uploads").resolve()
+        uploads_root.mkdir(parents=True, exist_ok=True)
+
+        raw = req.path.strip().lstrip("/")
+        p = Path(raw)
+        if p.is_absolute() or ".." in p.parts:
+            raise HTTPException(status_code=400, detail=f"Invalid path: {req.path}")
+        candidates: list[Path] = []
+        parts = list(p.parts)
+        if parts and parts[0] == "uploads":
+            candidates.append((uploads_root / Path(*parts[1:])).resolve())
+        elif parts and parts[0] == "work":
+            candidates.append((work_root / Path(*parts[1:])).resolve())
+        else:
+            candidates.append((work_root / p).resolve())
+            candidates.append((uploads_root / p).resolve())
+
+        target: Path | None = None
+        for c in candidates:
+            if c.exists() and c.is_file():
+                if user_root not in c.parents and c != user_root:
+                    continue
+                target = c
+                break
+        if target is None:
+            raise HTTPException(status_code=404, detail="PDF not found")
+
+        text, pages = read_pdf_text(target, max_chars=req.max_chars)
+        return PdfReadResponse(path=req.path, pages=pages, chars=len(text), text=text)
 
     @router.post('/ppt/export', response_model=PptExportResponse)
     def ppt_export(

@@ -14,7 +14,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import requests
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
@@ -286,14 +286,14 @@ def _agent_plan_url_from_ask_url(ask_url: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, "/agent/plan", "", ""))
 
 
-def _agent_clarify_url_from_ask_url(ask_url: str) -> str:
+def _files_upload_url_from_ask_url(ask_url: str) -> str:
     raw = (ask_url or "").strip()
     if not raw:
         return ""
     parsed = urlsplit(raw)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         return ""
-    return urlunsplit((parsed.scheme, parsed.netloc, "/agent/clarify", "", ""))
+    return urlunsplit((parsed.scheme, parsed.netloc, "/files/upload", "", ""))
 
 
 def _compact_planned_steps(steps: List[str]) -> List[str]:
@@ -1010,50 +1010,41 @@ def chat(req: ChatRequest) -> JSONResponse:
     return JSONResponse({"ok": True, "answer": answer, "raw": data})
 
 
-@app.post("/api/chat-clarify")
-def chat_clarify(req: ChatRequest) -> JSONResponse:
-    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
-    settings = _load_settings_for_user(user_id)
-    clarify_url = _agent_clarify_url_from_ask_url(settings["ask_ionos_url"].strip())
-    if not clarify_url:
+@app.post("/api/upload")
+def api_upload(
+    user_id: str = Query(""),
+    file: UploadFile = File(...),
+) -> JSONResponse:
+    resolved_user_id = _sanitize_user_id(user_id) if (user_id or "").strip() else _get_active_user_id()
+    settings = _load_settings_for_user(resolved_user_id)
+    upload_url = _files_upload_url_from_ask_url(settings.get("ask_ionos_url", ""))
+    if not upload_url:
         raise HTTPException(status_code=422, detail="Ungültige Agent-Ask URL.")
     api_key = settings.get("api_key", "").strip()
-    provider = str(settings.get("provider", "ionos")).strip().lower()
-    if provider not in {"ionos", "openai"}:
-        provider = "ionos"
 
-    headers: Dict[str, str] = {"Content-Type": "application/json"}
+    headers: Dict[str, str] = {}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    goal = _build_goal(req.message, req.history)
-    history_payload = _build_history_payload(req.history)
-
     try:
-        resp = requests.post(
-            clarify_url,
-            headers=headers,
-            json={"goal": goal, "history": history_payload, "provider": provider},
-            timeout=60,
-        )
+        filename = str(file.filename or "upload.bin")
+        content_type = str(file.content_type or "application/octet-stream")
+        files = {"file": (filename, file.file, content_type)}
+        resp = requests.post(upload_url, headers=headers, files=files, timeout=180)
     except requests.RequestException as exc:
         raise HTTPException(status_code=502, detail=f"API request failed: {exc}") from exc
+    finally:
+        try:
+            file.file.close()
+        except Exception:
+            pass
 
     if resp.status_code >= 400:
         snippet = resp.text[:500]
         raise HTTPException(status_code=resp.status_code, detail=f"API error: {snippet}")
 
     data: Dict[str, Any] = resp.json() if resp.content else {}
-    normalized_goal = str(data.get("normalized_goal") or "").strip()
-    status = str(data.get("status") or "ready").strip().lower()
-    return JSONResponse(
-        {
-            "ok": True,
-            "status": status if status in {"ready", "needs_info"} else "ready",
-            "normalized_goal": normalized_goal,
-            "raw": data,
-        }
-    )
+    return JSONResponse({"ok": True, "user_id": resolved_user_id, "upload": data})
 
 
 @app.post("/api/planned-task-explain")

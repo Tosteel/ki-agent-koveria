@@ -1,7 +1,81 @@
 {
   "version": 1,
-  "updated_at": "2026-02-18T19:47:05Z",
+  "updated_at": "2026-02-18T20:18:30Z",
   "chats": [
+    {
+      "id": 24,
+      "title": "was kannst du?",
+      "messages": [
+        {
+          "role": "bot",
+          "text": "Hallo! Wie kann ich Ihnen heute helfen?",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-02-18T20:14:12.316Z"
+        },
+        {
+          "role": "user",
+          "text": "was kannst du?",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-02-18T20:14:18.481Z"
+        },
+        {
+          "role": "bot",
+          "text": "Der Agent verfügt über 17 Fähigkeiten, darunter:\n\n- E-Mail-Verwaltung (answer_mail, fetch_inbox_mails, fetch_unanswered_mails, send_mail)\n- Webrecherche (browse_website, search_ebay, search_multitable, view_website)\n- Textverarbeitung (llm_compose, llm_smalltalk, llm_summarize)\n- Dateiverwaltung (pdf_export, ppt_export, read_file, write_file)\n- Wissensbasis-Recherche (rag_knowledgebase)\n- Agent-Fähigkeiten-Anzeige (list_skills)\n\nAlle Fähigkeiten sind verfügbar und können verwendet werden.",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [
+            "1. tool=list_skills args={}"
+          ],
+          "options": [],
+          "timestamp": "2026-02-18T20:14:40.136Z"
+        },
+        {
+          "role": "user",
+          "text": "was kannst du?",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-02-18T20:16:21.277Z"
+        },
+        {
+          "role": "bot",
+          "text": "Der Agent verfügt über 17 Fähigkeiten, darunter E-Mail-Verwaltung, Webrecherche, Textbearbeitung und Dateiverwaltung. Die Fähigkeiten umfassen unter anderem \"answer_mail\", \"browse_website\", \"list_skills\", \"llm_compose\" und \"send_mail\".",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [
+            "1. tool=list_skills args={}"
+          ],
+          "options": [],
+          "timestamp": "2026-02-18T20:17:16.031Z"
+        },
+        {
+          "role": "bot",
+          "text": "Übersicht der geplanten Schritte\n\n1. Die Wissensdatenbank wird nach einer Liste von Fähigkeiten durchsucht.\n2. Die Ergebnisse aus der Wissensdatenbank werden in einen Text überführt.",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [
+            "1. tool=list_skills args={}"
+          ],
+          "options": [
+            {
+              "type": "save_task",
+              "taskText": "Übersicht der geplanten Schritte\n\n1. Die Wissensdatenbank wird nach einer Liste von Fähigkeiten durchsucht.\n2. Die Ergebnisse aus der Wissensdatenbank werden in einen Text überführt.",
+              "saved": ""
+            }
+          ],
+          "timestamp": "2026-02-18T20:18:30.336Z"
+        }
+      ],
+      "created_at": "2026-02-18T20:14:12.316Z",
+      "updated_at": "2026-02-18T20:18:30.336Z"
+    },
     {
       "id": 23,
       "title": "suche in meiner Mailbox nach Emails. Erstelle eine sehr ausführliche Wiedergabe de Inhalte die du per PDF an tobias_stahl@outlook.de sendest.",
@@ -123,10 +197,170 @@
           ],
           "options": [],
           "timestamp": "2026-02-18T19:47:05.262Z"
+        },
+        {
+          "role": "bot",
+          "text": "Datei hochgeladen: 2025_goldbach_financial_GmbH_eprimo_Zahlungsaufforderung_Tobias_Stahl.pdf\nPfad: user/user1/uploads/2025_goldbach_financial_GmbH_eprimo_Zahlungsaufforderung_Tobias_Stahl.pdf\nGröße: 494784 Bytes",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-02-18T19:59:09.744Z"
+        },
+        {
+          "role": "bot",
+          "text": "Datei hochgeladen: 2025_goldbach_financial_GmbH_eprimo_Zahlungsaufforderung_Tobias_Stahl.pdf",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-02-18T20:02:16.510Z"
+        },
+        {
+          "role": "user",
+          "text": "worum geht es in dieser datei?",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-02-18T20:02:36.449Z"
+        },
+        {
+          "role": "bot",
+          "text": "Die Analyse der Datei '2025_goldbach_financial_GmbH_eprimo_Zahlungsaufforderung_Tobias_Stahl.pdf' konnte nicht durchgeführt werden, da die Datei nicht gefunden wurde (404: File not found). Es gibt keine weiteren Informationen über den Inhalt der Datei.",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [
+            "1. tool=read_file args={\"path\":\"2025_goldbach_financial_GmbH_eprimo_Zahlungsaufforderung_Tobias_Stahl.pdf\"}",
+            "2. tool=llm_compose args={\"text\":\"{steps[0].text}\"}"
+          ],
+          "options": [],
+          "timestamp": "2026-02-18T20:03:08.254Z"
+        },
+        {
+          "role": "bot",
+          "text": "Datei hochgeladen: 2025_goldbach_financial_GmbH_eprimo_Zahlungsaufforderung_Tobias_Stahl_1.pdf",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-02-18T20:07:02.266Z"
+        },
+        {
+          "role": "user",
+          "text": "was steht in dieser Datei?",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-02-18T20:07:10.936Z"
+        },
+        {
+          "role": "bot",
+          "text": "Die Analyse der Datei '2025_goldbach_financial_GmbH_eprimo_Zahlungsaufforderung_Tobias_Stahl_1.pdf' konnte nicht durchgeführt werden, da die Datei nicht gefunden wurde (404: File not found). Es liegen keine Daten vor.",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [
+            "1. tool=read_file args={\"path\":\"2025_goldbach_financial_GmbH_eprimo_Zahlungsaufforderung_Tobias_Stahl_1.pdf\",\"encoding\":\"pdf\"}"
+          ],
+          "options": [],
+          "timestamp": "2026-02-18T20:07:49.343Z"
+        },
+        {
+          "role": "user",
+          "text": "bitte benutze read_pdf zum lesen der Datei.",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-02-18T20:08:15.423Z"
+        },
+        {
+          "role": "bot",
+          "text": "Bevor ich starte, brauche ich noch:\n- Welche PDF-Datei soll ich lesen?",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-02-18T20:08:32.563Z"
+        },
+        {
+          "role": "user",
+          "text": "2025_goldbach_financial_GmbH_eprimo_Zahlungsaufforderung_Tobias_Stahl_1.pdf",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-02-18T20:08:53.206Z"
+        },
+        {
+          "role": "bot",
+          "text": "Planung unvollständig. Ich brauche eine kurze Präzisierung, bevor ich starte.",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [
+            "1. tool=read_file args={\"path\":\"example.pdf\"}"
+          ],
+          "options": [],
+          "timestamp": "2026-02-18T20:09:26.217Z"
+        },
+        {
+          "role": "bot",
+          "text": "Datei hochgeladen: 2025_goldbach_financial_GmbH_eprimo_Zahlungsaufforderung_Tobias_Stahl_2.pdf",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-02-18T20:12:29.868Z"
+        },
+        {
+          "role": "user",
+          "text": "bitte auswerten.",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-02-18T20:12:34.820Z"
+        },
+        {
+          "role": "bot",
+          "text": "Bevor ich starte, brauche ich noch:\n- Welche PDF-Datei soll ich lesen?",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-02-18T20:13:01.584Z"
+        },
+        {
+          "role": "bot",
+          "text": "Datei hochgeladen: 2025_goldbach_financial_GmbH_eprimo_Zahlungsaufforderung_Tobias_Stahl_3.pdf",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-02-18T20:13:07.773Z"
+        },
+        {
+          "role": "user",
+          "text": "bitte auswerten.",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-02-18T20:13:13.743Z"
+        },
+        {
+          "role": "bot",
+          "text": "Bevor ich starte, brauche ich noch:\n- Welche PDF-Datei soll ich lesen?",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-02-18T20:13:33.718Z"
         }
       ],
       "created_at": "2026-02-18T19:36:01.661Z",
-      "updated_at": "2026-02-18T19:47:05.262Z"
+      "updated_at": "2026-02-18T20:13:33.718Z"
     },
     {
       "id": 22,
@@ -1382,5 +1616,5 @@
       "updated_at": "2026-02-18T16:00:47.343Z"
     }
   ],
-  "active_chat_id": 23
+  "active_chat_id": 24
 }

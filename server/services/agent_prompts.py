@@ -32,6 +32,7 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
                 "Platzhalter nur als {steps[0].text}, {{steps.1.result.text}} oder {last.text}; niemals mit führendem $.\n"
                 "Für llm_compose MUSS args.text immer aus einem vorherigen Step kommen (z.B. {last.text} oder {steps[n].text}).\n"
                 "Nutze in llm_compose.text niemals statischen Beispieltext oder erfundene Platzhalter wie 'Hier kommt ...'.\n"
+                "Wenn der Nutzer eine PDF-Datei analysieren/lesen will, nutze read_pdf (nicht read_file).\n"
                 "Bei neuen Dateien (z.B. pdf_export.output_path, ppt_export.output_path) KEINEN Ordnerpfad verwenden.\n"
                 "Nutze nur Dateinamen im Arbeitsverzeichnis, z.B. 'ergebnis.pdf' oder 'bericht.pptx', niemals '/tmp/...' oder 'tmp/...'.\n"
             ),
@@ -87,6 +88,7 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
                 "Use answer_mail only when replying to an existing inbox message (mail_id/uid or explicit reference like 'reply to this email'). "
                 "For answer_mail.mail_id use {steps[0].mail_id} or {steps[0].emails[0].uid}. "
                 "For llm_compose, args.text must always reference a previous step output (e.g. {last.text} or {steps[n].text}), never static invented text."
+                "If the user asks to read/analyze a PDF file, use read_pdf (not read_file). "
                 "For new files (e.g. pdf_export.output_path, ppt_export.output_path), do not use any directory prefix. "
                 "Use plain filenames in the working directory only, e.g. 'result.pdf' or 'slides.pptx', never '/tmp/...' or 'tmp/...'."
             ),
