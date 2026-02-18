@@ -32,6 +32,8 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
                 "Platzhalter nur als {steps[0].text}, {{steps.1.result.text}} oder {last.text}; niemals mit führendem $.\n"
                 "Für llm_compose MUSS args.text immer aus einem vorherigen Step kommen (z.B. {last.text} oder {steps[n].text}).\n"
                 "Nutze in llm_compose.text niemals statischen Beispieltext oder erfundene Platzhalter wie 'Hier kommt ...'.\n"
+                "Bei neuen Dateien (z.B. pdf_export.output_path, ppt_export.output_path) KEINEN Ordnerpfad verwenden.\n"
+                "Nutze nur Dateinamen im Arbeitsverzeichnis, z.B. 'ergebnis.pdf' oder 'bericht.pptx', niemals '/tmp/...' oder 'tmp/...'.\n"
             ),
             "final_system": (
                 "Du bist ein Assistent. Antworte sachlich und knapp.\n"
@@ -53,6 +55,20 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
                 "Beispiele für needs_info: E-Mail ohne Empfänger, browse_website ohne URL. "
                 "Beispiele für ready: Wissenssuche, Webrecherche, allgemeine Analyse mit unvollständigen Filtern."
             ),
+            "goal_context_system": (
+                "Du erzeugst kompakten Arbeitskontext für einen Agenten. "
+                "Fokus auf die aktuelle Nutzeranfrage. "
+                "Nutze den Chatverlauf nur, wenn er zur Vervollständigung der Aufgabe nötig ist. "
+                "Keine Höflichkeitsphrasen, kein Smalltalk, keine unnötigen Details. "
+                "Antworte ausschließlich als JSON laut Schema."
+            ),
+            "planner_guard_system": (
+                "Du bist ein Planner-Guard. Prüfe, ob ein gegebener Tool-Plan zum Ziel passt. "
+                "Antworte ausschließlich im JSON-Format laut Schema."
+            ),
+            "planner_guard_refine_system": (
+                "Du präzisierst Guard-Fehler. Gib ausschließlich JSON aus."
+            ),
         },
         "openai": {
             "planner_system": (
@@ -71,6 +87,8 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
                 "Use answer_mail only when replying to an existing inbox message (mail_id/uid or explicit reference like 'reply to this email'). "
                 "For answer_mail.mail_id use {steps[0].mail_id} or {steps[0].emails[0].uid}. "
                 "For llm_compose, args.text must always reference a previous step output (e.g. {last.text} or {steps[n].text}), never static invented text."
+                "For new files (e.g. pdf_export.output_path, ppt_export.output_path), do not use any directory prefix. "
+                "Use plain filenames in the working directory only, e.g. 'result.pdf' or 'slides.pptx', never '/tmp/...' or 'tmp/...'."
             ),
             "final_system": (
                 "You are an assistant. Answer succinctly using tool outputs only. "
@@ -89,6 +107,20 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
                 "Return status=needs_info only when no tool can be started due to mandatory missing fields. "
                 "Examples for needs_info: email without recipient, browse_website without URL. "
                 "Examples for ready: knowledge retrieval, web research, analysis with incomplete filters."
+            ),
+            "goal_context_system": (
+                "You create compact working context for an agent. "
+                "Focus on the current user request. "
+                "Use chat history only if needed to complete the task. "
+                "No smalltalk, no fluff, no irrelevant details. "
+                "Return JSON only according to schema."
+            ),
+            "planner_guard_system": (
+                "You are a planner guard. Validate whether a tool plan matches the goal. "
+                "Return JSON only according to schema."
+            ),
+            "planner_guard_refine_system": (
+                "You refine planner guard errors. Return JSON only."
             ),
         },
     },
@@ -129,3 +161,21 @@ def get_clarification_system_prompt(provider: str, variant: Optional[str] = None
     p = _provider_key(provider)
     v = _resolve_variant(provider, variant)
     return _PROMPTS[v][p]["clarification_system"]
+
+
+def get_goal_context_system_prompt(provider: str, variant: Optional[str] = None) -> str:
+    p = _provider_key(provider)
+    v = _resolve_variant(provider, variant)
+    return _PROMPTS[v][p]["goal_context_system"]
+
+
+def get_planner_guard_system_prompt(provider: str, variant: Optional[str] = None) -> str:
+    p = _provider_key(provider)
+    v = _resolve_variant(provider, variant)
+    return _PROMPTS[v][p]["planner_guard_system"]
+
+
+def get_planner_guard_refine_system_prompt(provider: str, variant: Optional[str] = None) -> str:
+    p = _provider_key(provider)
+    v = _resolve_variant(provider, variant)
+    return _PROMPTS[v][p]["planner_guard_refine_system"]

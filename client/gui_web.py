@@ -286,6 +286,16 @@ def _agent_plan_url_from_ask_url(ask_url: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, "/agent/plan", "", ""))
 
 
+def _agent_clarify_url_from_ask_url(ask_url: str) -> str:
+    raw = (ask_url or "").strip()
+    if not raw:
+        return ""
+    parsed = urlsplit(raw)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return ""
+    return urlunsplit((parsed.scheme, parsed.netloc, "/agent/clarify", "", ""))
+
+
 def _compact_planned_steps(steps: List[str]) -> List[str]:
     compact: List[str] = []
     for idx, raw in enumerate(steps, start=1):
@@ -998,6 +1008,52 @@ def chat(req: ChatRequest) -> JSONResponse:
         answer = json.dumps(data, ensure_ascii=False)
 
     return JSONResponse({"ok": True, "answer": answer, "raw": data})
+
+
+@app.post("/api/chat-clarify")
+def chat_clarify(req: ChatRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    settings = _load_settings_for_user(user_id)
+    clarify_url = _agent_clarify_url_from_ask_url(settings["ask_ionos_url"].strip())
+    if not clarify_url:
+        raise HTTPException(status_code=422, detail="Ungültige Agent-Ask URL.")
+    api_key = settings.get("api_key", "").strip()
+    provider = str(settings.get("provider", "ionos")).strip().lower()
+    if provider not in {"ionos", "openai"}:
+        provider = "ionos"
+
+    headers: Dict[str, str] = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    goal = _build_goal(req.message, req.history)
+    history_payload = _build_history_payload(req.history)
+
+    try:
+        resp = requests.post(
+            clarify_url,
+            headers=headers,
+            json={"goal": goal, "history": history_payload, "provider": provider},
+            timeout=60,
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"API request failed: {exc}") from exc
+
+    if resp.status_code >= 400:
+        snippet = resp.text[:500]
+        raise HTTPException(status_code=resp.status_code, detail=f"API error: {snippet}")
+
+    data: Dict[str, Any] = resp.json() if resp.content else {}
+    normalized_goal = str(data.get("normalized_goal") or "").strip()
+    status = str(data.get("status") or "ready").strip().lower()
+    return JSONResponse(
+        {
+            "ok": True,
+            "status": status if status in {"ready", "needs_info"} else "ready",
+            "normalized_goal": normalized_goal,
+            "raw": data,
+        }
+    )
 
 
 @app.post("/api/planned-task-explain")

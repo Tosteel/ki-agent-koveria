@@ -31,9 +31,9 @@ def create_agent_router(
     append_agent_tools_hint: Callable[[str, Settings, str], str],
     llm_for_provider: Callable[[str], Any],
     run_clarification_gate: Callable[[Any, str], Dict[str, Any]],
-    run_planner_guard: Callable[[str, List[Dict[str, Any]]], Dict[str, Any]],
+    run_planner_guard: Callable[[Any, str, str, List[Dict[str, Any]]], Dict[str, Any]],
     clarification_response: Callable[[str, Dict[str, Any]], AgentAskResponse],
-    goal_with_context: Callable[[str, Any], str],
+    goal_with_context: Callable[[Any, str, str, Any], str],
     inject_llm_summary_before_pdf: Callable[[List[Dict[str, Any]], str], List[Dict[str, Any]]],
     run_steps_internal: Callable[..., Any],
     finalize_internal: Callable[..., str],
@@ -41,8 +41,8 @@ def create_agent_router(
 ) -> APIRouter:
     router = APIRouter()
 
-    def _apply_planner_guard(planner: Planner, goal: str, steps: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
-        gate = run_planner_guard(goal, steps)
+    def _apply_planner_guard(llm: Any, provider: str, planner: Planner, goal: str, steps: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        gate = run_planner_guard(llm, provider, goal, steps)
         print('\n===== PLANNER GUARD =====')
         print(f"status={gate.get('status')}")
         print(f"missing={gate.get('missing')}")
@@ -54,7 +54,7 @@ def create_agent_router(
         guarded_goal = f"{goal}\n\n{gate.get('instructions') or ''}".strip()
         replanned = planner.create_steps(goal=guarded_goal)
         replanned = inject_llm_summary_before_pdf(replanned, guarded_goal)
-        gate2 = run_planner_guard(goal, replanned)
+        gate2 = run_planner_guard(llm, provider, goal, replanned)
         print('\n===== PLANNER GUARD (REPLAN) =====')
         print(f"status={gate2.get('status')}")
         print(f"missing={gate2.get('missing')}")
@@ -99,7 +99,7 @@ def create_agent_router(
         ensure_user_dirs(s, user_id)
 
         registry = build_registry(user_id, s)
-        llm = llm_for_provider('ionos')
+        llm = llm_for_provider(req.provider)
         effective_goal = append_agent_tools_hint(req.goal, s, user_id)
         additional_props = req.additional_props if isinstance(req.additional_props, dict) else {}
         raw_steps = additional_props.get('planned_steps')
@@ -138,13 +138,12 @@ def create_agent_router(
         s: Settings = Depends(dep_settings),
     ) -> AgentClarifyResponse:
         ensure_user_dirs(s, user_id)
-        goal_ctx = goal_with_context(req.goal, req.history)
-        llm = llm_for_provider(req.provider)
+        provider = str(req.provider or "ionos").strip().lower()
+        if provider not in {"ionos", "openai"}:
+            provider = "ionos"
+        llm = llm_for_provider(provider)
+        goal_ctx = goal_with_context(llm, provider, req.goal, req.history)
         gate = run_clarification_gate(llm, goal_ctx)
-
-        provider = str(req.provider or '').strip().lower()
-        if provider not in {'openai', 'ionos'}:
-            provider = 'ionos'
 
         print('\n===== CLARIFICATION =====')
         print(f'provider={provider}')
@@ -199,11 +198,11 @@ def create_agent_router(
         credentials: HTTPAuthorizationCredentials = Depends(security),
     ) -> AgentAskResponse:
         ensure_user_dirs(s, user_id)
-        goal_ctx = goal_with_context(req.goal, req.history)
         provider = str(req.provider or "ionos").strip().lower()
         if provider not in {"ionos", "openai"}:
             provider = "ionos"
         llm = llm_for_provider(provider)
+        goal_ctx = goal_with_context(llm, provider, req.goal, req.history)
         gate = run_clarification_gate(llm, goal_ctx)
 
         print('\n===== CLARIFICATION =====')
@@ -222,7 +221,7 @@ def create_agent_router(
         planner = Planner(llm, build_registry(user_id, s))
         steps = planner.create_steps(goal=effective_goal)
         steps = inject_llm_summary_before_pdf(steps, effective_goal)
-        steps, plan_gate = _apply_planner_guard(planner, effective_goal, steps)
+        steps, plan_gate = _apply_planner_guard(llm, provider, planner, effective_goal, steps)
         if plan_gate.get("status") != "ready":
             missing = [str(x) for x in (plan_gate.get("missing") or [])]
             questions = [f"Bitte ergänze die Planung: {r}" for r in (plan_gate.get("reasons") or [])]

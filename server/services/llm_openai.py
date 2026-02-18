@@ -14,7 +14,7 @@ from .agent_prompts import (
 OPENAI_URL = os.getenv("OPENAI_URL", "https://api.openai.com/v1/responses").strip() or "https://api.openai.com/v1/responses"
 
 
-class LlmRuntime:
+class LlmOpenai:
     def __init__(self):
         self.api_key = os.getenv("OPENAI_API_KEY", "").strip()
         self.model = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()

@@ -1,10 +1,10 @@
 from typing import Any, Dict, List
 
 from ..agent.tool_registry import ToolRegistry
-from ..services.llm_openai import LlmRuntime
+from ..services.llm_openai import LlmOpenai
 
 class Planner:
-    def __init__(self, llm: LlmRuntime, registry: ToolRegistry):
+    def __init__(self, llm: LlmOpenai, registry: ToolRegistry):
         self.llm = llm
         self.registry = registry
 

@@ -169,8 +169,8 @@ def _run_clarification_gate(llm: Any, goal: str) -> Dict[str, Any]:
     return agent_service.run_clarification_gate(llm, goal)
 
 
-def _run_planner_guard(goal: str, steps: List[Dict[str, Any]]) -> Dict[str, Any]:
-    return agent_service.run_planner_guard(goal, steps)
+def _run_planner_guard(llm: Any, provider: str, goal: str, steps: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return agent_service.run_planner_guard(llm, provider, goal, steps)
 
 
 def _clarification_response(req_goal: str, gate: Dict[str, Any]) -> AgentAskResponse:
@@ -194,10 +194,10 @@ def _history_to_context(history: Any, max_items: int = 12) -> str:
     return agent_service.history_to_context(history, max_items=max_items)
 
 
-def _goal_with_context(goal: str, history: Any) -> str:
-    return agent_service.goal_with_context(goal, history)
+def _goal_with_context(llm: Any, provider: str, goal: str, history: Any) -> str:
+    return agent_service.build_goal_with_context(llm, provider, goal, history)
 
-from .services.llm_openai import LlmRuntime
+from .services.llm_openai import LlmOpenai
 from server.services.llm_ionos import IonosLLM
 
 from .agent.planner import Planner

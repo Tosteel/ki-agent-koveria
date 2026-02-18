@@ -11,9 +11,14 @@ from server.core.settings import Settings
 from server.tools.loader import register_all_tools
 from server.agent.tool_registry import ToolRegistry, ToolContext
 from server.agent.orchestrator import Orchestrator
-from server.services.llm_openai import LlmRuntime
+from server.services.llm_openai import LlmOpenai
 from server.services.llm_ionos import IonosLLM
 from server.services import memory_service
+from server.services.agent_prompts import (
+    get_goal_context_system_prompt,
+    get_planner_guard_refine_system_prompt,
+    get_planner_guard_system_prompt,
+)
 
 
 def first_nonempty_str(*values: Any) -> str:
@@ -253,6 +258,17 @@ def sanitize_execution_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]
             output_path = str(args_out.get("output_path") or "").strip()
             if not output_path.lower().endswith(".pptx"):
                 args_out["output_path"] = "result.pptx"
+        elif tool == "llm_smalltalk":
+            raw_chars = args_out.get("max_chars")
+            try:
+                max_chars = int(raw_chars)
+            except Exception:
+                max_chars = 280
+            if max_chars < 60:
+                max_chars = 60
+            if max_chars > 1200:
+                max_chars = 1200
+            args_out["max_chars"] = max_chars
         out.append({"tool": tool, "args": args_out})
     return out
 
@@ -343,55 +359,218 @@ def run_clarification_gate(llm: Any, goal: str) -> Dict[str, Any]:
     }
 
 
-def _goal_requires_mail(goal: str) -> bool:
-    g = str(goal or "").lower()
-    if re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", g):
-        return True
-    return any(k in g for k in ("mail", "e-mail", "email", "sende", "versend", "schick", "antworte", "beantworte"))
+def _parse_json_strictish(text: str) -> Dict[str, Any]:
+    t = str(text or "").strip()
+    if not t:
+        return {}
+    if t.startswith("```"):
+        t = t.strip("`").strip()
+        if "\n" in t:
+            first, rest = t.split("\n", 1)
+            if first.strip().lower() in {"json", "javascript"}:
+                t = rest.strip()
+    try:
+        obj = json.loads(t)
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        pass
+    start = t.find("{")
+    end = t.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            obj = json.loads(t[start : end + 1])
+            return obj if isinstance(obj, dict) else {}
+        except Exception:
+            return {}
+    return {}
 
 
-def _goal_requires_pdf(goal: str) -> bool:
-    g = str(goal or "").lower()
-    return "pdf" in g
+def _extract_openai_output_text(resp: Dict[str, Any]) -> str:
+    out = ""
+    for item in resp.get("output", []):
+        if not isinstance(item, dict):
+            continue
+        for c in item.get("content", []):
+            if isinstance(c, dict) and c.get("type") == "output_text":
+                out += str(c.get("text") or "")
+    return out.strip()
 
 
-def _goal_requires_ppt(goal: str) -> bool:
-    g = str(goal or "").lower()
-    return "ppt" in g or "powerpoint" in g or "präsentation" in g
+def _llm_planner_guard(llm: Any, provider: str, goal: str, steps: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if not hasattr(llm, "enabled") or not llm.enabled():
+        return {}
+
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "status": {"type": "string", "enum": ["ready", "replan"]},
+            "missing": {"type": "array", "items": {"type": "string"}},
+            "reasons": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["status", "missing", "reasons"],
+    }
+    compact_steps: List[Dict[str, Any]] = []
+    for i, step in enumerate(steps, 1):
+        if not isinstance(step, dict):
+            continue
+        args = step.get("args") if isinstance(step.get("args"), dict) else {}
+        compact_steps.append(
+            {
+                "step": i,
+                "tool": str(step.get("tool") or "").strip(),
+                "args": args,
+            }
+        )
+
+    system = get_planner_guard_system_prompt(provider)
+    user = (
+        f"Ziel:\n{goal}\n\n"
+        f"Geplante Schritte:\n{json.dumps(compact_steps, ensure_ascii=False)}\n\n"
+        "Prüfkriterien:\n"
+        "- Wenn Ziel E-Mail-Versand verlangt, muss send_mail oder answer_mail enthalten sein.\n"
+        "- Wenn Ziel PDF verlangt, muss pdf_export enthalten sein.\n"
+        "- Wenn Ziel Präsentation/PPT verlangt, muss ppt_export enthalten sein.\n"
+        "- Referenzen wie {steps[i].text} müssen zu existierenden Steps und sinnvollen Output-Feldern passen.\n"
+        "- Pflichtargumente pro Tool müssen erkennbar gesetzt sein.\n"
+        "- Wenn kein Schritt geplant ist: replan.\n"
+        "\nAusgabevorgaben für JSON:\n"
+        "- status=ready nur wenn keine harten Lücken bestehen.\n"
+        "- status=replan nur mit KONKRETEN missing/reasons.\n"
+        "- missing enthält maschinenlesbare Tokens, z.B.:\n"
+        "  missing_tool:send_mail\n"
+        "  missing_tool:pdf_export\n"
+        "  bad_reference:steps[1].summary\n"
+        "  missing_arg:send_mail.to\n"
+        "  missing_arg:answer_mail.mail_id\n"
+        "- reasons beschreibt pro missing präzise den Befund inkl. Step-Nummer/Tool."
+    )
+
+    try:
+        if hasattr(llm, "chat_completions"):
+            completion = llm.chat_completions(
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {"name": "planner_guard", "schema": schema, "strict": True},
+                },
+            )
+            text = llm.extract_text(completion) if hasattr(llm, "extract_text") else ""
+            parsed = _parse_json_strictish(text)
+        elif hasattr(llm, "_call"):
+            resp = llm._call(  # type: ignore[attr-defined]
+                input_messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                text_format={"type": "json_schema", "name": "planner_guard", "schema": schema, "strict": False},
+            )
+            parsed = _parse_json_strictish(_extract_openai_output_text(resp))
+        else:
+            return {}
+    except Exception:
+        return {}
+
+    status = str(parsed.get("status") or "").strip().lower()
+    if status not in {"ready", "replan"}:
+        return {}
+    missing = [str(x).strip() for x in (parsed.get("missing") or []) if str(x).strip()]
+    reasons = [str(x).strip() for x in (parsed.get("reasons") or []) if str(x).strip()]
+    return {"status": status, "missing": missing, "reasons": reasons}
 
 
-def run_planner_guard(goal: str, steps: List[Dict[str, Any]]) -> Dict[str, Any]:
-    steps_safe = [s for s in steps if isinstance(s, dict)]
-    tools = [str(s.get("tool") or "").strip() for s in steps_safe]
-    missing: List[str] = []
-    reasons: List[str] = []
+def run_planner_guard(llm: Any, provider: str, goal: str, steps: List[Dict[str, Any]]) -> Dict[str, Any]:
+    llm_gate = _llm_planner_guard(llm, provider, goal, steps)
+    if not llm_gate:
+        return {
+            "status": "replan",
+            "missing": ["planner_guard"],
+            "reasons": ["Planner-Guard konnte nicht vom LLM bewertet werden."],
+            "instructions": "WICHTIGE PLANUNGSREGELN (müssen erfüllt sein):\n- Vollständigen, zielkonformen Plan erzeugen.",
+        }
 
-    if not steps_safe:
-        missing.append("steps")
-        reasons.append("Es wurden keine Schritte geplant.")
+    status = str(llm_gate.get("status") or "replan").strip().lower()
+    missing = [str(x).strip() for x in (llm_gate.get("missing") or []) if str(x).strip()]
+    reasons = [str(x).strip() for x in (llm_gate.get("reasons") or []) if str(x).strip()]
 
-    if _goal_requires_mail(goal) and not any(t in {"send_mail", "answer_mail"} for t in tools):
-        missing.append("mail_step")
-        reasons.append("Ziel enthält E-Mail-Versand, aber send_mail/answer_mail fehlt.")
+    # If the guard answer is too generic, ask once for concrete, machine-readable gaps.
+    generic_tokens = {"plan_mismatch", "unknown", "insufficient_info", "not_enough_info"}
+    def _looks_generic(items: List[str], rs: List[str]) -> bool:
+        if not items:
+            return True
+        if any(i in generic_tokens for i in items):
+            return True
+        if any("nicht genug information" in r.lower() for r in rs):
+            return True
+        has_structured = any(
+            i.startswith("missing_tool:")
+            or i.startswith("missing_arg:")
+            or i.startswith("bad_reference:")
+            for i in items
+        )
+        return not has_structured
 
-    if _goal_requires_pdf(goal) and "pdf_export" not in tools:
-        missing.append("pdf_step")
-        reasons.append("Ziel enthält PDF-Anforderung, aber pdf_export fehlt.")
-
-    if _goal_requires_ppt(goal) and "ppt_export" not in tools:
-        missing.append("ppt_step")
-        reasons.append("Ziel enthält Präsentationsanforderung, aber ppt_export fehlt.")
-
-    status = "ready" if not missing else "replan"
+    if status == "replan" and _looks_generic(missing, reasons) and hasattr(llm, "enabled") and llm.enabled():
+        schema_refine = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "missing": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+                "reasons": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+            },
+            "required": ["missing", "reasons"],
+        }
+        compact_steps = []
+        for i, step in enumerate(steps, 1):
+            if not isinstance(step, dict):
+                continue
+            args = step.get("args") if isinstance(step.get("args"), dict) else {}
+            compact_steps.append({"step": i, "tool": str(step.get("tool") or "").strip(), "args": args})
+        system_refine = get_planner_guard_refine_system_prompt(provider)
+        user_refine = (
+            f"Ziel:\n{goal}\n\n"
+            f"Schritte:\n{json.dumps(compact_steps, ensure_ascii=False)}\n\n"
+            "Liefere KONKRETE missing/reasons.\n"
+            "missing MUSS nur diese Formen nutzen:\n"
+            "- missing_tool:<tool>\n"
+            "- missing_arg:<tool>.<arg>\n"
+            "- bad_reference:<reference>\n"
+            "- missing_step:<purpose>\n"
+            "Keine generischen Begriffe wie plan_mismatch."
+        )
+        try:
+            if hasattr(llm, "chat_completions"):
+                c = llm.chat_completions(
+                    messages=[{"role": "system", "content": system_refine}, {"role": "user", "content": user_refine}],
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": {"name": "planner_guard_refine", "schema": schema_refine, "strict": True},
+                    },
+                )
+                t = llm.extract_text(c) if hasattr(llm, "extract_text") else ""
+                parsed = _parse_json_strictish(t)
+            elif hasattr(llm, "_call"):
+                r = llm._call(  # type: ignore[attr-defined]
+                    input_messages=[{"role": "system", "content": system_refine}, {"role": "user", "content": user_refine}],
+                    text_format={"type": "json_schema", "name": "planner_guard_refine", "schema": schema_refine, "strict": False},
+                )
+                parsed = _parse_json_strictish(_extract_openai_output_text(r))
+            else:
+                parsed = {}
+            refined_missing = [str(x).strip() for x in (parsed.get("missing") or []) if str(x).strip()]
+            refined_reasons = [str(x).strip() for x in (parsed.get("reasons") or []) if str(x).strip()]
+            if refined_missing:
+                missing = refined_missing
+            if refined_reasons:
+                reasons = refined_reasons
+        except Exception:
+            pass
+    if status == "replan":
+        if not reasons:
+            reasons = ["Der Plan passt laut Guard nicht vollständig zum Ziel."]
+        if not missing:
+            missing = ["missing_step:goal_alignment"]
     instructions = ""
     if status == "replan":
         instructions = "WICHTIGE PLANUNGSREGELN (müssen erfüllt sein):\n- " + "\n- ".join(reasons)
-    return {
-        "status": status,
-        "missing": missing,
-        "reasons": reasons,
-        "instructions": instructions,
-    }
+    return {"status": status, "missing": missing, "reasons": reasons, "instructions": instructions}
 
 
 def history_to_context(history: Any, max_items: int = 12) -> str:
@@ -418,6 +597,63 @@ def goal_with_context(goal: str, history: Any) -> str:
     if not hist:
         return base
     return f"Aktuelle Anfrage:\n{base}\n\nDialogverlauf (letzte 12 Nachrichten):\n{hist}"
+
+
+def build_goal_with_context(llm: Any, provider: str, goal: str, history: Any) -> str:
+    base = (goal or "").strip()
+    if not base:
+        return base
+    hist = history_to_context(history, max_items=12)
+    if not hist:
+        return base
+    if not hasattr(llm, "enabled") or not llm.enabled():
+        return f"Aktuelle Anfrage:\n{base}\n\nKontext:\n{hist}"
+
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "standalone_goal": {"type": "string"},
+            "carry_context": {"type": "array", "items": {"type": "string"}},
+            "needs_context": {"type": "boolean"},
+        },
+        "required": ["standalone_goal", "carry_context", "needs_context"],
+    }
+    system = get_goal_context_system_prompt(provider)
+    user = (
+        f"Aktuelle Nutzeranfrage:\n{base}\n\n"
+        f"Dialogverlauf (letzte 12 Nachrichten):\n{hist}\n\n"
+        "Erzeuge ein standalone_goal. "
+        "Falls für die Ausführung nötig, liefere 1-3 kurze Kontextpunkte in carry_context."
+    )
+    try:
+        if hasattr(llm, "chat_completions"):
+            completion = llm.chat_completions(
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {"name": "goal_context", "schema": schema, "strict": True},
+                },
+            )
+            parsed = _parse_json_strictish(llm.extract_text(completion) if hasattr(llm, "extract_text") else "")
+        elif hasattr(llm, "_call"):
+            resp = llm._call(  # type: ignore[attr-defined]
+                input_messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                text_format={"type": "json_schema", "name": "goal_context", "schema": schema, "strict": False},
+            )
+            parsed = _parse_json_strictish(_extract_openai_output_text(resp))
+        else:
+            parsed = {}
+    except Exception:
+        parsed = {}
+
+    standalone_goal = str(parsed.get("standalone_goal") or base).strip() or base
+    needs_context = bool(parsed.get("needs_context"))
+    carry_context_raw = parsed.get("carry_context") or []
+    carry_context = [str(x).strip() for x in carry_context_raw if str(x).strip()][:3]
+    if not needs_context or not carry_context:
+        return standalone_goal
+    return f"Aktuelle Anfrage:\n{standalone_goal}\n\nKontext:\n" + "\n".join(f"- {c}" for c in carry_context)
 
 
 def _slugify_tool_name(title: str, agent_id: Any) -> str:
@@ -648,7 +884,7 @@ def provider_key(provider: str) -> str:
 def llm_for_provider(provider: str) -> Any:
     p = provider_key(provider)
     if p == "openai":
-        return LlmRuntime()
+        return LlmOpenai()
     return IonosLLM()
 
 

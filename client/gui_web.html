@@ -395,6 +395,10 @@
       box-shadow: 0 8px 18px rgba(48, 94, 182, 0.08);
       animation: bubbleIn 180ms ease;
     }
+    .bubble.bubble-pending {
+      font-size: 12px;
+      color: #8895ad;
+    }
 
     .message-delete {
       position: absolute;
@@ -1034,6 +1038,9 @@
 
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
+      if (meta && meta._pendingBot === true) {
+        bubble.classList.add('bubble-pending');
+      }
       const textNode = document.createElement('div');
       textNode.textContent = text;
       bubble.appendChild(textNode);
@@ -1909,15 +1916,32 @@
       return clean.join('\n');
     }
 
-    function setPendingBotPlaceholder(chatId, enabled) {
+    function normalizeGoalPreview(message) {
+      const base = String(message || '').trim();
+      if (!base) return 'Aktuelle Anfrage...';
+      return `Aktuelle Anfrage: ${base}`;
+    }
+
+    function toPendingNormalizedGoal(text, fallbackMessage) {
+      const base = String(text || '').trim();
+      if (base) return `${base}...`;
+      return `${normalizeGoalPreview(fallbackMessage)}...`;
+    }
+
+    function setPendingBotPlaceholder(chatId, enabled, pendingText = '...') {
       const chat = getChatById(chatId);
       if (!chat) return;
       const existingIdx = (chat.messages || []).findIndex((m) => m && m._pendingBot === true);
       if (enabled) {
-        if (existingIdx >= 0) return;
+        if (existingIdx >= 0) {
+          chat.messages[existingIdx].text = String(pendingText || '...');
+          touchChat(chat);
+          if (activeChatId === chatId) renderActiveChat();
+          return;
+        }
         chat.messages.push({
           role: 'bot',
-          text: '...',
+          text: String(pendingText || '...'),
           downloadUrl: '',
           downloadLabel: '',
           plannedSteps: [],
@@ -3222,13 +3246,28 @@
       }
 
       addMessageToChat(targetChatId, 'user', message);
-      setPendingBotPlaceholder(targetChatId, true);
+      setPendingBotPlaceholder(targetChatId, true, '...');
       inputEl.value = '';
       pendingChats.add(targetChatId);
       refreshComposerState();
       renderSidebarList();
 
       try {
+        try {
+          const clarifyResp = await fetch('/api/chat-clarify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message, history, user_id: currentUserId })
+          });
+          if (clarifyResp.ok) {
+            const clarifyData = await clarifyResp.json();
+            const normalizedGoal = String(clarifyData?.normalized_goal || '').trim();
+            setPendingBotPlaceholder(targetChatId, true, toPendingNormalizedGoal(normalizedGoal, message));
+          }
+        } catch (e) {
+          // ignore clarify preview failure; keep existing pending text
+        }
+
         const resp = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
