@@ -8,6 +8,8 @@ PHASE1_ALLOWED_TOOLS = {
     "pdf_export",
     "ppt_export",
     "search_multitable",
+    "langsearch",
+    #"google_search",
     "search_ebay",
     "view_website",
     "browse_website",

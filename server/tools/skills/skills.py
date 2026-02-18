@@ -14,11 +14,12 @@ _TOOL_DESCRIPTIONS: Dict[str, str] = {
     "pdf_export": "Text als PDF exportieren.",
     "ppt_export": "Text als PowerPoint exportieren.",
     "search_multitable": "Webrecherche mit strukturierten Ergebnissen.",
-    "search_ebay": "Produktsuche auf eBay.",
+    "langsearch": "Websuche mit LangSearch (Open/Free).",
+    "google_search": "Websuche über Google Custom Search.",
+    #"search_ebay": "Produktsuche auf eBay.",
     "view_website": "Inhalte auf einer einzelnen Website-Seite suchen.",
     "browse_website": "Website mit Navigation/Klicks über Unterseiten durchsuchen.",
     "send_mail": "E-Mails versenden (optional mit Anhang).",
-    "list_skills": "Verfügbare Agent-Fähigkeiten anzeigen.",
 }
 
 
@@ -42,4 +43,3 @@ def list_skills(*, include_descriptions: bool = True) -> Dict[str, Any]:
         "skills": skills,
         "text": text,
     }
-

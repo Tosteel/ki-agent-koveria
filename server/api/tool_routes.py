@@ -17,7 +17,9 @@ from server.tools.pdf.models import PdfExportRequest, PdfExportResponse, PdfRead
 from server.tools.powerpoint.models import PptExportRequest, PptExportResponse
 from server.tools.mail.models import MailSendRequest, MailSendResponse
 from server.tools.search_multitable.models import SearchGenerateJsonRequest
+from server.tools.langsearch.models import LangSearchRequest
 from server.tools.rag_knowledgebase import RagService
+from server.tools.langsearch import search_langsearch
 from server.tools.search_multitable import SearchService
 from server.tools.filesystem import read_text, write_text
 from server.tools.pdf import export_text_pdf, read_pdf_text
@@ -62,6 +64,20 @@ def create_tool_router(*, ensure_user_dirs):
         ensure_user_dirs(s, user_id)
         service = SearchService(s.search_base_url, credentials.credentials)
         return service.search_generate_json(user_prompt=req.user_prompt)
+
+    @router.post('/langsearch/search')
+    def langsearch_search(
+        req: LangSearchRequest,
+        user_id: str = Depends(get_current_user),
+        s: Settings = Depends(dep_settings),
+    ) -> Dict[str, Any]:
+        ensure_user_dirs(s, user_id)
+        return search_langsearch(
+            query=req.query,
+            count=req.count,
+            summary=req.summary,
+            freshness=req.freshness,
+        )
 
     @router.post('/files/read', response_model=FileReadResponse)
     def files_read(
