@@ -21,34 +21,18 @@ from .core.models import (
 from .deps import get_current_user, settings as dep_settings
 from .auth import get_token_for_user
 
-from .tools.rag_knowledgebase.models import RagQueryRequest
-from .tools.filesystem.models import FileReadRequest, FileReadResponse, FileWriteRequest, FileWriteResponse
-from .tools.pdf.models import PdfExportRequest, PdfExportResponse
-from .tools.powerpoint.models import PptExportRequest, PptExportResponse
-from .tools.mail.models import MailSendRequest, MailSendResponse
-from .tools.search_multitable.models import SearchGenerateJsonRequest
-from .tools.rag_knowledgebase import RagService
-from .tools.search_multitable import SearchService
-from .tools.filesystem import read_text, write_text
-from .tools.pdf import export_text_pdf
-from .tools.powerpoint import export_text_pptx
-from .tools.mail import send_mail
-from .tools.loader import register_all_tools
+from .tools.loader import create_all_tool_api_router, register_all_tools
 from .triggers import TriggerRegistry, TriggerRuntime, register_all_triggers
 from .triggers.store import load_user_triggers, save_user_triggers
 from .api.agent_routes import create_agent_router
 from .api.trigger_routes import create_trigger_router
 from .api.user_routes import router as user_router
-from .api.tool_routes import create_tool_router
 from .services import memory_service
 from .services import agent_service
 
 from .agent.tool_registry import ToolRegistry, ToolContext
 from .agent.orchestrator import Orchestrator
 from pydantic import BaseModel, Field
-
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-security = HTTPBearer(auto_error=False)
 
 app = FastAPI(title="ki-agent-koveria", version="0.1.0")
 
@@ -226,7 +210,7 @@ def _ensure_user_dirs(s: Settings, user_id: str) -> None:
 
 app.include_router(user_router)
 app.include_router(
-    create_tool_router(
+    create_all_tool_api_router(
         ensure_user_dirs=_ensure_user_dirs,
     )
 )

@@ -142,6 +142,8 @@ def _provider_key(provider: str) -> str:
     p = (provider or "").strip().lower()
     if p in {"ionos", "openai"}:
         return p
+    if p == "perplexity":
+        return "openai"
     return "ionos"
 
 

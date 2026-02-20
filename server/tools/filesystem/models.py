@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -15,7 +17,7 @@ class FileReadResponse(BaseModel):
 
 class FileWriteRequest(BaseModel):
     path: str = Field(..., description="")
-    content: str
+    content: Any
     encoding: str = Field("utf-8")
     overwrite: bool = True
 

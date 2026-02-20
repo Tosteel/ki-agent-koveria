@@ -1,0 +1,1 @@
+from .strategic_analysis_swot_positioning import run_strategic_analysis

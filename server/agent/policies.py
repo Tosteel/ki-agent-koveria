@@ -18,6 +18,19 @@ PHASE1_ALLOWED_TOOLS = {
     "fetch_inbox_mails",
     "fetch_unanswered_mails",
     "list_skills",
+    "competitive_parse_document",
+    "competitive_quality_gate",
+    "competitive_extract_product_profile",
+    "feature_claim_extraction_quality_gate",
+    "competitive_generate_analysis_plan",
+    "competitive_identify_competitors",
+    "competitive_extract_competitor_profiles",
+    "competitive_merge_competitor_profiles",
+    "competitive_verify_competitor_source_registry",
+    "competitive_feature_matrix_gap_analysis",
+    "competitive_strategic_analysis",
+    "competitive_generate_final_report",
+    "competitive_publish_pdf_report",
 }
 
 def is_phase1_tool_allowed(tool_name: str) -> bool:

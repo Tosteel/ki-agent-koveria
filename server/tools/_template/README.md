@@ -14,6 +14,7 @@ cp -r server/tools/_template server/tools/<toolname>
 
 - `tool_template.py` -> `<toolname>.py`
 - Update imports in `registry.py`
+- Update imports in `api.py`
 
 3. Update models:
 
@@ -25,12 +26,18 @@ cp -r server/tools/_template server/tools/<toolname>
 - `TOOL_NAME = "<toolname>"`
 - handler internals and imports
 
-5. Allow planner usage (optional):
+5. Update API route file:
+
+- Adjust endpoint path in `api.py`
+- Keep `create_router(*, ensure_user_dirs)` signature
+
+6. Allow planner usage (optional):
 
 - Add `<toolname>` to `server/agent/policies.py` `PHASE1_ALLOWED_TOOLS`.
 
 ## Notes
 
-- Loader auto-discovers tools by `server/tools/*/registry.py` and calls `register(registry)`.
+- Loader auto-discovers tools by `server/tools/**/registry.py` and calls `register(registry)`.
+- Tool API router auto-discovers `server/tools/**/api.py` and calls `create_router(...)`.
 - Keep request/response models small and explicit.
 - Return JSON-serializable payload only.

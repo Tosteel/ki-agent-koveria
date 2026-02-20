@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Dict
 
 from server.agent.tool_registry import ToolContext, ToolRegistry
@@ -21,10 +22,17 @@ def register(registry: ToolRegistry) -> None:
 
     def tool_write_file(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = FileWriteRequest(**args)
+        content = req.content
+        if isinstance(content, (dict, list)):
+            content_text = json.dumps(content, ensure_ascii=False, indent=2)
+        elif isinstance(content, str):
+            content_text = content
+        else:
+            content_text = str(content)
         n = write_text(
             ctx.settings.user_work_dir(ctx.user_id),
             req.path,
-            req.content,
+            content_text,
             encoding=req.encoding,
             overwrite=req.overwrite,
         )

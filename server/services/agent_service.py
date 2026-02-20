@@ -13,6 +13,7 @@ from server.agent.tool_registry import ToolRegistry, ToolContext
 from server.agent.orchestrator import Orchestrator
 from server.services.llm_openai import LlmOpenai
 from server.services.llm_ionos import IonosLLM
+from server.services.llm_perplexity import LlmPerplexity
 from server.services import memory_service
 from server.services.agent_prompts import (
     get_goal_context_system_prompt,
@@ -922,7 +923,7 @@ def build_registry(*, settings: Settings | None = None, user_id: str | None = No
 
 def provider_key(provider: str) -> str:
     p = str(provider or "").strip().lower()
-    if p in {"openai", "ionos"}:
+    if p in {"openai", "ionos", "perplexity"}:
         return p
     return "ionos"
 
@@ -931,6 +932,8 @@ def llm_for_provider(provider: str) -> Any:
     p = provider_key(provider)
     if p == "openai":
         return LlmOpenai()
+    if p == "perplexity":
+        return LlmPerplexity()
     return IonosLLM()
 
 
