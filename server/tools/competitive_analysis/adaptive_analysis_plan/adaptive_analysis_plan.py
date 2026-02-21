@@ -80,6 +80,247 @@ def _clean_category(raw: Any) -> str:
     return c
 
 
+def _compact_category_phrase(raw: str) -> str:
+    c = _norm_text(raw)
+    if not c:
+        return "Produkt"
+    # Keep category query-friendly and short.
+    c = re.sub(r"\s+", " ", c).strip(" -_,.;:")
+    words = c.split()
+    if len(words) > 8:
+        c = " ".join(words[:8])
+    return c
+
+
+def _extract_power_hints(profile: Dict[str, Any], product_name: str) -> List[str]:
+    hints: List[str] = []
+    text_blobs: List[str] = [_norm_text(product_name)]
+
+    for k in ("performance_parameters", "normalized_features"):
+        vals = profile.get(k)
+        if isinstance(vals, list):
+            for item in vals:
+                if not isinstance(item, dict):
+                    continue
+                n = _norm_text(item.get("name"))
+                v = _norm_text(item.get("value"))
+                u = _norm_text(item.get("unit"))
+                if n:
+                    text_blobs.append(n)
+                if v:
+                    text_blobs.append(f"{v} {u}".strip())
+
+    raw = " | ".join([x for x in text_blobs if x])
+
+    # Pattern like 5/6/8/10K or 5-10kW.
+    slash_nums = re.findall(r"(?<!\d)(\d{1,2}(?:[.,]\d)?)\s*/\s*(\d{1,2}(?:[.,]\d)?)(?:\s*/\s*(\d{1,2}(?:[.,]\d)?))?(?:\s*/\s*(\d{1,2}(?:[.,]\d)?))?\s*[kK]\b", raw)
+    for grp in slash_nums:
+        nums = [x for x in grp if x]
+        try:
+            vals = sorted({float(x.replace(",", ".")) for x in nums})
+            if vals:
+                hints.append(f"{vals[0]:g}-{vals[-1]:g} kW")
+        except Exception:
+            continue
+
+    range_kw = re.findall(r"(\d{1,2}(?:[.,]\d)?)\s*[-–]\s*(\d{1,2}(?:[.,]\d)?)\s*[kK][wW]?", raw)
+    for lo, hi in range_kw:
+        try:
+            l = float(lo.replace(",", "."))
+            h = float(hi.replace(",", "."))
+            if l <= h:
+                hints.append(f"{l:g}-{h:g} kW")
+        except Exception:
+            continue
+
+    # Derive coarse band from W values in performance fields.
+    w_values: List[float] = []
+    for entry in (profile.get("performance_parameters") or []):
+        if not isinstance(entry, dict):
+            continue
+        name = _norm_text(entry.get("name")).lower()
+        unit = _norm_text(entry.get("normalized_unit") or entry.get("unit")).lower()
+        val = entry.get("normalized_value")
+        if val is None:
+            val = entry.get("value")
+        if val is None:
+            continue
+        try:
+            fv = float(val)
+        except Exception:
+            continue
+        if unit in {"w", "kw", "va", "kva"} and any(tok in name for tok in ("leistung", "power", "output", "nenn", "rated", "nominal", "max", "pv", "ac")):
+            # Convert to kW-like value for rough query anchor.
+            if unit in {"w", "va"}:
+                fv = fv / 1000.0
+            w_values.append(fv)
+
+    # Generic fallback: also scan normalized_features for electrical power units.
+    for entry in (profile.get("normalized_features") or []):
+        if not isinstance(entry, dict):
+            continue
+        unit = _norm_text(entry.get("normalized_unit") or entry.get("unit")).lower()
+        val = entry.get("normalized_value")
+        if val is None:
+            val = entry.get("value")
+        if val is None or unit not in {"w", "kw", "va", "kva"}:
+            continue
+        try:
+            fv = float(val)
+        except Exception:
+            continue
+        if unit in {"w", "va"}:
+            fv = fv / 1000.0
+        if fv > 0:
+            w_values.append(fv)
+
+    if w_values:
+        lo = min(w_values)
+        hi = max(w_values)
+        if lo > 0 and hi > 0:
+            hints.append(f"{lo:g}-{hi:g} kW")
+
+    deduped = list(dict.fromkeys([_norm_text(h) for h in hints if _norm_text(h)]))
+    return deduped[:3]
+
+
+def _pick_primary_power_hint(hints: List[str]) -> str:
+    """
+    Prefer compact ranges (e.g. 5-10 kW) and avoid overly broad/noisy ranges.
+    """
+    best = ""
+    best_span = 9999.0
+    for h in hints:
+        m = re.search(r"(\d+(?:[.,]\d+)?)\s*-\s*(\d+(?:[.,]\d+)?)\s*kW", str(h), flags=re.IGNORECASE)
+        if not m:
+            continue
+        lo = float(m.group(1).replace(",", "."))
+        hi = float(m.group(2).replace(",", "."))
+        if lo <= 0 or hi <= 0 or hi < lo:
+            continue
+        span = hi - lo
+        # Generic guard: keep only realistic, focused residential/commercial bands.
+        if hi > 30 or span > 12:
+            continue
+        if span < best_span:
+            best_span = span
+            best = f"{lo:g}-{hi:g} kW"
+    return best
+
+
+def _extract_functionality_query_terms(profile: Dict[str, Any], max_terms: int = 4) -> List[str]:
+    raw_terms: List[str] = []
+    for f in (profile.get("normalized_features") or []):
+        if isinstance(f, dict):
+            n = _norm_text(f.get("name"))
+            if n:
+                raw_terms.append(n)
+    raw_terms.extend(_safe_list_str(profile.get("differentiators")))
+    raw_terms.extend(_safe_list_str(profile.get("use_cases")))
+
+    out: List[str] = []
+    seen: set[str] = set()
+    for t in raw_terms:
+        s = _norm_text(t)
+        if not s:
+            continue
+        # Prefer trailing functional phrase where present.
+        m = re.search(r"\b(?:zur|für|for)\s+([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß\- ]{2,})$", s, flags=re.IGNORECASE)
+        if m:
+            s = _norm_text(m.group(1))
+        s = re.sub(r"[™®©]", "", s)
+        s = re.sub(r"\s+", " ", s).strip(" -_,.;:")
+        if len(s) < 5 or len(s) > 40:
+            continue
+        if re.search(r"\d", s):
+            continue
+        if len(re.findall(r"[A-Za-zÄÖÜäöüß]", s)) < 4:
+            continue
+        # Drop mostly spec-ish terms for this specific query expansion.
+        if any(k in s.lower() for k in ("gewicht", "maß", "abmess", "spannung", "strom", "leistung", "kapaz")):
+            continue
+        k = s.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(s)
+        if len(out) >= max_terms:
+            break
+    return out
+
+
+def _extract_functional_signature(profile: Dict[str, Any], max_parts: int = 4) -> List[str]:
+    """
+    Build compact, high-signal functional signature parts from normalized features:
+    product-type-neutral but useful for search recall/precision.
+    Example outcome: ["lithium-ion", "6000 mAh", "rechargeable", "usb-c"].
+    """
+    parts: List[str] = []
+    seen: set[str] = set()
+
+    def _push(v: str) -> None:
+        s = _norm_text(v).lower()
+        if not s or s in seen:
+            return
+        seen.add(s)
+        parts.append(v.strip())
+
+    for f in (profile.get("normalized_features") or []):
+        if not isinstance(f, dict):
+            continue
+        name = _norm_text(f.get("name")).lower()
+        value_txt = _norm_text(f.get("value"))
+        unit_txt = _norm_text(f.get("unit"))
+
+        # Chemistry / cell type
+        if any(k in name for k in ("chemistry", "chemie", "cell chemistry")):
+            v = value_txt.lower()
+            if any(k in v for k in ("li-ion", "lithium-ion", "lithium ion", "li ion")):
+                _push("lithium-ion")
+            elif "lifepo4" in v:
+                _push("lifepo4")
+            elif v:
+                _push(value_txt)
+
+        # Rechargeable signal
+        if any(k in name for k in ("recharge", "auflad", "ladbar", "charging cycles")):
+            _push("rechargeable")
+
+        # Capacity signal
+        if any(k in name for k in ("capacity", "kapazit")):
+            if value_txt:
+                if unit_txt:
+                    _push(f"{value_txt} {unit_txt}")
+                else:
+                    _push(value_txt)
+
+        # Port / connector signal
+        if any(k in name for k in ("port", "anschluss", "connector")):
+            v = value_txt.lower()
+            if "usb-c" in v or "usb c" in v or "type-c" in v or "type c" in v:
+                _push("usb-c")
+            elif v:
+                _push(value_txt)
+
+        if len(parts) >= max_parts:
+            break
+
+    # Fallback from claims/differentiators for functional terms.
+    text_blob = " | ".join(
+        _safe_list_str(profile.get("differentiators"))[:8]
+        + _safe_list_str(profile.get("use_cases"))[:8]
+    ).lower()
+    if text_blob:
+        if "recharge" in text_blob or "auflad" in text_blob:
+            _push("rechargeable")
+        if "usb-c" in text_blob or "usb c" in text_blob:
+            _push("usb-c")
+        if "lithium-ion" in text_blob or "li-ion" in text_blob or "lithium ion" in text_blob:
+            _push("lithium-ion")
+
+    return parts[:max_parts]
+
+
 def _is_noisy_feature_term(term: str) -> bool:
     t = _norm_text(term)
     if not t:
@@ -103,6 +344,15 @@ def _is_noisy_feature_term(term: str) -> bool:
     ]
     tl = f" {t.lower()} "
     if any(frag in tl for frag in banned_fragments):
+        return True
+    # Truncated/fractured endings are typically OCR/table-join artifacts.
+    if t.endswith((" -", " –", "/", ":", "(", "[")):
+        return True
+    # Heavily concatenated measurement chains are usually low-signal features.
+    num_tokens = re.findall(r"\d+(?:[.,]\d+)?", t)
+    if len(num_tokens) >= 3:
+        return True
+    if re.search(r"(?:\d+(?:[.,]\d+)?\s*[a-zA-Z%]+.*){2,}", t):
         return True
     # Mostly numeric/units is not a stable search schema feature name.
     if re.fullmatch(r"[\d\W]+", t):
@@ -129,14 +379,22 @@ def _clean_feature_terms(values: List[str], max_items: int = 20) -> List[str]:
 
 def _build_competitor_queries(
     *,
+    profile: Dict[str, Any],
     product_name: str,
     manufacturer: str,
     product_category: str,
-    min_queries: int = 6,
+    segments: List[str],
+    use_cases: List[str],
+    dimension_names: List[str],
+    functionality_terms: List[str],
+    functional_signature: List[str],
+    min_queries: int = 10,
 ) -> List[str]:
     name = _norm_text(product_name)
     brand = _norm_text(manufacturer)
     category = _clean_category(product_category)
+    category_phrase = _compact_category_phrase(category if category != "unknown" else "Produkt")
+    power_hints = _extract_power_hints(profile, name)
 
     anchor = name or brand
     if not anchor and category != "unknown":
@@ -144,37 +402,120 @@ def _build_competitor_queries(
     if not anchor:
         anchor = "produkt"
 
-    # Keep queries competitor-focused on the main product/market class.
-    queries: List[str] = [
-        f"Alternativen zu {anchor}",
-        f"Wettbewerber von {anchor}",
-        f"{anchor} Konkurrenz Vergleich",
-        f"{anchor} vs Konkurrenzmodelle",
-        f"{anchor} competitor alternatives",
-        f"{anchor} competing products",
+    # Anchor/model queries (limited to avoid overfitting to vendor/model naming).
+    anchor_queries: List[str] = [
+        f"Alternativen zu {anchor} Datenblatt",
+        f"Wettbewerber von {anchor} technische Daten",
+        f"{anchor} datasheet specs",
     ]
 
-    if category != "unknown":
-        queries.extend(
-            [
-                f"{category} Wettbewerber Vergleich",
-                f"{category} ähnliche Produkte zu {anchor}",
-                f"{category} Konkurrenzmodelle Datenblatt",
-            ]
-        )
+    primary_power = _pick_primary_power_hint(power_hints)
+    category_anchor = category_phrase
+    if primary_power:
+        category_anchor = f"{category_phrase} ({primary_power})"
+
+    # Category queries: concise and product-page oriented.
+    category_queries: List[str] = [
+        f"{category_anchor} Wettbewerber Vergleich",
+        f"{category_anchor} ähnliche Produkte zu {anchor}",
+        f"{category_anchor} Produktserie technische Daten",
+        f"{category_anchor} product page specs",
+    ]
+
+    # Use an intent rotation so we don't generate near-duplicate suffix variants
+    # for the same base term (e.g. "... Nominal voltage", "... datasheet", "... specs").
+    feature_intents = [
+        "{cat} {term}",
+        "{cat} {term} datasheet",
+        "{cat} {term} product page",
+        "{cat} {term} technical specifications",
+    ]
+    for idx, ft in enumerate(functionality_terms[:6]):
+        term = _compact_category_phrase(ft)
+        if not term:
+            continue
+        tmpl = feature_intents[idx % len(feature_intents)]
+        category_queries.append(tmpl.format(cat=category_anchor, term=term).strip())
 
     if brand and name:
-        queries.extend(
+        # Avoid duplicated brand prefix when product_name already includes brand.
+        brand_in_name = brand.lower() in name.lower()
+        brand_name_anchor = name if brand_in_name else f"{brand} {name}"
+        anchor_queries.extend(
             [
-                f"{brand} {name} competitors",
-                f"{brand} {name} alternatives",
+                f"{brand_name_anchor} competitors",
+                f"{brand_name_anchor} alternatives",
             ]
         )
 
-    deduped = list(dict.fromkeys([_norm_text(q) for q in queries if _norm_text(q)]))
+    if functional_signature:
+        sig = " ".join([_compact_category_phrase(x) for x in functional_signature if _compact_category_phrase(x)]).strip()
+        if sig:
+            category_queries.extend(
+                [
+                    f"{category_anchor} {sig}",
+                    f"{category_anchor} {sig} competitors",
+                    f"{category_anchor} {sig} datasheet",
+                ]
+            )
+
+    # Balanced order with guaranteed anchor reservation:
+    # keep category/function focus, but always retain 2-3 brand/product anchor queries.
+    max_queries = 16
+    clean_category = list(dict.fromkeys([_norm_text(q) for q in category_queries if _norm_text(q)]))
+    clean_anchor = list(dict.fromkeys([_norm_text(q) for q in anchor_queries if _norm_text(q)]))
+
+    anchor_keep = 3 if len(clean_anchor) >= 3 else (2 if len(clean_anchor) >= 2 else len(clean_anchor))
+    category_budget = max(0, max_queries - anchor_keep)
+
+    # Ensure at least one explicit brand-bearing anchor query survives truncation,
+    # otherwise brand-specific recall can disappear in short query sets.
+    selected_anchor: List[str] = []
+    if anchor_keep > 0:
+        brand_q: List[str] = []
+        non_brand_q: List[str] = clean_anchor[:]
+        if brand:
+            brand_q = [q for q in clean_anchor if brand.lower() in q.lower()]
+            non_brand_q = [q for q in clean_anchor if q not in brand_q]
+
+        if non_brand_q:
+            selected_anchor.append(non_brand_q[0])
+        if brand_q and len(selected_anchor) < anchor_keep:
+            selected_anchor.append(brand_q[0])
+        if len(brand_q) > 1 and len(selected_anchor) < anchor_keep:
+            selected_anchor.append(brand_q[1])
+
+        for q in (non_brand_q[1:] + brand_q[1:] + clean_anchor):
+            if len(selected_anchor) >= anchor_keep:
+                break
+            if q not in selected_anchor:
+                selected_anchor.append(q)
+
+    mixed: List[str] = []
+    mixed.extend(clean_category[:category_budget])
+    mixed.extend(selected_anchor[:anchor_keep])
+    if len(mixed) < max_queries:
+        mixed.extend(clean_category[category_budget : category_budget + (max_queries - len(mixed))])
+
+    deduped = list(dict.fromkeys([q for q in mixed if _norm_text(q)]))
     if len(deduped) < min_queries and category != "unknown":
-        deduped.append(f"{category} Marktvergleich")
-    return deduped[:12]
+        deduped.append(f"{category_anchor} technische Datenblatt")
+    if len(deduped) < min_queries:
+        deduped.append("Produkt technische Daten")
+    return deduped[:max_queries]
+
+
+def _compact_use_case_phrase(raw: str) -> str:
+    u = _compact_category_phrase(raw)
+    if not u:
+        return ""
+    # Remove repetitive heads to keep queries concise and reusable.
+    u = re.sub(r"^(für|for)\s+", "", u, flags=re.IGNORECASE)
+    u = re.sub(r"\bvon\s+\w+\b$", "", u, flags=re.IGNORECASE).strip()
+    # Drop repeated category nouns in use-case phrase to avoid tautologies.
+    u = re.sub(r"\b(wechselrichter|inverter|produkt|systeme?)\b", "", u, flags=re.IGNORECASE)
+    u = re.sub(r"\s{2,}", " ", u).strip(" -_,.;:")
+    return u or _compact_category_phrase(raw)
 
 
 def _sanitize_plan(
@@ -247,17 +588,23 @@ def _sanitize_plan(
     # Deduplicate terms.
     search_terms = list({(st.term.lower(), st.intent): st for st in search_terms if st.term}.values())
 
-    queries = _build_competitor_queries(
-        product_name=product_name,
-        manufacturer=manufacturer,
-        product_category=product_category,
-    )
-
     comp_dims = []
     if llm_data:
         comp_dims = [ComparisonDimension(**d) for d in (llm_data.get("comparison_dimensions") or []) if isinstance(d, dict)]
     if not comp_dims:
         comp_dims = base_dimensions
+
+    queries = _build_competitor_queries(
+        profile=profile,
+        product_name=product_name,
+        manufacturer=manufacturer,
+        product_category=product_category,
+        segments=_safe_list_str(profile.get("target_segments")),
+        use_cases=_safe_list_str(profile.get("use_cases")),
+        dimension_names=[d.name for d in comp_dims if _norm_text(d.name)],
+        functionality_terms=_extract_functionality_query_terms(profile, max_terms=4),
+        functional_signature=_extract_functional_signature(profile, max_parts=4),
+    )
 
     relevance_criteria = _safe_list_str((llm_data or {}).get("relevance_criteria")) if llm_data else []
     if not relevance_criteria:
@@ -278,6 +625,9 @@ def _sanitize_plan(
 
     notes = _safe_list_str((llm_data or {}).get("notes")) if llm_data else []
     notes.append("Search queries werden auf Wettbewerber zum Hauptprodukt fokussiert; Feature-Noise wird unterdrückt.")
+    notes.append("Query-Mix priorisiert Produkt-/Serienseiten mit Datenblatt/Spezifikations-Intent.")
+    notes.append("Zusätzliche Query-Varianten für funktionale Kernmerkmale werden berücksichtigt.")
+    notes.append("Funktionale Signatur aus Produkttyp+Kernspezifikationen (z. B. Chemie/Kapazität/Port) wird in Queries priorisiert.")
     notes = list(dict.fromkeys([n for n in notes if _norm_text(n)]))
 
     min_competitors = int((llm_data or {}).get("min_competitors") or 6)

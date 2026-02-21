@@ -38,7 +38,7 @@ Ziel: Schritt-Artefakte step-spezifisch per LLM prüfen und bei Bedarf (Modus `v
 
 Schritt-zu-Artefakt:
 1. `parsed_doc.json`
-2. `product_profile.json` (oder `product_profile_quality_gated.json`)
+2. `product_profile.json` (oder `product_profile_qg.json`)
 3. `analysis_plan.json`
 4. `competitor_list.json`
 5. `competitor_profiles.json`
@@ -158,7 +158,7 @@ Output: `product_profile.json`
 ## Tool2a: Quality Gate für Feature- & Claim-Extraktion
 Input: `product_profile.json`
 Prozess: JSON evaluieren, unsinnige Feature-Objekte filtern/reparieren, gleiche `product_profile`-Struktur beibehalten
-Output: `product_profile_quality_gated.json`
+Output: `product_profile_qg.json`
 
 ```json
 {
@@ -176,7 +176,7 @@ Output: `product_profile_quality_gated.json`
     {
       "tool": "write_file",
       "args": {
-        "path": "product_profile_quality_gated.json",
+        "path": "product_profile_qg.json",
         "content": "{steps[0].payload}",
         "overwrite": true
       }
@@ -185,10 +185,10 @@ Output: `product_profile_quality_gated.json`
 }
 ```
 
-Hinweis: In den Folgeschritten dann `product_profile_quality_gated.json` statt `product_profile.json` verwenden.
+Hinweis: In den Folgeschritten dann `product_profile_qg.json` statt `product_profile.json` verwenden.
 
 ## Tool3: Adaptiver Analyseplan (Strategie-Generator)
-Input: `product_profile_quality_gated.json` (oder `product_profile.json` ohne Quality Gate)
+Input: `product_profile_qg.json` (oder `product_profile.json` ohne Quality Gate)
 Prozess: Vergleichsdimensionen definieren, Suchqueries generieren, Mindestabdeckung festlegen, Feature-Schema erweitern
 Output: `analysis_plan.json`
 
@@ -198,7 +198,7 @@ Output: `analysis_plan.json`
     {
       "tool": "competitive_generate_analysis_plan",
       "args": {
-        "product_profile_path": "product_profile_quality_gated.json",
+        "product_profile_path": "product_profile_qg.json",
         "provider": "ionos",
         "max_context_chars": 14000
       }
@@ -216,7 +216,7 @@ Output: `analysis_plan.json`
 ```
 
 ## Tool4: Wettbewerberidentifikation
-Input: `analysis_plan.json` + `product_profile_quality_gated.json` (oder `product_profile.json`)
+Input: `analysis_plan.json` + `product_profile_qg.json` (oder `product_profile.json`)
 Prozess: Websuche, semantische Ähnlichkeitsanalyse, Deduplizierung, Relevanzranking
 Output: `competitor_list.json`
 
@@ -227,7 +227,7 @@ Output: `competitor_list.json`
       "tool": "competitive_identify_competitors",
       "args": {
         "analysis_plan_path": "analysis_plan.json",
-        "product_profile_path": "product_profile_quality_gated.json",
+        "product_profile_path": "product_profile_qg.json",
         "provider": "openai",
         "max_queries": 8,
         "per_query_results": 6,
@@ -246,8 +246,44 @@ Output: `competitor_list.json`
 }
 ```
 
+## Tool4b: Wettbewerberliste-Quality-Gate (optional, empfohlen)
+Input: `competitor_list.json` (+ optional `product_profile_qg.json`)
+Prozess: Entfernt False-Positives aus Tool4 (z. B. generische Vergleichs-/Katalogseiten, schwache `unknown`-Kandidaten, Herstellerknoten ohne Modellsignal), dedupliziert Name+Domain.
+Output: `competitor_list_qg.json`
+
+```json
+{
+  "steps": [
+    {
+      "tool": "competitor_identification_quality_gate",
+      "args": {
+        "competitor_list_path": "competitor_list.json",
+        "product_profile_path": "product_profile_qg.json",
+        "provider": "perplexity",
+        "min_relevance_score": 0.06,
+        "drop_generic_listing_pages": true,
+        "drop_weak_unknown_candidates": true,
+        "drop_manufacturer_nodes_without_model_signal": true,
+        "dedupe_by_name_and_domain": true,
+        "enable_llm_snippet_validation": true,
+        "llm_min_keep_confidence": 0.55,
+        "max_llm_checks": 20
+      }
+    },
+    {
+      "tool": "write_file",
+      "args": {
+        "path": "competitor_list_qg.json",
+        "content": "{steps[0].payload}",
+        "overwrite": true
+      }
+    }
+  ]
+}
+```
+
 ## Tool5: Wettbewerberdaten-Extraktion & Normalisierung
-Input: `competitor_list.json`
+Input: `competitor_list_qg.json` (oder `competitor_list.json`, falls Tool4b nicht genutzt wird)
 Prozess: Crawling, Feature-Mapping, Preis-/Leistungsdaten erfassen, Evidenz dokumentieren
 Output: `competitor_profiles.json`
 - `source_registry_path` ist optional. Nur setzen, wenn die Datei bereits existiert.
@@ -371,8 +407,44 @@ Merge aller Teile:
 }
 ```
 
+### Tool5b: Quality Gate für Competitor-Profile
+Input: `competitor_profiles.json`
+Prozess: Profil-Qualität prüfen, verrauschte `mapped_features` entfernen, nicht-offizielle URLs markieren (ohne `profile.url` zu überschreiben), Preise gegen Modell/Variante verifizieren und bei Bedarf korrigieren.
+Output: `competitor_profiles_qg.json`
+
+```json
+{
+  "steps": [
+    {
+      "tool": "competitor_profile_extraction_quality_gate",
+      "args": {
+        "competitor_profiles_path": "competitor_profiles.json",
+        "provider": "openai",
+        "max_context_chars": 18000,
+        "verify_independent_urls": true,
+        "cross_validate_features": true,
+        "enrich_seller_prices": true,
+        "verify_existing_prices": true,
+        "remove_noisy_mapped_features": true,
+        "verbose_progress": true
+      }
+    },
+    {
+      "tool": "write_file",
+      "args": {
+        "path": "competitor_profiles_qg.json",
+        "content": "{steps[0].payload}",
+        "overwrite": true
+      }
+    }
+  ]
+}
+```
+
+Hinweis: Das Tool gibt wie die anderen Tools ein Payload zurück; `write_file` sollte weiterhin `content: "{steps[0].payload}"` verwenden.
+
 ## Tool6: Feature-Matrix & Gap-Analyse
-Input: `product_profile.json` + `competitor_profiles.json`
+Input: `product_profile_qg.json` (oder `product_profile.json`) + `competitor_profiles_qg.json` (oder `competitor_profiles.json`)
 Prozess: Vergleichsmatrix erstellen, Marktstandards identifizieren, Differenzierungsmerkmale und Lücken berechnen
 Output: `comparison_matrix.json`, `gaps_and_usps.json`
 
@@ -514,7 +586,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
     {
       "tool": "competitive_parse_document",
       "args": {
-        "path": "product.txt",
+        "path": "DE DS SH5.0RT 6.0RT 8.0RT 10RT Datenblatt.pdf",
         "max_chars": 50000
       }
     },
@@ -530,7 +602,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       "tool": "competitive_extract_product_profile",
       "args": {
         "parsed_doc_path": "parsed_doc.json",
-        "provider": "ionos",
+        "provider": "perplexity",
         "max_context_chars": 18000
       }
     },
@@ -543,10 +615,28 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       }
     },
     {
-      "tool": "competitive_generate_analysis_plan",
+      "tool": "feature_claim_extraction_quality_gate",
       "args": {
         "product_profile_path": "product_profile.json",
-        "provider": "ionos",
+        "provider": "perplexity",
+        "max_context_chars": 18000,
+        "remove_nonsensical_features": true,
+        "repair_feature_names": true
+      }
+    },
+    {
+      "tool": "write_file",
+      "args": {
+        "path": "product_profile_qg.json",
+        "content": "{steps[4].payload}",
+        "overwrite": true
+      }
+    },
+    {
+      "tool": "competitive_generate_analysis_plan",
+      "args": {
+        "product_profile_path": "product_profile_qg.json",
+        "provider": "perplexity",
         "max_context_chars": 14000
       }
     },
@@ -554,7 +644,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       "tool": "write_file",
       "args": {
         "path": "analysis_plan.json",
-        "content": "{steps[4].payload}",
+        "content": "{steps[6].payload}",
         "overwrite": true
       }
     },
@@ -562,28 +652,52 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       "tool": "competitive_identify_competitors",
       "args": {
         "analysis_plan_path": "analysis_plan.json",
-        "product_profile_path": "product_profile.json",
-        "provider": "openai",
-        "max_queries": 8,
-        "per_query_results": 6,
-        "shortlist_size": 12
+        "product_profile_path": "product_profile_qg.json",
+        "provider": "perplexity",
+        "max_queries": 20,
+        "per_query_results": 10,
+        "shortlist_size": 25
       }
     },
     {
       "tool": "write_file",
       "args": {
         "path": "competitor_list.json",
-        "content": "{steps[6].payload}",
+        "content": "{steps[8].payload}",
+        "overwrite": true
+      }
+    },
+    {
+      "tool": "competitor_identification_quality_gate",
+      "args": {
+        "competitor_list_path": "competitor_list.json",
+        "product_profile_path": "product_profile_qg.json",
+        "provider": "perplexity",
+        "min_relevance_score": 0.06,
+        "drop_generic_listing_pages": true,
+        "drop_weak_unknown_candidates": true,
+        "drop_manufacturer_nodes_without_model_signal": true,
+        "dedupe_by_name_and_domain": true,
+        "enable_llm_snippet_validation": true,
+        "llm_min_keep_confidence": 0.55,
+        "max_llm_checks": 20
+      }
+    },
+    {
+      "tool": "write_file",
+      "args": {
+        "path": "competitor_list_qg.json",
+        "content": "{steps[10].payload}",
         "overwrite": true
       }
     },
     {
       "tool": "competitive_extract_competitor_profiles",
       "args": {
-        "competitor_list_path": "competitor_list.json",
-        "provider": "openai",
+        "competitor_list_path": "competitor_list_qg.json",
+        "provider": "perplexity",
         "offset": 0,
-        "limit": 10,
+        "limit": 20,
         "max_pages_per_competitor": 3,
         "verbose_progress": true
       }
@@ -592,23 +706,45 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       "tool": "write_file",
       "args": {
         "path": "competitor_profiles.json",
-        "content": "{steps[8].payload}",
+        "content": "{steps[12].payload}",
+        "overwrite": true
+      }
+    },
+    {
+      "tool": "competitor_profile_extraction_quality_gate",
+      "args": {
+        "competitor_profiles_path": "competitor_profiles.json",
+        "provider": "perplexity",
+        "max_context_chars": 18000,
+        "verify_independent_urls": true,
+        "cross_validate_features": true,
+        "enrich_seller_prices": true,
+        "verify_existing_prices": true,
+        "remove_noisy_mapped_features": true,
+        "verbose_progress": true
+      }
+    },
+    {
+      "tool": "write_file",
+      "args": {
+        "path": "competitor_profiles_qg.json",
+        "content": "{steps[14].payload}",
         "overwrite": true
       }
     },
     {
       "tool": "competitive_feature_matrix_gap_analysis",
       "args": {
-        "product_profile_path": "product_profile.json",
-        "competitor_profiles_path": "competitor_profiles.json",
-        "provider": "openai"
+        "product_profile_path": "product_profile_qg.json",
+        "competitor_profiles_path": "competitor_profiles_qg.json",
+        "provider": "perplexity"
       }
     },
     {
       "tool": "write_file",
       "args": {
         "path": "feature_matrix_gap.json",
-        "content": "{steps[10].payload}",
+        "content": "{steps[16].payload}",
         "overwrite": true
       }
     },
@@ -619,26 +755,26 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
         "evidences": {
           "comparison_matrix_path": "feature_matrix_gap.json"
         },
-        "provider": "openai"
+        "provider": "perplexity"
       }
     },
     {
       "tool": "write_file",
       "args": {
         "path": "strategic_analysis.json",
-        "content": "{steps[12].payload}",
+        "content": "{steps[18].payload}",
         "overwrite": true
       }
     },
     {
       "tool": "competitive_generate_final_report",
       "args": {
-        "provider": "ionos",
+        "provider": "perplexity",
         "artifact_paths": {
-          "product_profile": "product_profile.json",
+          "product_profile": "product_profile_qg.json",
           "analysis_plan": "analysis_plan.json",
-          "competitor_list": "competitor_list.json",
-          "competitor_profiles": "competitor_profiles.json",
+          "competitor_list": "competitor_list_qg.json",
+          "competitor_profiles": "competitor_profiles_qg.json",
           "comparison_matrix": "feature_matrix_gap.json",
           "gaps_and_usps": "feature_matrix_gap.json",
           "strategic_analysis": "strategic_analysis.json"
@@ -650,15 +786,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       "tool": "write_file",
       "args": {
         "path": "final_report.json",
-        "content": "{steps[14].payload}",
-        "overwrite": true
-      }
-    },
-    {
-      "tool": "write_file",
-      "args": {
-        "path": "review_status.json",
-        "content": "{\"status\":\"pending_manual_review\",\"step\":\"9\",\"note\":\"Tool9 optional/not implemented\"}",
+        "content": "{steps[20].payload}",
         "overwrite": true
       }
     },
@@ -670,14 +798,6 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
         "logo_path": "logo.png",
         "include_render_log": true,
         "render_log_path": "render_log.json"
-      }
-    },
-    {
-      "tool": "write_file",
-      "args": {
-        "path": "pdf_publish_result.json",
-        "content": "{steps[17].payload}",
-        "overwrite": true
       }
     }
   ]

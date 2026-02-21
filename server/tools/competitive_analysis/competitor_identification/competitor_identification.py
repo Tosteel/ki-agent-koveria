@@ -42,6 +42,10 @@ FAMILY_TRIM_TOKENS = {
 LEGAL_NAME_TOKENS = {
     "inc", "corp", "corporation", "company", "co", "ltd", "llc", "gmbh", "ag", "sa", "plc", "kg", "srl",
 }
+GENERIC_NAME_TOKENS = {
+    "wechselrichter", "inverter", "hybrid", "series", "serie", "technology", "technologies",
+    "new", "energy", "solar", "power", "supply", "systems", "solutions",
+}
 TRUSTED_EXTERNAL_DOMAIN_HINTS = (
     "auto-motor-und-sport",
     "autobild",
@@ -760,12 +764,20 @@ def _openai_search(query: str, per_query_results: int, api_key: str, model: str)
     }
     system = (
         "Nutze Websuche und liefere nur JSON mit dem Schema: "
-        "{\"results\":[{\"name\":\"\",\"url\":\"\",\"snippet\":\"\"}]}. "
+        "{\"results\":[{\"name\":\"\",\"url\":\"\",\"snippet\":\"\",\"source_type\":\"\"}]}. "
         f"Maximal {int(per_query_results)} Ergebnisse. "
-        "Wichtig: Nur reale Unternehmen/Produktanbieter zurückgeben. "
-        "Keine Platzhalter, keine generischen Namen wie 'Hersteller A/B/C', keine erfundenen Domains."
+        "WICHTIG: Gesucht sind konkrete Wettbewerbsprodukte/-serien auf Produktniveau (produktnahe Seiten), "
+        "nicht Marken-/Hersteller-Übersichtsseiten. "
+        "Keine Platzhalter, keine generischen Namen wie 'Hersteller A/B/C', keine erfundenen Domains. "
+        "Für jedes Ergebnis muss der Name ein konkretes Produkt/Serie nennen (z. B. Modellreihe), "
+        "und das Snippet muss einen klaren Produktbezug enthalten (z. B. Leistung, Spezifikation, Datenblatt, Modellcode). "
+        "Setze source_type strikt auf eines von: product_page | series_page | manufacturer_page | comparison_page. "
+        "Wenn nur Hersteller-/Kategorieseiten gefunden werden, gib weniger Ergebnisse statt unscharfer Treffer aus."
     )
-    user = f"Finde relevante Wettbewerber für die Suchanfrage: {query}"
+    user = (
+        f"Finde relevante Wettbewerbsprodukte für die Suchanfrage: {query}\n"
+        "Achte auf Produkt-/Serienebene und meide reine Brand-/Herstellerknoten."
+    )
 
     payload: Dict[str, Any] = {
         "model": model,
@@ -792,8 +804,12 @@ def _openai_search(query: str, per_query_results: int, api_key: str, model: str)
                                     "name": {"type": "string"},
                                     "url": {"type": "string"},
                                     "snippet": {"type": "string"},
+                                    "source_type": {
+                                        "type": "string",
+                                        "enum": ["product_page", "series_page", "manufacturer_page", "comparison_page"],
+                                    },
                                 },
-                                "required": ["name", "url", "snippet"],
+                                "required": ["name", "url", "snippet", "source_type"],
                             },
                         }
                     },
@@ -840,11 +856,15 @@ def _openai_search(query: str, per_query_results: int, api_key: str, model: str)
                 continue
             title = _clean_text(str(r.get("name") or ""))
             snippet = _clean_text(str(r.get("snippet") or ""))
+            source_type = _clean_text(str(r.get("source_type") or "")).lower()
+            if source_type not in {"product_page", "series_page", "manufacturer_page", "comparison_page"}:
+                source_type = "unknown"
             out.append(
                 {
                     "title": title,
                     "url": url,
                     "snippet": snippet,
+                    "source_type": source_type,
                 }
             )
 
@@ -870,6 +890,7 @@ def _openai_search(query: str, per_query_results: int, api_key: str, model: str)
                             "title": title,
                             "url": url,
                             "snippet": snippet,
+                            "source_type": "unknown",
                         }
                     )
     return out[:per_query_results]
@@ -882,11 +903,19 @@ def _perplexity_search(query: str, per_query_results: int, api_key: str, model: 
     }
     system = (
         "Liefere ausschließlich JSON im Format "
-        "{\"results\":[{\"name\":\"\",\"url\":\"\",\"snippet\":\"\"}]}. "
+        "{\"results\":[{\"name\":\"\",\"url\":\"\",\"snippet\":\"\",\"source_type\":\"\"}]}. "
         f"Maximal {int(per_query_results)} Ergebnisse. "
-        "Nur reale Wettbewerber/Produkte, keine Platzhalter, keine erfundenen URLs."
+        "Nur reale Wettbewerbsprodukte/-serien auf Produktniveau, keine Marken-/Hersteller-Übersichtsseiten, "
+        "keine Platzhalter, keine erfundenen URLs. "
+        "Name muss konkretes Produkt/Serie enthalten; Snippet muss klaren Produktbezug zeigen "
+        "(z. B. Leistung, Spezifikation, Datenblatt, Modellcode). "
+        "Setze source_type strikt auf eines von: product_page | series_page | manufacturer_page | comparison_page. "
+        "Wenn nur unscharfe Markenknoten vorliegen, liefere lieber weniger Ergebnisse."
     )
-    user = f"Finde relevante Wettbewerber für: {query}"
+    user = (
+        f"Finde relevante Wettbewerbsprodukte für: {query}\n"
+        "Keine reinen Hersteller-/Kategorieknoten; nur konkrete Produkt-/Serienseiten."
+    )
     payload: Dict[str, Any] = {
         "model": model,
         "messages": [
@@ -910,8 +939,12 @@ def _perplexity_search(query: str, per_query_results: int, api_key: str, model: 
                                     "name": {"type": "string"},
                                     "url": {"type": "string"},
                                     "snippet": {"type": "string"},
+                                    "source_type": {
+                                        "type": "string",
+                                        "enum": ["product_page", "series_page", "manufacturer_page", "comparison_page"],
+                                    },
                                 },
-                                "required": ["name", "url", "snippet"],
+                                "required": ["name", "url", "snippet", "source_type"],
                             },
                         }
                     },
@@ -956,6 +989,12 @@ def _perplexity_search(query: str, per_query_results: int, api_key: str, model: 
                     "title": _clean_text(str(r.get("name") or "")),
                     "url": url,
                     "snippet": _clean_text(str(r.get("snippet") or "")),
+                    "source_type": (
+                        _clean_text(str(r.get("source_type") or "")).lower()
+                        if _clean_text(str(r.get("source_type") or "")).lower()
+                        in {"product_page", "series_page", "manufacturer_page", "comparison_page"}
+                        else "unknown"
+                    ),
                 }
             )
 
@@ -963,7 +1002,7 @@ def _perplexity_search(query: str, per_query_results: int, api_key: str, model: 
     if not out and text:
         url_matches = re.findall(r"https?://[^\s\"'<>]+", text)
         for u in url_matches:
-            out.append({"title": "", "url": u.strip(), "snippet": ""})
+            out.append({"title": "", "url": u.strip(), "snippet": "", "source_type": "unknown"})
 
     # Keep unique URLs only.
     dedup: List[Dict[str, str]] = []
@@ -996,6 +1035,7 @@ def _langsearch_fallback(query: str, per_query_results: int) -> List[Dict[str, s
                 "title": _clean_text(str(item.get("title") or "")),
                 "url": url,
                 "snippet": _clean_text(str(item.get("snippet") or "")),
+                "source_type": "unknown",
             }
         )
     return out[:per_query_results]
@@ -1030,6 +1070,7 @@ def _score_candidate(
     snippet: str,
     url: str,
     source_query: str,
+    source_type: str,
     dimensions: List[str],
 ) -> CompetitorCandidate:
     combined = f"{title}\n{snippet}"
@@ -1058,6 +1099,7 @@ def _score_candidate(
     return CompetitorCandidate(
         name=_pick_name(title, url),
         url=url,
+        source_type=source_type if source_type in {"product_page", "series_page", "manufacturer_page", "comparison_page"} else "unknown",
         snippet=snippet,
         source_query=source_query,
         cluster=cluster,
@@ -1161,6 +1203,55 @@ def _collapse_near_duplicate_names(cands: List[CompetitorCandidate]) -> List[Com
     return kept
 
 
+def _brand_domain_key(c: CompetitorCandidate) -> str:
+    brand = _brand_token(c.name)
+    dom = _domain(c.url)
+    dom_root = dom
+    if "." in dom:
+        parts = dom.split(".")
+        if len(parts) >= 2:
+            dom_root = f"{parts[-2]}.{parts[-1]}"
+    if brand and dom_root:
+        return f"{brand}|{dom_root}"
+    return brand or dom_root or _candidate_key(c)
+
+
+def _is_generic_brand_name(name: str) -> bool:
+    toks = _name_tokens(name)
+    if not toks:
+        return True
+    # Generic if it mostly consists of legal/generic descriptor tokens.
+    informative = [t for t in toks if t not in GENERIC_NAME_TOKENS]
+    # Keep first token (brand) + maybe one informative token.
+    return len(informative) <= 2
+
+
+def _collapse_brand_domain_duplicates(cands: List[CompetitorCandidate]) -> List[CompetitorCandidate]:
+    """
+    Final dedupe for manufacturer-level duplicates that survived lexical dedupe.
+    Keeps highest-ranked candidate per brand/domain when both names are generic.
+    """
+    grouped: Dict[str, List[CompetitorCandidate]] = {}
+    for c in cands:
+        k = _brand_domain_key(c)
+        grouped.setdefault(k, []).append(c)
+
+    out: List[CompetitorCandidate] = []
+    for _, group in grouped.items():
+        if len(group) == 1:
+            out.append(group[0])
+            continue
+        # If at least two are generic manufacturer-level entries, keep only best one.
+        generic = [g for g in group if _is_generic_brand_name(g.name)]
+        if len(generic) >= 2:
+            best = sorted(group, key=lambda x: (x.relevance_score, x.similarity_score), reverse=True)[0]
+            out.append(best)
+            continue
+        # Otherwise keep all (likely distinct model-level entries from same brand).
+        out.extend(group)
+    return out
+
+
 def identify_competitors(
     *,
     analysis_plan: Optional[Dict[str, Any]],
@@ -1168,7 +1259,7 @@ def identify_competitors(
     product_profile: Optional[Dict[str, Any]],
     product_profile_path: Optional[str],
     provider: str = "openai",
-    max_queries: int = 8,
+    max_queries: int = 12,
     per_query_results: int = 6,
     shortlist_size: int = 10,
     user_root: Path,
@@ -1268,6 +1359,7 @@ def identify_competitors(
                 title = _clean_text(str(r.get("title") or ""))
                 url = str(r.get("url") or "").strip()
                 snippet = _clean_text(str(r.get("snippet") or ""))
+                source_type = _clean_text(str(r.get("source_type") or "")).lower()
                 if not url:
                     continue
                 if _is_placeholder_candidate(name=title, url=url, snippet=snippet):
@@ -1289,6 +1381,7 @@ def identify_competitors(
                     snippet=snippet,
                     url=url,
                     source_query=q,
+                    source_type=source_type,
                     dimensions=dimensions,
                 )
                 raw_candidates.append(cand)
@@ -1563,6 +1656,13 @@ def identify_competitors(
             c.url = _clean_url(c.url)
             c.url_candidates = [c.url] if c.url else []
             c.url_provenance = {c.url: "unknown"} if c.url else {}
+
+    before_final_dedupe = len(shortlist)
+    shortlist = _collapse_brand_domain_duplicates(shortlist)
+    shortlist = sorted(shortlist, key=lambda c: (c.relevance_score, c.similarity_score), reverse=True)[:target_count]
+    removed_final_dupes = before_final_dedupe - len(shortlist)
+    if removed_final_dupes > 0:
+        warnings.append(f"Collapsed {removed_final_dupes} brand/domain duplicate competitors.")
 
     if p in {"openai", "perplexity"} and not used_provider_web_search:
         warnings.append(f"{p.capitalize()} web search was not used; fallback search provider was applied.")

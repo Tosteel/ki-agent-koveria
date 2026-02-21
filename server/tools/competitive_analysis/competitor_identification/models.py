@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 class CompetitorCandidate(BaseModel):
     name: str
     url: str
+    source_type: str = "unknown"
     url_candidates: List[str] = Field(default_factory=list)
     url_provenance: Dict[str, str] = Field(default_factory=dict)
     snippet: str = ""
@@ -34,7 +35,7 @@ class CompetitorIdentificationRequest(BaseModel):
     product_profile: Optional[Dict[str, Any]] = None
     product_profile_path: Optional[str] = None
     provider: str = "openai"
-    max_queries: int = Field(default=8, ge=1, le=20)
+    max_queries: int = Field(default=12, ge=1, le=20)
     per_query_results: int = Field(default=6, ge=2, le=20)
     shortlist_size: int = Field(default=10, ge=3, le=50)
 
