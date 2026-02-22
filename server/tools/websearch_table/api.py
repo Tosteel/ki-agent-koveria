@@ -9,7 +9,7 @@ from server.core.settings import Settings
 from server.deps import get_current_user, settings as dep_settings
 
 from .models import SearchGenerateJsonRequest
-from .search_multitable import SearchService
+from .websearch_table import SearchService
 
 security = HTTPBearer(auto_error=False)
 
