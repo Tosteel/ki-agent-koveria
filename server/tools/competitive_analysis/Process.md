@@ -164,7 +164,7 @@ Output: `product_profile_qg.json`
 {
   "steps": [
     {
-      "tool": "feature_claim_extraction_quality_gate",
+      "tool": "competitive_extract_feature_claim_profile_quality_gate",
       "args": {
         "product_profile_path": "product_profile.json",
         "provider": "openai",
@@ -471,6 +471,38 @@ Output: `comparison_matrix.json`, `gaps_and_usps.json`
 }
 ```
 
+### Tool6b: Feature-Matrix-Gap Quality Gate (Backfill fehlender Wettbewerbs-Features)
+Input: `feature_matrix_gap.json`
+Prozess: Für `present=false`-Features pro Wettbewerber gezielte Nachrecherche (`<competitor> <feature>`) via Websuche + LLM-Extraktion; bei Treffer wird der Feature-Cell ergänzt und mit Source-Vermerk markiert.
+Output: `feature_matrix_gap_qg.json`
+
+```json
+{
+  "steps": [
+    {
+      "tool": "competitive_feature_matrix_gap_analysis_quality_gate",
+      "args": {
+        "feature_matrix_gap_path": "feature_matrix_gap.json",
+        "provider": "perplexity",
+        "max_missing_features_per_competitor": 30,
+        "max_urls_per_feature": 3,
+        "max_llm_calls": 400,
+        "min_confidence": 0.55,
+        "verbose_progress": true
+      }
+    },
+    {
+      "tool": "write_file",
+      "args": {
+        "path": "feature_matrix_gap_qg.json",
+        "content": "{steps[0].payload}",
+        "overwrite": true
+      }
+    }
+  ]
+}
+```
+
 ## Tool7: Strategische Analyse (SWOT & Positionierung)
 Input: `gaps_and_usps.json` + `comparison_matrix.json`
 Prozess: Interne vs. externe Faktoren ableiten, SWOT strukturieren, Positionierungskoordinaten berechnen
@@ -615,7 +647,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       }
     },
     {
-      "tool": "feature_claim_extraction_quality_gate",
+      "tool": "competitive_extract_feature_claim_profile_quality_gate",
       "args": {
         "product_profile_path": "product_profile.json",
         "provider": "perplexity",
@@ -749,11 +781,31 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       }
     },
     {
+      "tool": "competitive_feature_matrix_gap_analysis_quality_gate",
+      "args": {
+        "feature_matrix_gap_path": "feature_matrix_gap.json",
+        "provider": "perplexity",
+        "max_missing_features_per_competitor": 30,
+        "max_urls_per_feature": 3,
+        "max_llm_calls": 400,
+        "min_confidence": 0.55,
+        "verbose_progress": true
+      }
+    },
+    {
+      "tool": "write_file",
+      "args": {
+        "path": "feature_matrix_gap_qg.json",
+        "content": "{steps[18].payload}",
+        "overwrite": true
+      }
+    },
+    {
       "tool": "competitive_strategic_analysis",
       "args": {
-        "gaps_and_usps_path": "feature_matrix_gap.json",
+        "gaps_and_usps_path": "feature_matrix_gap_qg.json",
         "evidences": {
-          "comparison_matrix_path": "feature_matrix_gap.json"
+          "comparison_matrix_path": "feature_matrix_gap_qg.json"
         },
         "provider": "perplexity"
       }
@@ -762,7 +814,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       "tool": "write_file",
       "args": {
         "path": "strategic_analysis.json",
-        "content": "{steps[18].payload}",
+        "content": "{steps[20].payload}",
         "overwrite": true
       }
     },
@@ -775,8 +827,8 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
           "analysis_plan": "analysis_plan.json",
           "competitor_list": "competitor_list_qg.json",
           "competitor_profiles": "competitor_profiles_qg.json",
-          "comparison_matrix": "feature_matrix_gap.json",
-          "gaps_and_usps": "feature_matrix_gap.json",
+          "comparison_matrix": "feature_matrix_gap_qg.json",
+          "gaps_and_usps": "feature_matrix_gap_qg.json",
           "strategic_analysis": "strategic_analysis.json"
         },
         "max_chars_per_artifact": 10000
@@ -786,7 +838,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       "tool": "write_file",
       "args": {
         "path": "final_report.json",
-        "content": "{steps[20].payload}",
+        "content": "{steps[22].payload}",
         "overwrite": true
       }
     },

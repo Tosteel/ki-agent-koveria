@@ -11,7 +11,8 @@ from .models import (
 )
 
 
-TOOL_NAME = "feature_claim_extraction_quality_gate"
+TOOL_NAME = "competitive_extract_feature_claim_profile_quality_gate"
+LEGACY_TOOL_NAME = "feature_claim_extraction_quality_gate"
 
 
 def register(registry: ToolRegistry) -> None:
@@ -26,6 +27,7 @@ def register(registry: ToolRegistry) -> None:
             repair_feature_names=req.repair_feature_names,
             min_alpha_chars=req.min_alpha_chars,
             max_feature_name_length=req.max_feature_name_length,
+            allow_llm_fallback=req.allow_llm_fallback,
             user_root=ctx.settings.user_dir(ctx.user_id),
             work_root=ctx.settings.user_work_dir(ctx.user_id),
         )
@@ -36,6 +38,12 @@ def register(registry: ToolRegistry) -> None:
 
     registry.register(
         TOOL_NAME,
+        tool_feature_claim_extraction_quality_gate,
+        request_model=FeatureClaimExtractionQualityGateRequest,
+    )
+    # Backward compatibility alias for existing plans/pipelines.
+    registry.register(
+        LEGACY_TOOL_NAME,
         tool_feature_claim_extraction_quality_gate,
         request_model=FeatureClaimExtractionQualityGateRequest,
     )

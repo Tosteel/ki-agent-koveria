@@ -206,6 +206,55 @@ _PRICE_NOISE_HINTS = (
     "serviceplan",
 )
 
+_COMPETITOR_PRODUCT_HINTS = (
+    "e-bike",
+    "ebike",
+    "pedelec",
+    "electro bike",
+    "electric bike",
+    "faltrad",
+    "klapprad",
+    "folding bike",
+)
+
+_NON_PRODUCT_URL_HINTS = (
+    "/news/",
+    "/blog/",
+    "/forum/",
+    "/jobs",
+    "/career",
+    "/karriere",
+    "/impressum",
+    "/datenschutz",
+    "/privacy",
+    "/kontakt",
+    "/about",
+    "auto-motor-und-sport.de",
+)
+
+_BOILERPLATE_LINE_HINTS = (
+    "zum inhalt springen",
+    "skip to content",
+    "mein konto",
+    "warenkorb",
+    "wishlist",
+    "cookie",
+    "datenschutz",
+    "privacy",
+    "newsletter",
+    "kontakt",
+    "faq",
+    "agb",
+    "widerruf",
+    "lieferung",
+    "shipping",
+    "zahlung",
+    "payment",
+    "anmelden",
+    "login",
+    "register",
+)
+
 
 def _safe_list_str(values: Any) -> List[str]:
     if not isinstance(values, list):

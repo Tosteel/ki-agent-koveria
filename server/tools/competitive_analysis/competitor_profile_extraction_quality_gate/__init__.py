@@ -1,0 +1,3 @@
+from .competitor_profile_extraction_quality_gate import run_competitor_profile_extraction_quality_gate
+
+__all__ = ["run_competitor_profile_extraction_quality_gate"]

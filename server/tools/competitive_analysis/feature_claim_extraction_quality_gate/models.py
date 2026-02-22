@@ -16,6 +16,7 @@ class FeatureClaimExtractionQualityGateRequest(BaseModel):
     repair_feature_names: bool = True
     min_alpha_chars: int = Field(default=2, ge=1, le=10)
     max_feature_name_length: int = Field(default=96, ge=24, le=240)
+    allow_llm_fallback: bool = True
 
     @model_validator(mode="after")
     def _validate_input(self) -> "FeatureClaimExtractionQualityGateRequest":

@@ -92,6 +92,62 @@ def _compact_category_phrase(raw: str) -> str:
     return c
 
 
+def _strip_parenthetical(text: str) -> str:
+    s = _norm_text(text)
+    if not s:
+        return ""
+    # Remove technical/noisy parenthetical qualifiers in category anchor,
+    # e.g. "(0.25-0.72 kW)".
+    s = re.sub(r"\([^)]*\)", "", s)
+    s = re.sub(r"\s{2,}", " ", s).strip(" -_,.;:/")
+    return s
+
+
+def _split_category_variants(category_phrase: str, max_items: int = 3) -> List[str]:
+    """
+    Split broad category phrases into concise alternatives to avoid
+    repeated identical query prefixes.
+    Example: "Faltbares E-Bike / E-Klapprad" -> ["Faltbares E-Bike", "E-Klapprad"].
+    """
+    raw = _strip_parenthetical(category_phrase) or _norm_text(category_phrase)
+    if not raw:
+        return ["Produkt"]
+
+    normalized = re.sub(r"\s*/\s*", " | ", raw)
+    normalized = re.sub(r"\s+\|\s+", " | ", normalized)
+    parts = [p.strip(" -_,.;:") for p in normalized.split("|")]
+
+    # Also split very broad conjunction forms.
+    expanded: List[str] = []
+    for p in parts:
+        if not p:
+            continue
+        # Keep short compounds, split only if clearly two category alternatives.
+        if re.search(r"\b(?:und|or|oder)\b", p, flags=re.IGNORECASE) and len(p.split()) >= 4:
+            sub = re.split(r"\b(?:und|or|oder)\b", p, flags=re.IGNORECASE)
+            for x in sub:
+                xx = _compact_category_phrase(_norm_text(x))
+                if xx:
+                    expanded.append(xx)
+        else:
+            expanded.append(_compact_category_phrase(p))
+
+    out: List[str] = []
+    seen: set[str] = set()
+    for p in expanded:
+        s = _norm_text(p)
+        if not s:
+            continue
+        key = s.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(s)
+        if len(out) >= max_items:
+            break
+    return out or [_compact_category_phrase(raw)]
+
+
 def _extract_power_hints(profile: Dict[str, Any], product_name: str) -> List[str]:
     hints: List[str] = []
     text_blobs: List[str] = [_norm_text(product_name)]
@@ -377,6 +433,33 @@ def _clean_feature_terms(values: List[str], max_items: int = 20) -> List[str]:
     return out
 
 
+def _infer_category_phrase_when_unknown(
+    *,
+    product_name: str,
+    segments: List[str],
+    use_cases: List[str],
+    functionality_terms: List[str],
+) -> str:
+    blob = " | ".join(
+        [str(product_name or "")]
+        + [str(x or "") for x in (segments or [])[:8]]
+        + [str(x or "") for x in (use_cases or [])[:8]]
+        + [str(x or "") for x in (functionality_terms or [])[:8]]
+    ).lower()
+
+    keyword_map = [
+        (("saug", "wisch", "mopp", "vacuum", "robot"), "Saug- und Wischroboter"),
+        (("kaffeevollautomat", "espresso", "cappuccino", "coffee machine"), "Kaffeevollautomat"),
+        (("wechselrichter", "inverter", "mppt", "hybrid-wr"), "Wechselrichter"),
+        (("li-ion", "lithium-ion", "rechargeable battery", "akku", "usb-c"), "Lithium-Ionen Akku"),
+        (("lüftung", "ventilation", "air handling"), "Lüftungssystem"),
+    ]
+    for keys, label in keyword_map:
+        if any(k in blob for k in keys):
+            return label
+    return "Produktkategorie"
+
+
 def _build_competitor_queries(
     *,
     profile: Dict[str, Any],
@@ -393,7 +476,15 @@ def _build_competitor_queries(
     name = _norm_text(product_name)
     brand = _norm_text(manufacturer)
     category = _clean_category(product_category)
-    category_phrase = _compact_category_phrase(category if category != "unknown" else "Produkt")
+    if category != "unknown":
+        category_phrase = _compact_category_phrase(category)
+    else:
+        category_phrase = _infer_category_phrase_when_unknown(
+            product_name=name,
+            segments=segments,
+            use_cases=use_cases,
+            functionality_terms=functionality_terms,
+        )
     power_hints = _extract_power_hints(profile, name)
 
     anchor = name or brand
@@ -411,16 +502,24 @@ def _build_competitor_queries(
 
     primary_power = _pick_primary_power_hint(power_hints)
     category_anchor = category_phrase
-    if primary_power:
-        category_anchor = f"{category_phrase} ({primary_power})"
+    category_variants = _split_category_variants(category_phrase, max_items=3)
+    base_terms = category_variants if category_variants else [category_anchor]
 
     # Category queries: concise and product-page oriented.
-    category_queries: List[str] = [
-        f"{category_anchor} Wettbewerber Vergleich",
-        f"{category_anchor} ähnliche Produkte zu {anchor}",
-        f"{category_anchor} Produktserie technische Daten",
-        f"{category_anchor} product page specs",
+    category_templates = [
+        "{cat} Wettbewerber Vergleich",
+        "{cat} ähnliche Produkte zu {anchor}",
+        "{cat} Produktserie technische Daten",
+        "{cat} product page specs",
     ]
+    category_queries: List[str] = []
+    for idx, tmpl in enumerate(category_templates):
+        cat = base_terms[idx % len(base_terms)]
+        category_queries.append(tmpl.format(cat=cat, anchor=anchor).strip())
+
+    # Technical range hint only once (avoid same technical prefix everywhere).
+    if primary_power:
+        category_queries.append(f"{base_terms[0]} {primary_power} technische Daten".strip())
 
     # Use an intent rotation so we don't generate near-duplicate suffix variants
     # for the same base term (e.g. "... Nominal voltage", "... datasheet", "... specs").
@@ -435,7 +534,8 @@ def _build_competitor_queries(
         if not term:
             continue
         tmpl = feature_intents[idx % len(feature_intents)]
-        category_queries.append(tmpl.format(cat=category_anchor, term=term).strip())
+        cat = base_terms[idx % len(base_terms)]
+        category_queries.append(tmpl.format(cat=cat, term=term).strip())
 
     if brand and name:
         # Avoid duplicated brand prefix when product_name already includes brand.
@@ -453,9 +553,9 @@ def _build_competitor_queries(
         if sig:
             category_queries.extend(
                 [
-                    f"{category_anchor} {sig}",
-                    f"{category_anchor} {sig} competitors",
-                    f"{category_anchor} {sig} datasheet",
+                    f"{base_terms[0]} {sig}",
+                    f"{base_terms[min(1, len(base_terms)-1)]} {sig} competitors",
+                    f"{base_terms[0]} {sig} datasheet",
                 ]
             )
 

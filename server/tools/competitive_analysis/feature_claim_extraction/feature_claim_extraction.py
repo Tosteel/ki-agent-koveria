@@ -76,6 +76,7 @@ _CATEGORY_HINTS = {
     "kühl": "hvac",
     "compressor": "compressor",
 }
+_GENERIC_BAD_FEATURE_NAMES = {"measurement", "unknown", "n/a", "na", "-", "x", "xx"}
 
 
 def _parse_json_strictish(text: str) -> Dict[str, Any]:
@@ -293,6 +294,158 @@ def _build_semantic_schema() -> Dict[str, Any]:
     }
 
 
+def _build_feature_refine_schema() -> Dict[str, Any]:
+    feature_obj = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "name": {"type": "string"},
+            "value": {"oneOf": [{"type": "number"}, {"type": "string"}, {"type": "integer"}]},
+            "unit": {"type": "string"},
+            "normalized_value": {"oneOf": [{"type": "number"}, {"type": "string"}, {"type": "integer"}, {"type": "null"}]},
+            "normalized_unit": {"type": "string"},
+            "source": {"type": "string"},
+        },
+        "required": ["name", "value", "unit", "normalized_value", "normalized_unit", "source"],
+    }
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "normalized_features": {"type": "array", "items": feature_obj},
+            "performance_parameters": {"type": "array", "items": feature_obj},
+            "metadata_patch": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "product_name": {"type": ["string", "null"]},
+                    "manufacturer": {"type": ["string", "null"]},
+                },
+                "required": ["product_name", "manufacturer"],
+            },
+            "quality_notes": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["normalized_features", "performance_parameters", "metadata_patch", "quality_notes"],
+    }
+
+
+def _clean_name_for_features(name: str) -> str:
+    n = str(name or "").strip()
+    n = re.sub(r"\s+", " ", n).strip()
+    n = re.sub(r"\s*[=:]\s*$", "", n)
+    return n
+
+
+def _is_bad_feature_name(name: str) -> bool:
+    n = _clean_name_for_features(name)
+    nl = n.lower()
+    if not n:
+        return True
+    if nl in _GENERIC_BAD_FEATURE_NAMES:
+        return True
+    if len(re.findall(r"[A-Za-zÄÖÜäöü]", n)) < 2:
+        return True
+    if re.match(r"^\d+(?:[.,]\d+)?(?:\s*[x×]\s*\d+(?:[.,]\d+)?){1,4}\s*[x×]?$", n):
+        return True
+    return False
+
+
+def _to_feature_list(raw: Any) -> List[NormalizedFeature]:
+    out: List[NormalizedFeature] = []
+    if not isinstance(raw, list):
+        return out
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            f = NormalizedFeature(**item)
+        except Exception:
+            continue
+        f.name = _clean_name_for_features(f.name)
+        if _is_bad_feature_name(f.name):
+            continue
+        out.append(f)
+    return out
+
+
+def _llm_refine_features(
+    *,
+    provider: str,
+    metadata: Dict[str, Any],
+    features: List[NormalizedFeature],
+    performance: List[NormalizedFeature],
+    context: str,
+    warnings: List[str],
+) -> Dict[str, Any]:
+    schema = _build_feature_refine_schema()
+    system = (
+        "Du bist ein Datenqualitäts-Editor für technische Produktdaten. "
+        "Bereinige und normalisiere NUR die übergebenen Features semantisch. "
+        "Regeln: "
+        "1) Keine neuen Fakten erfinden. "
+        "2) Vermeide generische Rohlabels; benenne Features semantisch klar und eindeutig. "
+        "3) Entferne verkettete/kaputte Namen und behalte pro Feature nur sinnvolle Einträge. "
+        "4) Falls mehrere Werte zu einer Kennzahl gehören, nutze klare Feature-Namen statt Rohketten. "
+        "5) performance_parameters muss technisch aussagekräftig bleiben und darf nicht leer sein, wenn technische Daten vorhanden sind. "
+        "6) metadata_patch.product_name/manufacturer nur setzen, wenn aus Kontext belastbar; sonst null. "
+        "Antworte nur als JSON gemäß Schema."
+    )
+    user = (
+        "Input:\n"
+        + json.dumps(
+            {
+                "metadata": metadata,
+                "normalized_features": [f.model_dump() for f in features[:220]],
+                "performance_parameters": [f.model_dump() for f in performance[:220]],
+                "context_excerpt": context[:12000],
+            },
+            ensure_ascii=False,
+        )
+    )
+
+    p = str(provider or "ionos").strip().lower()
+    if p not in {"ionos", "openai", "perplexity"}:
+        p = "ionos"
+
+    if p in {"openai", "perplexity"}:
+        client = LlmOpenai() if p == "openai" else LlmPerplexity()
+        if not client.enabled():
+            warnings.append(f"{p} feature refinement skipped; provider not configured.")
+            return {}
+        try:
+            resp = client._call(
+                input_messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                text_format={"type": "json_schema", "name": "feature_refinement", "schema": schema, "strict": False},
+            )
+            return _parse_json_strictish(_openai_extract_output_text(resp))
+        except Exception as exc:
+            warnings.append(f"{p} feature refinement failed: {exc}")
+            return {}
+
+    client_i = IonosLLM()
+    if not client_i.enabled():
+        warnings.append("IONOS feature refinement skipped; provider not configured.")
+        return {}
+    try:
+        comp = client_i.chat_completions(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {"name": "feature_refinement", "schema": schema, "strict": True},
+            },
+        )
+        return _parse_json_strictish(client_i.extract_text(comp))
+    except Exception as exc:
+        warnings.append(f"IONOS feature refinement failed: {exc}")
+        return {}
+
+
 def _openai_extract_output_text(resp: Dict[str, Any]) -> str:
     out = ""
     for item in resp.get("output", []):
@@ -444,6 +597,60 @@ def extract_feature_claim_profile(
     target_segments = _dedupe_by_key(_safe_list_str(semantic.get("target_segments")), lambda s: s.lower())
     use_cases = _dedupe_by_key(_safe_list_str(semantic.get("use_cases")), lambda s: s.lower())
     differentiators = _dedupe_by_key(_safe_list_str(semantic.get("differentiators")), lambda s: s.lower())
+
+    # LLM-based feature refinement to improve semantic names and reduce noisy chains early in step 2.
+    refine = _llm_refine_features(
+        provider=provider,
+        metadata=metadata,
+        features=features,
+        performance=performance,
+        context=combined_text or raw_text or section_text,
+        warnings=warnings,
+    )
+    if isinstance(refine, dict) and refine:
+        refined_features = _to_feature_list(refine.get("normalized_features"))
+        refined_performance = _to_feature_list(refine.get("performance_parameters"))
+        if refined_features:
+            features = _dedupe_by_key(
+                refined_features,
+                lambda f: f"{f.name.lower()}|{f.normalized_value}|{f.normalized_unit.lower()}",
+            )
+        else:
+            # Guard baseline features too
+            features = _dedupe_by_key(
+                [f for f in features if not _is_bad_feature_name(f.name)],
+                lambda f: f"{f.name.lower()}|{f.normalized_value}|{f.normalized_unit.lower()}",
+            )
+        if refined_performance:
+            performance = _dedupe_by_key(
+                refined_performance,
+                lambda f: f"{f.name.lower()}|{f.normalized_value}|{f.normalized_unit.lower()}",
+            )
+        else:
+            performance = _dedupe_by_key(
+                [f for f in features if any(h in f"{f.name} {f.source}".lower() for h in _PERFORMANCE_HINTS)],
+                lambda f: f"{f.name.lower()}|{f.normalized_value}|{f.normalized_unit.lower()}",
+            )
+        mp = refine.get("metadata_patch") if isinstance(refine.get("metadata_patch"), dict) else {}
+        pn = str(mp.get("product_name") or "").strip()
+        mf = str(mp.get("manufacturer") or "").strip()
+        if pn:
+            metadata["product_name"] = pn
+        if mf:
+            metadata["manufacturer"] = mf
+        qnotes = _safe_list_str(refine.get("quality_notes"))
+        for n in qnotes[:6]:
+            warnings.append(f"feature_refinement_note: {n}")
+    else:
+        # Baseline guard when no refinement result is available
+        features = _dedupe_by_key(
+            [f for f in features if not _is_bad_feature_name(f.name)],
+            lambda f: f"{f.name.lower()}|{f.normalized_value}|{f.normalized_unit.lower()}",
+        )
+        performance = _dedupe_by_key(
+            [f for f in performance if not _is_bad_feature_name(f.name)],
+            lambda f: f"{f.name.lower()}|{f.normalized_value}|{f.normalized_unit.lower()}",
+        )
 
     p = str(provider or "ionos").strip().lower()
     if p not in {"ionos", "openai", "perplexity"}:

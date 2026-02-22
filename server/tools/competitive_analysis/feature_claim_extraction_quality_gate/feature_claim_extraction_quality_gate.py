@@ -33,6 +33,12 @@ _GENERIC_BAD_NAMES = {
     "x",
     "xx",
 }
+_PSEUDO_NAME_RES = [
+    re.compile(r"^vdc\s*=", re.IGNORECASE),
+    re.compile(r"^idc\s*=", re.IGNORECASE),
+    re.compile(r"^udc\s*=", re.IGNORECASE),
+    re.compile(r"^[x×/\-.,\s\d]+$"),
+]
 
 
 def _resolve_input_path(path: str, user_root: Path, work_root: Path) -> Path:
@@ -153,6 +159,54 @@ def _openai_extract_output_text(resp: Dict[str, Any]) -> str:
     return out.strip()
 
 
+def _extract_any_output_text(resp: Dict[str, Any]) -> str:
+    txt = _openai_extract_output_text(resp)
+    if txt:
+        return txt
+    try:
+        return LlmPerplexity._extract_text(resp)  # type: ignore[attr-defined]
+    except Exception:
+        return ""
+
+
+def _feature_to_prompt_dict(f: NormalizedFeature, *, include_source: bool) -> Dict[str, Any]:
+    src = _clean_text(f.source)
+    if include_source and len(src) > 180:
+        src = src[:180].rstrip() + "..."
+    return {
+        "name": _clean_text(f.name),
+        "value": f.value,
+        "unit": _clean_text(f.unit),
+        "normalized_value": f.normalized_value,
+        "normalized_unit": _clean_text(f.normalized_unit),
+        "source": src if include_source else "",
+    }
+
+
+def _build_llm_user_payload(
+    *,
+    profile: ProductProfile,
+    max_context_chars: int,
+    include_source: bool,
+) -> str:
+    nf = [_feature_to_prompt_dict(f, include_source=include_source) for f in (profile.normalized_features or [])]
+    pf = [_feature_to_prompt_dict(f, include_source=include_source) for f in (profile.performance_parameters or [])]
+    payload = {
+        "product_category": profile.product_category,
+        "normalized_features": nf,
+        "performance_parameters": pf,
+    }
+    # Keep prompt JSON syntactically valid; shrink by dropping tail items instead of hard string cutting.
+    while len(json.dumps(payload, ensure_ascii=False)) > max_context_chars and (payload["normalized_features"] or payload["performance_parameters"]):
+        if len(payload["normalized_features"]) >= len(payload["performance_parameters"]) and payload["normalized_features"]:
+            payload["normalized_features"].pop()
+        elif payload["performance_parameters"]:
+            payload["performance_parameters"].pop()
+        else:
+            break
+    return "Eingabeprofil:\n" + json.dumps(payload, ensure_ascii=False)
+
+
 def _llm_clean_features(
     *,
     provider: str,
@@ -167,42 +221,49 @@ def _llm_clean_features(
     system = (
         "Du bist ein Quality-Gate für Produkt-Feature-Extraktion. "
         "Korrigiere und bereinige NUR normalized_features/performance_parameters. "
-        "Regeln: 1) Unsinnige Feature-Namen entfernen (z.B. reine Dimensionsfragmente wie '457 × 350 ×', generische Namen wie 'measurement'). "
+        "Regeln: 1) Unsinnige, unvollstaendige oder offensichtlich generische Feature-Namen entfernen. "
         "2) Abgeschnittene Namen sinnvoll reparieren. 3) Keine neuen Fakten erfinden. "
         "4) Werte/Einheiten nur aus vorhandenen Daten übernehmen. "
         "5) Nur gültiges JSON gemäß Schema."
     )
-    user = (
-        "Eingabeprofil:\n"
-        + json.dumps(
-            {
-                "product_category": profile.product_category,
-                "normalized_features": [f.model_dump() for f in (profile.normalized_features or [])],
-                "performance_parameters": [f.model_dump() for f in (profile.performance_parameters or [])],
-            },
-            ensure_ascii=False,
-        )[:max_context_chars]
-    )
+    users = [
+        _build_llm_user_payload(profile=profile, max_context_chars=max_context_chars, include_source=True),
+        _build_llm_user_payload(profile=profile, max_context_chars=min(max_context_chars, 14000), include_source=False),
+        _build_llm_user_payload(profile=profile, max_context_chars=min(max_context_chars, 9000), include_source=False),
+    ]
 
     if p in {"openai", "perplexity"}:
         client = LlmOpenai() if p == "openai" else LlmPerplexity()
         if not client.enabled():
             raise HTTPException(status_code=400, detail=f"{p} not configured for feature_claim_extraction_quality_gate.")
-        fmt = {"type": "json_schema", "name": "feature_claim_quality_gate", "schema": schema, "strict": False}
-        try:
-            resp = client._call(
-                input_messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                text_format=fmt,
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"{p} quality gate failed: {exc}") from exc
-        parsed = _parse_json_strictish(_openai_extract_output_text(resp))
-        if not parsed:
-            raise HTTPException(status_code=502, detail=f"{p} quality gate returned invalid JSON.")
-        return parsed
+        rf = {
+            "type": "json_schema",
+            "name": "feature_claim_quality_gate",
+            "schema": schema,
+            "strict": True,
+        }
+        errors: List[str] = []
+        for idx, user in enumerate(users, start=1):
+            try:
+                resp = client._call(
+                    input_messages=[
+                        {
+                            "role": "system",
+                            "content": system
+                            + " WICHTIG: Gib ausschließlich ein einzelnes JSON-Objekt zurück. Kein Markdown, kein Fließtext.",
+                        },
+                        {"role": "user", "content": user},
+                    ],
+                    text_format=rf,
+                )
+            except Exception as exc:
+                errors.append(f"attempt_{idx}: {exc}")
+                continue
+            parsed = _parse_json_strictish(_extract_any_output_text(resp))
+            if parsed and isinstance(parsed.get("normalized_features"), list) and isinstance(parsed.get("performance_parameters"), list):
+                return parsed
+            errors.append(f"attempt_{idx}: invalid_json_or_schema")
+        raise HTTPException(status_code=502, detail=f"{p} quality gate returned invalid JSON. {' | '.join(errors)}")
 
     client_i = IonosLLM()
     if not client_i.enabled():
@@ -265,7 +326,37 @@ def _feature_quality_reason(
         return "dimension_fragment_name"
     if _count_alpha_chars(n) < min_alpha_chars:
         return "insufficient_alpha_chars"
+    if any(rx.search(n) for rx in _PSEUDO_NAME_RES):
+        return "pseudo_feature_name"
+    if n.count("/") >= 3 and len(re.findall(r"\d+(?:[.,]\d+)?", n)) >= 4:
+        return "concatenated_measurement_chain"
     return None
+
+
+def _dedupe_features(features: List[NormalizedFeature]) -> List[NormalizedFeature]:
+    out: List[NormalizedFeature] = []
+    seen: set[str] = set()
+    for f in features:
+        key = (
+            f"{str(f.name).strip().lower()}|{str(f.value).strip()}|{str(f.unit).strip().lower()}|"
+            f"{str(f.normalized_value)}|{str(f.normalized_unit).strip().lower()}"
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(f)
+    return out
+
+
+def _normalize_product_name(raw_name: Any) -> Any:
+    n = _clean_text(str(raw_name or ""))
+    if not n:
+        return raw_name
+    n = n.replace("_", " ")
+    n = re.sub(r"^(?:[A-Z]{2}\s+)?(?:DS\s+)?", "", n, flags=re.IGNORECASE)
+    n = re.sub(r"\b(?:datenblatt|datasheet|data\s*sheet|spec(?:ification)?s?|pdf)\b", "", n, flags=re.IGNORECASE)
+    n = re.sub(r"\s{2,}", " ", n).strip(" -_,.;")
+    return n or raw_name
 
 
 def _filter_and_repair_features(
@@ -320,6 +411,7 @@ def run_feature_claim_extraction_quality_gate(
     repair_feature_names: bool,
     min_alpha_chars: int,
     max_feature_name_length: int,
+    allow_llm_fallback: bool,
     user_root: Path,
     work_root: Path,
 ) -> tuple[ProductProfile, FeatureClaimQualityReport]:
@@ -331,25 +423,93 @@ def run_feature_claim_extraction_quality_gate(
     )
 
     input_feature_count = len(profile.normalized_features or [])
-    llm_result = _llm_clean_features(
-        provider=provider,
-        profile=profile,
-        max_context_chars=max_context_chars,
-    )
+    llm_failed = False
+    llm_error_msg = ""
+    try:
+        llm_result = _llm_clean_features(
+            provider=provider,
+            profile=profile,
+            max_context_chars=max_context_chars,
+        )
+    except HTTPException as exc:
+        llm_failed = True
+        llm_error_msg = str(getattr(exc, "detail", exc))
+        if not allow_llm_fallback:
+            raise HTTPException(status_code=502, detail=f"quality_gate_without_fallback_failed: {llm_error_msg}") from exc
+        llm_result = {}
 
     llm_features_raw = llm_result.get("normalized_features") if isinstance(llm_result.get("normalized_features"), list) else []
     llm_perf_raw = llm_result.get("performance_parameters") if isinstance(llm_result.get("performance_parameters"), list) else []
     quality_notes = [str(x).strip() for x in (llm_result.get("quality_notes") or []) if str(x or "").strip()]
 
-    cleaned_features = [NormalizedFeature(**x) for x in llm_features_raw if isinstance(x, dict)]
-    filtered_performance = [NormalizedFeature(**x) for x in llm_perf_raw if isinstance(x, dict)]
+    cleaned_features_in = [NormalizedFeature(**x) for x in llm_features_raw if isinstance(x, dict)]
+    source_features_in = list(profile.normalized_features or [])
+    llm_performance_in = [NormalizedFeature(**x) for x in llm_perf_raw if isinstance(x, dict)]
+    source_performance_in = list(profile.performance_parameters or [])
 
     repaired = 0
     reason_counts: Dict[str, int] = {}
 
+    cleaned_features, repaired_a, reasons_a = _filter_and_repair_features(
+        features=cleaned_features_in,
+        remove_nonsensical_features=remove_nonsensical_features,
+        repair_feature_names=repair_feature_names,
+        min_alpha_chars=min_alpha_chars,
+        max_feature_name_length=max_feature_name_length,
+    )
+    cleaned_features = _dedupe_features(cleaned_features)
+    repaired += repaired_a
+    for k, v in reasons_a.items():
+        reason_counts[k] = reason_counts.get(k, 0) + v
+
+    if not cleaned_features:
+        fallback_features, repaired_f, reasons_f = _filter_and_repair_features(
+            features=source_features_in,
+            remove_nonsensical_features=remove_nonsensical_features,
+            repair_feature_names=repair_feature_names,
+            min_alpha_chars=min_alpha_chars,
+            max_feature_name_length=max_feature_name_length,
+        )
+        cleaned_features = _dedupe_features(fallback_features)
+        repaired += repaired_f
+        for k, v in reasons_f.items():
+            reason_counts[k] = reason_counts.get(k, 0) + v
+
+    filtered_performance, repaired_b, reasons_b = _filter_and_repair_features(
+        features=llm_performance_in,
+        remove_nonsensical_features=remove_nonsensical_features,
+        repair_feature_names=repair_feature_names,
+        min_alpha_chars=min_alpha_chars,
+        max_feature_name_length=max_feature_name_length,
+    )
+    filtered_performance = _dedupe_features(filtered_performance)
+    repaired += repaired_b
+    for k, v in reasons_b.items():
+        reason_counts[k] = reason_counts.get(k, 0) + v
+
+    if not filtered_performance:
+        fallback_perf, repaired_c, reasons_c = _filter_and_repair_features(
+            features=source_performance_in,
+            remove_nonsensical_features=remove_nonsensical_features,
+            repair_feature_names=repair_feature_names,
+            min_alpha_chars=min_alpha_chars,
+            max_feature_name_length=max_feature_name_length,
+        )
+        fallback_perf = _dedupe_features(fallback_perf)
+        filtered_performance = fallback_perf
+        repaired += repaired_c
+        for k, v in reasons_c.items():
+            reason_counts[k] = reason_counts.get(k, 0) + v
+
+    if not filtered_performance:
+        inferred_perf = [f for f in cleaned_features if f.normalized_value is not None and str(f.unit or "").strip()]
+        filtered_performance = _dedupe_features(inferred_perf[:24])
+
     warnings = list(profile.extraction_warnings or [])
     dropped = input_feature_count - len(cleaned_features)
     warnings.append(f"Quality gate corrected by LLM provider={provider}.")
+    if llm_failed:
+        warnings.append(f"Quality gate LLM fallback used: {llm_error_msg}")
     if dropped > 0:
         warnings.append(f"Quality gate removed {dropped} nonsensical normalized_features.")
     if repaired > 0:
@@ -365,14 +525,20 @@ def run_feature_claim_extraction_quality_gate(
         drop_reasons=reason_counts,
         notes=[],
     )
-    report.notes.append("post_llm_guard=disabled")
+    report.notes.append("post_llm_guard=enabled")
     report.notes.append(f"llm_provider={provider}")
+    report.notes.append(f"llm_fallback_used={str(llm_failed).lower()}")
+    if not llm_performance_in and filtered_performance:
+        report.notes.append("performance_parameters_fallback=source_or_inferred")
+
+    metadata = dict(profile.metadata or {})
+    metadata["product_name"] = _normalize_product_name(metadata.get("product_name"))
 
     cleaned_profile = ProductProfile(
         schema_version=profile.schema_version,
         provider=profile.provider,
         product_category=profile.product_category,
-        metadata=profile.metadata,
+        metadata=metadata,
         normalized_features=cleaned_features,
         performance_parameters=filtered_performance,
         price_indicators=profile.price_indicators,

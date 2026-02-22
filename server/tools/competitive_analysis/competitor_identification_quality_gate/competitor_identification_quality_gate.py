@@ -38,6 +38,16 @@ _GENERIC_LISTING_HINTS = (
     "wiki",
 )
 
+_GENERIC_NAME_HINTS = (
+    "saug- und wischroboter",
+    "saugroboter",
+    "wischroboter",
+    "kaffeevollautomat",
+    "wechselrichter",
+    "rechargeable battery",
+    "lithium-ion rechargeable battery",
+)
+
 
 def _parse_json_strictish(text: str) -> Dict[str, Any]:
     if not text:
@@ -240,6 +250,27 @@ def _is_self_or_variant(c: CompetitorCandidate, product_name: str, manufacturer:
     return False
 
 
+def _tokenize_category(category: str) -> List[str]:
+    toks = re.findall(r"[a-z0-9]+", str(category or "").lower())
+    return [t for t in toks if len(t) >= 5]
+
+
+def _is_generic_name_without_model_signal(c: CompetitorCandidate, product_category: str) -> bool:
+    name = str(c.name or "").strip().lower()
+    if not name:
+        return True
+    if _model_signal(name):
+        return False
+
+    has_generic_hint = any(h in name for h in _GENERIC_NAME_HINTS)
+    cat_tokens = _tokenize_category(product_category)
+    has_category_overlap = bool(cat_tokens) and any(t in name for t in cat_tokens)
+
+    # Strenger nur dann droppen, wenn klar generischer Name vorliegt
+    # (Kategoriebegriff ohne Modellsignal).
+    return has_generic_hint or has_category_overlap
+
+
 def _dedupe_by_name_domain(candidates: List[CompetitorCandidate]) -> Tuple[List[CompetitorCandidate], int]:
     best: Dict[Tuple[str, str], CompetitorCandidate] = {}
     removed = 0
@@ -280,6 +311,29 @@ def _llm_candidate_judge_schema() -> Dict[str, Any]:
         },
         "required": ["is_competitor_product", "confidence", "reason_code", "short_reason"],
     }
+
+
+def _llm_rejection_reason_code(
+    *,
+    is_competitor: bool,
+    reason_code: str,
+) -> str:
+    if is_competitor:
+        return ""
+    rc = str(reason_code or "").strip().lower()
+    allowed_negative = {
+        "generic_listing",
+        "category_or_brand_node",
+        "self_or_variant",
+        "non_product_content",
+        "insufficient_signal",
+        "other",
+    }
+    if rc in allowed_negative:
+        return rc
+    # Schützt gegen inkonsistente LLM-Antworten wie:
+    # is_competitor_product=false + reason_code=valid_product_competitor
+    return "inconsistent_label"
 
 
 def _llm_validate_candidate(
@@ -326,11 +380,9 @@ def _llm_validate_candidate(
             return {}
         rf = {
             "type": "json_schema",
-            "json_schema": {
-                "name": "competitor_candidate_validation",
-                "schema": schema,
-                "strict": False,
-            },
+            "name": "competitor_candidate_validation",
+            "schema": schema,
+            "strict": False,
         }
         try:
             resp = client._call(  # type: ignore[attr-defined]
@@ -367,6 +419,100 @@ def _llm_validate_candidate(
         return _parse_json_strictish(c2.extract_text(completion))
     except Exception as exc:
         warnings.append(f"IONOS LLM candidate validation failed for '{candidate.name}': {exc}")
+        return {}
+
+
+def _llm_name_normalization_schema() -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "normalized_name": {"type": "string"},
+            "changed": {"type": "boolean"},
+            "confidence": {"type": "number"},
+            "reason": {"type": "string"},
+        },
+        "required": ["normalized_name", "changed", "confidence", "reason"],
+    }
+
+
+def _llm_normalize_candidate_name(
+    *,
+    provider: str,
+    candidate: CompetitorCandidate,
+    product_category: str,
+    warnings: List[str],
+) -> Dict[str, Any]:
+    p = str(provider or "perplexity").strip().lower()
+    if p not in {"openai", "perplexity", "ionos"}:
+        p = "perplexity"
+
+    schema = _llm_name_normalization_schema()
+    system = (
+        "Du normalisierst Wettbewerbernamen auf die präzise Produkt-/Modellbezeichnung. "
+        "Entferne generische Zusätze (z. B. Produkttyp, Marketing-Text, Satzteile nach 'mit/für/inkl.'). "
+        "Behalte Hersteller + Modell. Keine Halluzinationen. Wenn unsicher, unverändert zurückgeben."
+    )
+    user = json.dumps(
+        {
+            "product_category": product_category,
+            "candidate": {
+                "name": candidate.name,
+                "url": candidate.url,
+                "snippet": candidate.snippet,
+                "source_type": candidate.source_type,
+            },
+            "output_rule": "Return best concise product/model name.",
+        },
+        ensure_ascii=False,
+    )
+
+    if p in {"openai", "perplexity"}:
+        client = LlmOpenai() if p == "openai" else LlmPerplexity()
+        if not client.enabled():
+            warnings.append(f"{p} not configured; skipped LLM name normalization.")
+            return {}
+        fmt = {
+            "type": "json_schema",
+            "name": "competitor_name_normalization",
+            "schema": schema,
+            "strict": False,
+        }
+        try:
+            resp = client._call(  # type: ignore[attr-defined]
+                input_messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                text_format=fmt,
+            )
+            return _parse_json_strictish(_extract_any_output_text(resp))
+        except Exception as exc:
+            warnings.append(f"{p} LLM name normalization failed for '{candidate.name}': {exc}")
+            return {}
+
+    c2 = IonosLLM()
+    if not c2.enabled():
+        warnings.append("IONOS not configured; skipped LLM name normalization.")
+        return {}
+    try:
+        completion = c2.chat_completions(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "competitor_name_normalization",
+                    "schema": schema,
+                    "strict": True,
+                },
+            },
+        )
+        return _parse_json_strictish(c2.extract_text(completion))
+    except Exception as exc:
+        warnings.append(f"IONOS LLM name normalization failed for '{candidate.name}': {exc}")
         return {}
 
 
@@ -409,6 +555,9 @@ def run_competitor_identification_quality_gate(
     warnings = list(cl.extraction_warnings or [])
     llm_checked = 0
     llm_dropped = 0
+    llm_name_checked = 0
+    llm_name_changed = 0
+    llm_name_max_checks = max(0, min(40, int(max_llm_checks)))
 
     for c in cl.competitors:
         reasons: List[str] = []
@@ -424,6 +573,29 @@ def run_competitor_identification_quality_gate(
 
         if drop_manufacturer_nodes_without_model_signal and _is_manufacturer_node_without_model_signal(c):
             reasons.append("manufacturer_node_without_model_signal")
+
+        if not reasons and llm_name_checked < llm_name_max_checks:
+            llm_name_checked += 1
+            normalized = _llm_normalize_candidate_name(
+                provider=provider,
+                candidate=c,
+                product_category=product_category,
+                warnings=warnings,
+            )
+            if normalized:
+                raw_new_name = str(normalized.get("normalized_name") or "").strip()
+                changed = bool(normalized.get("changed"))
+                conf = float(normalized.get("confidence") or 0.0)
+                if changed and raw_new_name and raw_new_name != c.name and conf >= 0.5:
+                    original_name = c.name
+                    c = c.model_copy(update={"name": raw_new_name})
+                    llm_name_changed += 1
+                    warnings.append(
+                        f"Normalized competitor name via LLM: '{original_name}' -> '{raw_new_name}' (confidence={conf:.2f})"
+                    )
+
+        if not reasons and _is_generic_name_without_model_signal(c, product_category):
+            reasons.append("generic_name_without_model_signal")
 
         llm_conf: float | None = None
         if not reasons and enable_llm_snippet_validation and llm_checked < max(0, int(max_llm_checks)):
@@ -442,7 +614,8 @@ def run_competitor_identification_quality_gate(
                 llm_conf = conf
                 rc = str(judged.get("reason_code") or "other").strip().lower()
                 if (not is_competitor) and conf >= float(llm_min_keep_confidence):
-                    reasons.append(f"llm_{rc or 'rejected'}")
+                    reject_code = _llm_rejection_reason_code(is_competitor=is_competitor, reason_code=rc)
+                    reasons.append(f"llm_{reject_code or 'rejected'}")
                     llm_dropped += 1
 
         if reasons:
@@ -472,6 +645,9 @@ def run_competitor_identification_quality_gate(
         warnings.append(
             f"Identification QG LLM validation checked={llm_checked}, dropped={llm_dropped}, min_keep_confidence={llm_min_keep_confidence}."
         )
+    warnings.append(
+        f"Identification QG LLM name normalization checked={llm_name_checked}, changed={llm_name_changed}, max_checks={llm_name_max_checks}."
+    )
     if dropped_details:
         max_detail_lines = 80
         warnings.extend(dropped_details[:max_detail_lines])

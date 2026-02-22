@@ -117,3 +117,38 @@ Empfehlung:
 - Mittelfristig: Migration auf PostgreSQL für `users`, `tasks`, `agents`, `triggers`, `runs`.
 - Optional ergänzen: Redis für Queue, Caching und verteilte Locks.
 - JSON künftig nur noch für Import/Export verwenden.
+
+## Idee: Quality-Gate Verbesserungen (Competitor/Profile Extraction)
+
+1. Varianten sauber trennen  
+Bei `5/6/8/10K` erst in Einzelprofile splitten (`...5K`, `...6K` usw.), dann Features/Preise mappen. Das reduziert Mischwerte massiv.
+
+2. Table-first Parsing für PDFs  
+Vor LLM immer strukturierten Tabellen-Extractor nutzen (Zeile/Spalte), LLM nur fürs Mapping. Viele verkettete Features kommen aus Fließtext-Parsing.
+
+3. Striktere Feature-Filter  
+Hard rules vor dem Speichern:
+- Name-Länge begrenzen
+- Keine `chain`-Namen mit mehrfachen Zahlenfolgen
+- `schema_feature=Other` standardmäßig verwerfen (oder separat halten)
+
+4. Unit- und Range-Normalisierung verbessern  
+Ranges als `min/max` speichern statt als einzelne, fragmentierte Werte; Normen (`IEC 61727`) nie als numerischer Messwert normalisieren.
+
+5. Cross-Validation pro Feature-Typ  
+Für kritische Felder (Leistung, Wirkungsgrad, Abmessungen) mindestens 2 unabhängige Quellen verlangen oder Confidence stark absenken.
+
+6. Preis-Gate verschärfen  
+Preis nur akzeptieren, wenn Modell-Match inkl. Variantencode passt (z. B. `GW5000-ES` vs `GW5000-BH`), plus Ausreißercheck gegen Median ähnlicher Angebote.
+
+7. Bestehende Preise regelmäßig revalidieren  
+TTL einführen (`verified_at`, `stale_after_days`) und bei Abweichung markieren statt still überschreiben.
+
+8. Source-Qualität scoren und gewichten  
+Hersteller-Datenblatt > Distributor-PDF > Shop > Aggregator. Diese Gewichtung direkt in `confidence` einfließen lassen.
+
+9. Explizite Drop-Reasons pro Feature  
+Nicht nur Count, sondern pro entferntem Feature maschinenlesbar: `reason_code`, `rule_id`, `source_url`.
+
+10. Gold-Set + Regression-Tests  
+20-30 manuell kuratierte Produkte als Referenz; bei jeder Prompt-/Rule-Änderung automatisch Precision/Recall + Price-Accuracy prüfen.

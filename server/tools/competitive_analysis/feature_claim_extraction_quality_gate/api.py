@@ -31,6 +31,7 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
             repair_feature_names=req.repair_feature_names,
             min_alpha_chars=req.min_alpha_chars,
             max_feature_name_length=req.max_feature_name_length,
+            allow_llm_fallback=req.allow_llm_fallback,
             user_root=s.user_dir(user_id),
             work_root=s.user_work_dir(user_id),
         )

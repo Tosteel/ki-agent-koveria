@@ -610,9 +610,43 @@ def _localize_report_german(provider: str, report: FinalReport, warnings: List[s
     if not localized:
         return report
     try:
-        return FinalReport(**localized)
+        localized_report = FinalReport(**localized)
     except Exception as exc:
         warnings.append(f"German localization failed; kept original report ({exc})")
+        return report
+
+    # Guardrail: keep structural sections from pre-localized report if localization
+    # returns empty objects/lists.
+    loc = localized_report.model_dump()
+    base = report.model_dump()
+
+    for key in ("product_profile_brief", "competitor_overview", "feature_matrix_section", "gap_usp_analysis"):
+        if not isinstance(loc.get(key), dict) or not loc.get(key):
+            loc[key] = base.get(key, {})
+            warnings.append(f"Localization fallback applied for empty section: {key}")
+
+    for key in ("strengths", "weaknesses", "opportunities", "threats"):
+        if not (loc.get("swot") or {}).get(key):
+            loc.setdefault("swot", {})[key] = (base.get("swot") or {}).get(key, [])
+            warnings.append(f"Localization fallback applied for empty swot.{key}")
+
+    pos = loc.get("positioning_diagram") or {}
+    base_pos = base.get("positioning_diagram") or {}
+    if not pos.get("axis_x") or not pos.get("axis_y") or not pos.get("points"):
+        loc["positioning_diagram"] = base_pos
+        warnings.append("Localization fallback applied for positioning_diagram")
+
+    if not loc.get("strategic_recommendations"):
+        loc["strategic_recommendations"] = base.get("strategic_recommendations", [])
+        warnings.append("Localization fallback applied for strategic_recommendations")
+    if not loc.get("executive_summary"):
+        loc["executive_summary"] = base.get("executive_summary", [])
+        warnings.append("Localization fallback applied for executive_summary")
+
+    try:
+        return FinalReport(**loc)
+    except Exception as exc:
+        warnings.append(f"Localization merge validation failed; kept original report ({exc})")
         return report
 
 
@@ -729,8 +763,8 @@ def build_final_report(
         executive_summary=exec_summary,
     )
 
-    validation = _validate_report(report, context)
     report = _localize_report_german(provider=provider, report=report, warnings=warnings)
+    validation = _validate_report(report, context)
 
     p = str(provider or "ionos").strip().lower()
     if p not in {"ionos", "openai", "perplexity"}:

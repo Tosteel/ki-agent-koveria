@@ -76,9 +76,43 @@ class LlmPerplexity:
     @staticmethod
     def _extract_text(resp: Dict[str, Any]) -> str:
         try:
-            return str(resp["choices"][0]["message"]["content"] or "").strip()
+            content = resp["choices"][0]["message"]["content"]
         except Exception:
             return ""
+
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, (int, float)):
+            return str(content).strip()
+        if isinstance(content, list):
+            parts: List[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    s = item.strip()
+                    if s:
+                        parts.append(s)
+                    continue
+                if isinstance(item, dict):
+                    # Common block styles: {"type":"text","text":"..."} or {"text":"..."}
+                    txt = item.get("text")
+                    if isinstance(txt, str) and txt.strip():
+                        parts.append(txt.strip())
+                        continue
+                    # Defensive fallback for dict-like blocks.
+                    for v in item.values():
+                        if isinstance(v, str) and v.strip():
+                            parts.append(v.strip())
+                            break
+            return "\n".join(parts).strip()
+        if isinstance(content, dict):
+            txt = content.get("text")
+            if isinstance(txt, str):
+                return txt.strip()
+            try:
+                return json.dumps(content, ensure_ascii=False).strip()
+            except Exception:
+                return ""
+        return str(content).strip()
 
     @staticmethod
     def _normalize_response_format(fmt: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:

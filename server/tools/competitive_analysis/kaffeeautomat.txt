@@ -1,0 +1,173 @@
+{
+  "steps": [
+    {
+      "tool": "competitive_parse_document",
+      "args": {
+        "path": "TQ713D03.pdf",
+        "max_chars": 50000
+      }
+    },
+    {
+      "tool": "write_file",
+      "args": {
+        "path": "parsed_doc.json",
+        "content": "{steps[0].payload}",
+        "overwrite": true
+      }
+    },
+    {
+      "tool": "competitive_extract_product_profile",
+      "args": {
+        "parsed_doc_path": "parsed_doc.json",
+        "provider": "perplexity",
+        "max_context_chars": 18000
+      }
+    },
+    {
+      "tool": "write_file",
+      "args": {
+        "path": "product_profile.json",
+        "content": "{steps[2].payload}",
+        "overwrite": true
+      }
+    },
+    {
+      "tool": "competitive_generate_analysis_plan",
+      "args": {
+        "product_profile_path": "product_profile.json",
+        "provider": "perplexity",
+        "max_context_chars": 14000
+      }
+    },
+    {
+      "tool": "write_file",
+      "args": {
+        "path": "analysis_plan.json",
+        "content": "{steps[4].payload}",
+        "overwrite": true
+      }
+    },
+    {
+      "tool": "competitive_identify_competitors",
+      "args": {
+        "analysis_plan_path": "analysis_plan.json",
+        "product_profile_path": "product_profile.json",
+        "provider": "perplexity",
+        "max_queries": 8,
+        "per_query_results": 6,
+        "shortlist_size": 12
+      }
+    },
+    {
+      "tool": "write_file",
+      "args": {
+        "path": "competitor_list.json",
+        "content": "{steps[6].payload}",
+        "overwrite": true
+      }
+    },
+    {
+      "tool": "competitive_extract_competitor_profiles",
+      "args": {
+        "competitor_list_path": "competitor_list.json",
+        "provider": "perplexity",
+        "offset": 0,
+        "limit": 10,
+        "max_pages_per_competitor": 3,
+        "verbose_progress": true
+      }
+    },
+    {
+      "tool": "write_file",
+      "args": {
+        "path": "competitor_profiles.json",
+        "content": "{steps[8].payload}",
+        "overwrite": true
+      }
+    },
+    {
+      "tool": "competitive_feature_matrix_gap_analysis",
+      "args": {
+        "product_profile_path": "product_profile.json",
+        "competitor_profiles_path": "competitor_profiles.json",
+        "provider": "perplexity"
+      }
+    },
+    {
+      "tool": "write_file",
+      "args": {
+        "path": "feature_matrix_gap.json",
+        "content": "{steps[10].payload}",
+        "overwrite": true
+      }
+    },
+    {
+      "tool": "competitive_strategic_analysis",
+      "args": {
+        "gaps_and_usps_path": "feature_matrix_gap.json",
+        "evidences": {
+          "comparison_matrix_path": "feature_matrix_gap.json"
+        },
+        "provider": "perplexity"
+      }
+    },
+    {
+      "tool": "write_file",
+      "args": {
+        "path": "strategic_analysis.json",
+        "content": "{steps[12].payload}",
+        "overwrite": true
+      }
+    },
+    {
+      "tool": "competitive_generate_final_report",
+      "args": {
+        "provider": "perplexity",
+        "artifact_paths": {
+          "product_profile": "product_profile.json",
+          "analysis_plan": "analysis_plan.json",
+          "competitor_list": "competitor_list.json",
+          "competitor_profiles": "competitor_profiles.json",
+          "comparison_matrix": "feature_matrix_gap.json",
+          "gaps_and_usps": "feature_matrix_gap.json",
+          "strategic_analysis": "strategic_analysis.json"
+        },
+        "max_chars_per_artifact": 10000
+      }
+    },
+    {
+      "tool": "write_file",
+      "args": {
+        "path": "final_report.json",
+        "content": "{steps[14].payload}",
+        "overwrite": true
+      }
+    },
+    {
+      "tool": "write_file",
+      "args": {
+        "path": "review_status.json",
+        "content": "{\"status\":\"pending_manual_review\",\"step\":\"9\",\"note\":\"Tool9 optional/not implemented\"}",
+        "overwrite": true
+      }
+    },
+    {
+      "tool": "competitive_publish_pdf_report",
+      "args": {
+        "final_report_path": "final_report.json",
+        "output_path": "competition_analysis_report.pdf",
+        "logo_path": "logo.png",
+        "include_render_log": true,
+        "render_log_path": "render_log.json"
+      }
+    },
+    {
+      "tool": "write_file",
+      "args": {
+        "path": "pdf_publish_result.json",
+        "content": "{steps[17].payload}",
+        "overwrite": true
+      }
+    }
+  ]
+}
