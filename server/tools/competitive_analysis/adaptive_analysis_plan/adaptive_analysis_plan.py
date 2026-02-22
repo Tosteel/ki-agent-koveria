@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -12,6 +13,8 @@ from server.services.llm_openai import LlmOpenai
 from server.services.llm_perplexity import LlmPerplexity
 
 from .models import AnalysisPlan, AnalysisScope, ComparisonDimension, SearchTerm
+
+_TARGET_SEARCH_QUERIES = 16
 
 
 def _parse_json_strictish(text: str) -> Dict[str, Any]:
@@ -618,6 +621,63 @@ def _compact_use_case_phrase(raw: str) -> str:
     return u or _compact_category_phrase(raw)
 
 
+_QUERY_BANNED_PATTERNS = (
+    r"\bsite:",
+    r"\bvs\b",
+    r"https?://",
+)
+
+
+def _sanitize_query_term(text: str) -> str:
+    q = _norm_text(text)
+    if not q:
+        return ""
+    q = q.replace("_", " ")
+    # Strip internal/version suffixes like _v2, v2, final, draft.
+    q = re.sub(r"\b(v\d+|ver(sion)?\s*\d+|final|draft|tmp)\b", "", q, flags=re.IGNORECASE)
+    q = re.sub(r"\s+", " ", q).strip()
+    return q
+
+
+def _is_generic_query_allowed(text: str) -> bool:
+    q = _norm_text(text)
+    if not q:
+        return False
+    if len(q) < 12 or len(q) > 140:
+        return False
+    if len(q.split()) < 3:
+        return False
+    ql = q.lower()
+    if any(re.search(p, ql, flags=re.IGNORECASE) for p in _QUERY_BANNED_PATTERNS):
+        return False
+    if ql.count("?") > 1:
+        return False
+    years = [int(y) for y in re.findall(r"\b(20\d{2})\b", q)]
+    if years:
+        current_year = datetime.utcnow().year
+        # Prevent stale temporal anchors (e.g., "2023") while allowing current/near years.
+        if any(y < current_year - 1 for y in years):
+            return False
+    return True
+
+
+def _sanitize_llm_queries(raw_queries: List[str], *, min_queries: int, max_queries: int = _TARGET_SEARCH_QUERIES) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for q in raw_queries:
+        qq = _sanitize_query_term(q)
+        if not _is_generic_query_allowed(qq):
+            continue
+        k = qq.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(qq)
+        if len(out) >= max_queries:
+            break
+    return out if len(out) >= min_queries else out
+
+
 def _sanitize_plan(
     *,
     profile: Dict[str, Any],
@@ -693,6 +753,10 @@ def _sanitize_plan(
         comp_dims = [ComparisonDimension(**d) for d in (llm_data.get("comparison_dimensions") or []) if isinstance(d, dict)]
     if not comp_dims:
         comp_dims = base_dimensions
+    comp_dims = _normalize_comparison_dimensions_required_fields(comp_dims)
+
+    min_competitors = int((llm_data or {}).get("min_competitors") or 6)
+    min_competitors = max(6, min(50, min_competitors))
 
     queries = _build_competitor_queries(
         profile=profile,
@@ -730,9 +794,6 @@ def _sanitize_plan(
     notes.append("Funktionale Signatur aus Produkttyp+Kernspezifikationen (z. B. Chemie/Kapazität/Port) wird in Queries priorisiert.")
     notes = list(dict.fromkeys([n for n in notes if _norm_text(n)]))
 
-    min_competitors = int((llm_data or {}).get("min_competitors") or 6)
-    min_competitors = max(6, min(50, min_competitors))
-
     return AnalysisPlan(
         provider=p,
         product_category=product_category,
@@ -746,6 +807,60 @@ def _sanitize_plan(
         notes=notes,
         extraction_warnings=warnings,
     )
+
+
+_GENERIC_REQUIRED_FIELDS = {
+    "performance_parameters",
+    "normalized_features",
+    "extended_feature_schema",
+    "price_indicators",
+    "relevance_criteria",
+    "notes",
+    "target_segments",
+    "use_cases",
+    "claims",
+    "differentiators",
+}
+
+
+def _generic_required_fields_by_dimension_name(dim_name: str) -> List[str]:
+    n = _norm_text(dim_name).lower()
+    if any(k in n for k in ("preis", "price", "kosten", "cost", "tco", "wirtschaft")):
+        return ["price_indicators"]
+    if any(k in n for k in ("compliance", "norm", "zert", "regulator", "sicherheit", "safety")):
+        return ["relevance_criteria", "notes"]
+    if any(k in n for k in ("zielgruppe", "segment", "use-case", "use case", "anwendung", "fit")):
+        return ["target_segments", "use_cases"]
+    if any(k in n for k in ("feature", "funktion", "ausstattung", "capabilit")):
+        return ["normalized_features", "extended_feature_schema"]
+    # Default for technical/competitive dimensions:
+    return ["performance_parameters", "normalized_features"]
+
+
+def _normalize_comparison_dimensions_required_fields(dimensions: List[ComparisonDimension]) -> List[ComparisonDimension]:
+    out: List[ComparisonDimension] = []
+    for d in dimensions:
+        raw = [str(x).strip() for x in (d.required_fields or []) if str(x).strip()]
+        kept = [x for x in raw if x in _GENERIC_REQUIRED_FIELDS]
+        if not kept:
+            kept = _generic_required_fields_by_dimension_name(d.name)
+        # ensure deterministic order + dedupe
+        seen: set[str] = set()
+        normalized: List[str] = []
+        for k in kept:
+            if k in seen:
+                continue
+            seen.add(k)
+            normalized.append(k)
+        out.append(
+            ComparisonDimension(
+                name=d.name,
+                weight=d.weight,
+                rationale=d.rationale,
+                required_fields=normalized,
+            )
+        )
+    return out
 
 
 def _resolve_input_path(path: str, user_root: Path, work_root: Path) -> Path:
@@ -881,14 +996,30 @@ def _openai_extract_output_text(resp: Dict[str, Any]) -> str:
 
 def _llm_plan(provider: str, context: str, warnings: List[str]) -> Dict[str, Any]:
     schema = _semantic_schema()
+    current_year = datetime.utcnow().year
     system = (
         "Du erzeugst einen adaptiven Wettbewerbsanalyse-Plan für ein Produktprofil. "
         "Antworte strikt als JSON gemäß Schema. "
-        "Definiere Vergleichsdimensionen, Suchstrategie, Relevanzkriterien und Analyseumfang."
+        "Definiere Vergleichsdimensionen, Suchstrategie, Relevanzkriterien und Analyseumfang. "
+        "Wichtig für search_queries: nur generische Wettbewerber-Suchanfragen, keine 'vs'-Vergleiche, "
+        "keine site:-Filter, keine URLs. "
+        "Keine markenspezifischen Pflichtbegriffe in required_fields; nur generische Felder. "
+        "Jede Query muss mindestens 3 Wörter enthalten und konkrete Suchintention tragen. "
+        "Jahreszahlen nicht in jeder Query verwenden."
     )
     user = (
         "Erstelle einen pragmatischen Analyseplan basierend auf folgendem product_profile. "
-        "Gewichte Dimensionen sinnvoll und gib konkrete Suchbegriffe/Queries aus.\n\n"
+        "Gewichte Dimensionen sinnvoll und gib konkrete Suchbegriffe/Queries aus.\n"
+        f"Für search_queries (genau {_TARGET_SEARCH_QUERIES} Stück) nutze diesen Mix:\n"
+        "- 5-8 Markt-/Alternativen-Queries (Konkurrenz, Alternativen, Top-Modelle)\n"
+        "- 5-8 technische Capability-Queries auf Basis comparison_dimensions\n"
+        "- 3-5 Segment/Use-Case-Queries\n"
+        "- 2-4 Kaufkriterien-Queries (Preis-Leistung, Zuverlässigkeit, Wartung)\n"
+        f"- Jahresbezug nur aktuell/nah (z. B. {current_year}); keine alten Jahre.\n"
+        "- Nur 30-50% der Queries dürfen eine Jahreszahl tragen.\n"
+        "- Technische Capability-Queries und Use-Case-Queries bevorzugt ohne Jahreszahl formulieren.\n"
+        "- Wenn ein Jahr verwendet wird, nicht standardmäßig als letztes Token anhängen; "
+        "Formulierungen variieren (z. B. 'im Jahr 2026', '2026 Vergleich').\n\n"
         f"product_profile:\n{context}"
     )
 

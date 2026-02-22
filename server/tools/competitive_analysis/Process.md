@@ -111,7 +111,7 @@ Output: `parsed_doc.json`
     {
       "tool": "competitive_parse_document",
       "args": {
-        "path": "product.txt",
+        "path": "/competitor_analysis/Dreame_X50_Ultra_Complete_v2.pdf",
         "max_chars": 50000
       }
     },

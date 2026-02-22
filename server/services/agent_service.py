@@ -646,6 +646,43 @@ def goal_with_context(goal: str, history: Any) -> str:
     return f"Aktuelle Anfrage:\n{base}\n\nDialogverlauf (letzte 12 Nachrichten):\n{hist}"
 
 
+def _is_context_dependent_goal(goal: str) -> bool:
+    g = str(goal or "").strip().lower()
+    if not g:
+        return False
+
+    markers = (
+        "wie oben",
+        "wie vorher",
+        "wie zuvor",
+        "wie besprochen",
+        "dazu",
+        "darauf",
+        "davon",
+        "dieses",
+        "diese",
+        "dieser",
+        "das gleiche",
+        "gleiches format",
+        "nochmal",
+        "nochmals",
+        "weiter damit",
+        "mach weiter",
+        "fortsetzen",
+        "als zweiten",
+        "als 2ten",
+        "und jetzt",
+        "jetzt auch",
+    )
+    if any(m in g for m in markers):
+        return True
+
+    tokens = re.findall(r"\w+", g)
+    if tokens and tokens[0] in {"und", "dann", "jetzt", "außerdem", "auch", "danach", "weiter"}:
+        return True
+    return False
+
+
 def build_goal_with_context(llm: Any, provider: str, goal: str, history: Any) -> str:
     base = (goal or "").strip()
     if not base:
@@ -654,7 +691,9 @@ def build_goal_with_context(llm: Any, provider: str, goal: str, history: Any) ->
     if not hist:
         return f"goal:\n{base}"
     if not hasattr(llm, "enabled") or not llm.enabled():
-        return f"goal:\n{base}\n\ngoal_context:\n{hist}"
+        if _is_context_dependent_goal(base):
+            return f"goal:\n{base}\n\ngoal_context:\n{hist}"
+        return f"goal:\n{base}"
 
     schema = {
         "type": "object",
@@ -695,12 +734,28 @@ def build_goal_with_context(llm: Any, provider: str, goal: str, history: Any) ->
     except Exception:
         parsed = {}
 
+    standalone_goal = str(parsed.get("standalone_goal") or "").strip()
+    effective_goal = standalone_goal or base
     needs_context = bool(parsed.get("needs_context"))
     carry_context_raw = parsed.get("carry_context") or []
     carry_context = [str(x).strip() for x in carry_context_raw if str(x).strip()][:3]
-    if not needs_context or not carry_context:
-        return f"goal:\n{base}"
-    return f"goal:\n{base}\n\ngoal_context:\n" + "\n".join(f"- {c}" for c in carry_context)
+
+    # Primary path: LLM says context is required.
+    if needs_context:
+        if carry_context:
+            return f"goal:\n{effective_goal}\n\ngoal_context:\n" + "\n".join(f"- {c}" for c in carry_context)
+        # LLM asked for context but did not produce carry_context -> safe fallback to full history.
+        return f"goal:\n{effective_goal}\n\ngoal_context:\n{hist}"
+
+    # If LLM produced a standalone rewrite, trust it and omit context.
+    if standalone_goal:
+        return f"goal:\n{effective_goal}"
+
+    # Fallback when LLM output is inconclusive: use deterministic heuristic.
+    if _is_context_dependent_goal(base):
+        return f"goal:\n{base}\n\ngoal_context:\n{hist}"
+
+    return f"goal:\n{base}"
 
 
 def _slugify_tool_name(title: str, agent_id: Any) -> str:
