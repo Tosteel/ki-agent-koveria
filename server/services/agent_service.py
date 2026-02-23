@@ -16,7 +16,6 @@ from server.services.llm_ionos import IonosLLM
 from server.services.llm_perplexity import LlmPerplexity
 from server.services import memory_service
 from server.services.agent_prompts import (
-    get_goal_context_system_prompt,
     get_planner_guard_refine_system_prompt,
     get_planner_guard_system_prompt,
 )
@@ -684,78 +683,14 @@ def _is_context_dependent_goal(goal: str) -> bool:
 
 
 def build_goal_with_context(llm: Any, provider: str, goal: str, history: Any) -> str:
+    _ = (llm, provider)
     base = (goal or "").strip()
     if not base:
         return base
     hist = history_to_context(history, max_items=12)
     if not hist:
         return f"goal:\n{base}"
-    if not hasattr(llm, "enabled") or not llm.enabled():
-        if _is_context_dependent_goal(base):
-            return f"goal:\n{base}\n\ngoal_context:\n{hist}"
-        return f"goal:\n{base}"
-
-    schema = {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "standalone_goal": {"type": "string"},
-            "carry_context": {"type": "array", "items": {"type": "string"}},
-            "needs_context": {"type": "boolean"},
-        },
-        "required": ["standalone_goal", "carry_context", "needs_context"],
-    }
-    system = get_goal_context_system_prompt(provider)
-    user = (
-        f"Aktuelle Nutzeranfrage:\n{base}\n\n"
-        f"Dialogverlauf (letzte 12 Nachrichten):\n{hist}\n\n"
-        "Die aktuelle Nutzeranfrage bleibt unverändert das goal. "
-        "Liefere nur den notwendigen goal_context. "
-        "Falls nötig, liefere 1-3 kurze Kontextpunkte in carry_context."
-    )
-    try:
-        if hasattr(llm, "chat_completions"):
-            completion = llm.chat_completions(
-                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {"name": "goal_context", "schema": schema, "strict": True},
-                },
-            )
-            parsed = _parse_json_strictish(llm.extract_text(completion) if hasattr(llm, "extract_text") else "")
-        elif hasattr(llm, "_call"):
-            resp = llm._call(  # type: ignore[attr-defined]
-                input_messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-                text_format={"type": "json_schema", "name": "goal_context", "schema": schema, "strict": False},
-            )
-            parsed = _parse_json_strictish(_extract_openai_output_text(resp))
-        else:
-            parsed = {}
-    except Exception:
-        parsed = {}
-
-    standalone_goal = str(parsed.get("standalone_goal") or "").strip()
-    effective_goal = standalone_goal or base
-    needs_context = bool(parsed.get("needs_context"))
-    carry_context_raw = parsed.get("carry_context") or []
-    carry_context = [str(x).strip() for x in carry_context_raw if str(x).strip()][:3]
-
-    # Primary path: LLM says context is required.
-    if needs_context:
-        if carry_context:
-            return f"goal:\n{effective_goal}\n\ngoal_context:\n" + "\n".join(f"- {c}" for c in carry_context)
-        # LLM asked for context but did not produce carry_context -> safe fallback to full history.
-        return f"goal:\n{effective_goal}\n\ngoal_context:\n{hist}"
-
-    # If LLM produced a standalone rewrite, trust it and omit context.
-    if standalone_goal:
-        return f"goal:\n{effective_goal}"
-
-    # Fallback when LLM output is inconclusive: use deterministic heuristic.
-    if _is_context_dependent_goal(base):
-        return f"goal:\n{base}\n\ngoal_context:\n{hist}"
-
-    return f"goal:\n{base}"
+    return f"goal:\n{base}\n\ngoal_context:\n{hist}"
 
 
 def _slugify_tool_name(title: str, agent_id: Any) -> str:
