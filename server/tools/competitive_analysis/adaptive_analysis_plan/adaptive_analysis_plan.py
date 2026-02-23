@@ -436,6 +436,29 @@ def _clean_feature_terms(values: List[str], max_items: int = 20) -> List[str]:
     return out
 
 
+def _to_discoverable_feature_label(term: str) -> str:
+    t = _norm_text(term)
+    if not t:
+        return ""
+    t = re.sub(r"[™®©]", "", t)
+    t = re.sub(r"\s+", " ", t).strip(" -_,.;:")
+
+    # Prefer functional phrase when present.
+    m = re.search(r"\b(?:zur|für|for)\s+([A-Za-zÄÖÜäöüß0-9][A-Za-zÄÖÜäöüß0-9\- ]{2,})$", t, flags=re.IGNORECASE)
+    if m:
+        t = _norm_text(m.group(1))
+
+    # Drop leading branded token before hyphen/space if present.
+    m2 = re.match(r"^[A-Z][A-Za-z0-9]{2,}\s*[-:]\s*([A-Za-zÄÖÜäöüß0-9].+)$", t)
+    if m2:
+        t = _norm_text(m2.group(1))
+
+    # Remove generic wrapper words.
+    t = re.sub(r"\b(system|technologie|technology|plattform|platform)\b", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"\s+", " ", t).strip(" -_,.;:")
+    return t
+
+
 def _infer_category_phrase_when_unknown(
     *,
     product_name: str,
@@ -474,6 +497,7 @@ def _build_competitor_queries(
     dimension_names: List[str],
     functionality_terms: List[str],
     functional_signature: List[str],
+    feature_terms: List[str],
     min_queries: int = 10,
 ) -> List[str]:
     name = _norm_text(product_name)
@@ -490,18 +514,9 @@ def _build_competitor_queries(
         )
     power_hints = _extract_power_hints(profile, name)
 
-    anchor = name or brand
-    if not anchor and category != "unknown":
-        anchor = category
-    if not anchor:
-        anchor = "produkt"
-
-    # Anchor/model queries (limited to avoid overfitting to vendor/model naming).
-    anchor_queries: List[str] = [
-        f"Alternativen zu {anchor} Datenblatt",
-        f"Wettbewerber von {anchor} technische Daten",
-        f"{anchor} datasheet specs",
-    ]
+    # Avoid direct base-product targeting in query generation.
+    anchor = category_phrase if category != "unknown" else (name or brand or "produkt")
+    anchor_queries: List[str] = []
 
     primary_power = _pick_primary_power_hint(power_hints)
     category_anchor = category_phrase
@@ -511,8 +526,8 @@ def _build_competitor_queries(
     # Category queries: concise and product-page oriented.
     category_templates = [
         "{cat} Wettbewerber Vergleich",
-        "{cat} ähnliche Produkte zu {anchor}",
-        "{cat} Produktserie technische Daten",
+        "{cat} ähnliche Produkte",
+        "{cat} Produktmodelle technische Daten",
         "{cat} product page specs",
     ]
     category_queries: List[str] = []
@@ -540,14 +555,37 @@ def _build_competitor_queries(
         cat = base_terms[idx % len(base_terms)]
         category_queries.append(tmpl.format(cat=cat, term=term).strip())
 
-    if brand and name:
-        # Avoid duplicated brand prefix when product_name already includes brand.
-        brand_in_name = brand.lower() in name.lower()
-        brand_name_anchor = name if brand_in_name else f"{brand} {name}"
+    # Explicit category + segment/use_case/feature combinations.
+    for idx, seg in enumerate((segments or [])[:4]):
+        s = _compact_use_case_phrase(seg)
+        if not s:
+            continue
+        cat = base_terms[idx % len(base_terms)]
+        category_queries.append(f"{cat} {s} Vergleich".strip())
+        category_queries.append(f"{cat} {s} Produktseite".strip())
+
+    for idx, uc in enumerate((use_cases or [])[:4]):
+        u = _compact_use_case_phrase(uc)
+        if not u:
+            continue
+        cat = base_terms[idx % len(base_terms)]
+        category_queries.append(f"{cat} {u} technische Daten".strip())
+        category_queries.append(f"{cat} {u} Modelle".strip())
+
+    for idx, ft in enumerate((feature_terms or [])[:6]):
+        f = _compact_category_phrase(ft)
+        if not f:
+            continue
+        cat = base_terms[idx % len(base_terms)]
+        category_queries.append(f"{cat} {f} Produktseite".strip())
+        category_queries.append(f"{cat} {f} Datenblatt".strip())
+
+    if category != "unknown":
         anchor_queries.extend(
             [
-                f"{brand_name_anchor} competitors",
-                f"{brand_name_anchor} alternatives",
+                f"{category_anchor} Alternativen",
+                f"{category_anchor} Wettbewerbsprodukte",
+                f"{category_anchor} Marktführer Modelle",
             ]
         )
 
@@ -605,6 +643,39 @@ def _build_competitor_queries(
         deduped.append(f"{category_anchor} technische Datenblatt")
     if len(deduped) < min_queries:
         deduped.append("Produkt technische Daten")
+    # Hard target: always emit max_queries where feasible by adding generic, intent-safe fillers.
+    if len(deduped) < max_queries:
+        fillers: List[str] = []
+        if category != "unknown":
+            fillers.extend(
+                [
+                    f"{category_anchor} Wettbewerber Vergleich",
+                    f"{category_anchor} Top Modelle",
+                    f"{category_anchor} Preis Leistung Vergleich",
+                    f"{category_anchor} Zuverlässigkeit Test",
+                    f"{category_anchor} Wartungskosten Vergleich",
+                    f"{category_anchor} technische Daten",
+                ]
+            )
+        else:
+            fillers.extend(
+                [
+                    f"{anchor} Wettbewerber Vergleich",
+                    f"{anchor} Alternativen",
+                    f"{anchor} technische Daten",
+                    f"{anchor} Preis Leistung Vergleich",
+                    f"{anchor} Zuverlässigkeit Test",
+                ]
+            )
+        for q in fillers:
+            qq = _norm_text(q)
+            if not qq or qq in deduped:
+                continue
+            if not _is_generic_query_allowed(qq):
+                continue
+            deduped.append(qq)
+            if len(deduped) >= max_queries:
+                break
     return deduped[:max_queries]
 
 
@@ -708,9 +779,13 @@ def _sanitize_plan(
     if llm_data:
         raw_features.extend(_safe_list_str(llm_data.get("extended_feature_schema")))
     clean_features = _clean_feature_terms([_norm_text(x) for x in raw_features if _norm_text(x)], max_items=20)
+    discoverable_features = _clean_feature_terms(
+        [_to_discoverable_feature_label(x) for x in clean_features if _to_discoverable_feature_label(x)],
+        max_items=20,
+    )
 
-    if not clean_features:
-        clean_features = [
+    if not discoverable_features:
+        discoverable_features = [
             "Leistung",
             "Kapazität",
             "Effizienz",
@@ -730,11 +805,14 @@ def _sanitize_plan(
     if product_category and product_category.lower() != "unknown":
         search_terms.append(SearchTerm(term=product_category, intent="category"))
 
-    # Keep segment/use-case terms; avoid noisy feature terms as search anchors.
+    # Keep segment/use-case terms and include discoverable feature anchors.
     for s in _safe_list_str(profile.get("target_segments"))[:4]:
         search_terms.append(SearchTerm(term=s, intent="segment"))
     for u in _safe_list_str(profile.get("use_cases"))[:4]:
         search_terms.append(SearchTerm(term=u, intent="use_case"))
+    for f in discoverable_features[:6]:
+        if not _is_noisy_feature_term(f):
+            search_terms.append(SearchTerm(term=f, intent="feature"))
     for t in llm_terms[:8]:
         intent = _norm_text(t.get("intent")).lower() or "generic"
         term = _norm_text(t.get("term"))
@@ -768,6 +846,7 @@ def _sanitize_plan(
         dimension_names=[d.name for d in comp_dims if _norm_text(d.name)],
         functionality_terms=_extract_functionality_query_terms(profile, max_terms=4),
         functional_signature=_extract_functional_signature(profile, max_parts=4),
+        feature_terms=discoverable_features,
     )
 
     relevance_criteria = _safe_list_str((llm_data or {}).get("relevance_criteria")) if llm_data else []
@@ -798,7 +877,7 @@ def _sanitize_plan(
         provider=p,
         product_category=product_category,
         comparison_dimensions=comp_dims,
-        extended_feature_schema=clean_features,
+        extended_feature_schema=discoverable_features,
         search_terms=search_terms,
         search_queries=queries,
         min_competitors=min_competitors,

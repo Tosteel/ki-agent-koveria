@@ -32,6 +32,7 @@ class AnalysisPlan(BaseModel):
     comparison_dimensions: List[ComparisonDimension] = Field(default_factory=list)
     extended_feature_schema: List[str] = Field(default_factory=list)
     search_terms: List[SearchTerm] = Field(default_factory=list)
+    additional_search_terms: List[SearchTerm] = Field(default_factory=list)
     search_queries: List[str] = Field(default_factory=list)
     min_competitors: int = Field(default=5, ge=2, le=50)
     relevance_criteria: List[str] = Field(default_factory=list)
