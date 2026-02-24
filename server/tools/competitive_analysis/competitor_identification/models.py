@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 
 class CompetitorCandidate(BaseModel):
     name: str
+    manufacturer: str = ""
     url: str
     source_type: str = "unknown"
     url_candidates: List[str] = Field(default_factory=list)
@@ -38,6 +39,7 @@ class CompetitorIdentificationRequest(BaseModel):
     max_queries: int = Field(default=12, ge=1, le=20)
     per_query_results: int = Field(default=6, ge=2, le=20)
     shortlist_size: int = Field(default=10, ge=3, le=50)
+    verbose_terminal: bool = False
 
     @model_validator(mode="after")
     def _validate_inputs(self) -> "CompetitorIdentificationRequest":

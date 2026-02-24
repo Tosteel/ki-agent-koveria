@@ -181,7 +181,7 @@ def _looks_like_product_or_datasheet(*, url: str, title: str, snippet: str) -> b
     )
     negative = (
         "/category", "/categories", "/catalog", "/katalog", "/collections", "/collection",
-        "/shop", "/search", "/blog", "/news", "/forum", "/tag/", "/brands", "/marken",
+        "/search", "/blog", "/news", "/forum", "/tag/", "/brands", "/marken",
     )
     has_pos = any(k in txt for k in positive)
     has_neg = any(k in txt for k in negative)
@@ -203,7 +203,7 @@ def _is_strong_product_page(url: str, title: str, snippet: str) -> bool:
     )
     negative = (
         "/category", "/categories", "/catalog", "/katalog", "/collections", "/collection",
-        "/shop", "/search", "/blog", "/news", "/forum", "/tag/", "/brands", "/marken",
+        "/search", "/blog", "/news", "/forum", "/tag/", "/brands", "/marken",
         "/compare", "/vergleich",
     )
     if any(k in txt for k in negative):
@@ -262,6 +262,45 @@ def _url_priority_score(
         score -= 35.0
 
     return score
+
+
+def _source_priority_rank(
+    *,
+    manufacturer: str,
+    candidate_name: str,
+    result: Dict[str, str],
+) -> int:
+    """
+    Hard source ordering for final URL choice:
+    5 official product page
+    4 official datasheet/pdf
+    3 non-official strong product page
+    2 non-official datasheet/pdf
+    1 other product-like page
+    0 everything else
+    """
+    url = _clean_url(str(result.get("url") or "").strip())
+    title = _clean_text(str(result.get("title") or ""))
+    snippet = _clean_text(str(result.get("snippet") or ""))
+    if not url:
+        return 0
+
+    official = _manufacturer_domain_match(manufacturer, url)
+    strong_product = _is_strong_product_page(url, title, snippet)
+    is_pdf = _is_pdf_or_datasheet(url, title, snippet)
+    product_like = _looks_like_product_or_datasheet(url=url, title=title, snippet=snippet)
+
+    if official and strong_product and not is_pdf:
+        return 5
+    if official and is_pdf:
+        return 4
+    if strong_product and not is_pdf:
+        return 3
+    if is_pdf:
+        return 2
+    if product_like:
+        return 1
+    return 0
 
 
 def _normalize_candidate_label(raw: str) -> str:
@@ -483,9 +522,14 @@ def identify_competitors_v0_2(
             t = _clean_text(str(r.get("title") or ""))
             s = _clean_text(str(r.get("snippet") or ""))
             source_type = _clean_text(str(r.get("source_type") or "")).lower()
-            if not u or _is_low_trust_url(u):
+            if not u:
                 continue
-            if not (_looks_like_product_or_datasheet(url=u, title=t, snippet=s) or _is_strong_product_page(u, t, s)):
+            strong_product_seed = _is_strong_product_page(u, t, s)
+            looks_like_seed = _looks_like_product_or_datasheet(url=u, title=t, snippet=s)
+            # Loosen early seed gate: keep strong product pages even from mixed/trust-limited domains.
+            if _is_low_trust_url(u) and not strong_product_seed:
+                continue
+            if not (looks_like_seed or strong_product_seed):
                 continue
 
             raw_label = _clean_text(str(r.get("name") or t))
@@ -634,7 +678,17 @@ def identify_competitors_v0_2(
             _log(f"no_valid_url candidate={combined_name or cand_name}")
             continue
 
-        ranked_candidates.sort(key=lambda x: x[0], reverse=True)
+        ranked_candidates.sort(
+            key=lambda x: (
+                _source_priority_rank(
+                    manufacturer=m,
+                    candidate_name=combined_name or cand_name,
+                    result=x[1],
+                ),
+                x[0],
+            ),
+            reverse=True,
+        )
         _best_score, r, used_query, source_label = ranked_candidates[0]
         title = _clean_text(str(r.get("title") or ""))
         snippet = _clean_text(str(r.get("snippet") or ""))

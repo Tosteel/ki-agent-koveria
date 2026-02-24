@@ -23,6 +23,7 @@ _TOOL_DESCRIPTIONS: Dict[str, str] = {
     "view_website": "Inhalte auf einer einzelnen Website-Seite suchen.",
     "browse_website": "Website mit Navigation/Klicks über Unterseiten durchsuchen.",
     "send_mail": "E-Mails versenden (optional mit Anhang).",
+    "competitor_search_v0_4": "Wettbewerber über Playwright+BeautifulSoup suchen und per LLM auf direkte Konkurrenz prüfen.",
 }
 
 

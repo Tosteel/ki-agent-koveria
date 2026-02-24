@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 class ProfessionalPdfPublisherRequest(BaseModel):
     final_report: Optional[Dict[str, Any]] = None
     final_report_path: Optional[str] = None
-    output_path: str = "competition_analysis_report.pdf"
+    output_path: str = "competition_analysis_report_kaffeemaschine.pdf"
     logo_path: Optional[str] = None
     report_config_path: Optional[str] = None
     chart_paths: List[str] = Field(default_factory=list)

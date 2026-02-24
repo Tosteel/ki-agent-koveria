@@ -588,7 +588,7 @@ Output: `competition_analysis_report.pdf`
       "tool": "competitive_publish_pdf_report",
       "args": {
         "final_report_path": "final_report.json",
-        "output_path": "competition_analysis_report.pdf",
+        "output_path": "competition_analysis_report_kaffeemaschine.pdf",
         "logo_path": "logo.png",
         "include_render_log": true,
         "render_log_path": "render_log.json"
@@ -846,7 +846,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       "tool": "competitive_publish_pdf_report",
       "args": {
         "final_report_path": "final_report.json",
-        "output_path": "competition_analysis_report.pdf",
+        "output_path": "competition_analysis_report_kaffeemaschine.pdf",
         "logo_path": "logo.png",
         "include_render_log": true,
         "render_log_path": "render_log.json"

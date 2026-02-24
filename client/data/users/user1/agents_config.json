@@ -1,5 +1,42 @@
 {
   "version": 1,
-  "updated_at": "2026-02-22T22:04:27Z",
-  "agents": []
+  "updated_at": "2026-02-23T17:16:25Z",
+  "agents": [
+    {
+      "id": 1,
+      "title": "Deckenagent",
+      "text": "Rechnung mit Deckenabhängung Kosten\n\n1. Die Wissensdatenbank wird nach Informationen zu \"Rechnung mit Deckenabhängung Kosten\" durchsucht.\n2. Die Ergebnisse aus der Wissensdatenbank werden in eine E-Mail mit dem Betreff \"Rechnung mit Deckenabhängung Kosten\" überführt und an eine bestimmte Adresse gesendet.",
+      "planned_steps": [
+        "1. tool=rag_knowledgebase args={\"query\":\"Rechnung mit Deckenabhängung Kosten\"}",
+        "2. tool=send_mail args={\"to\":[\"{{platzhalter_mail}}\"],\"subject\":\"Rechnung mit Deckenabhängung Kosten\",\"body\":\"{steps[0].text}\"}"
+      ],
+      "created_at": "2026-02-23T12:34:31Z",
+      "source_task_id": 10,
+      "placeholders": [
+        {
+          "name": "platzhalter_mail",
+          "type": "email",
+          "required": true,
+          "description": "Platzhalter platzhalter_mail",
+          "used_in": [
+            "steps[1].args.to[0]"
+          ]
+        }
+      ],
+      "dialog": [
+        {
+          "role": "user",
+          "text": "ergänze als schritt 2: mail versenden an platzhalter_mail",
+          "plannedSteps": [],
+          "timestamp": "2026-02-23T12:38:48.368Z"
+        },
+        {
+          "role": "bot",
+          "text": "Änderung erfolgreich durchgeführt.",
+          "plannedSteps": [],
+          "timestamp": "2026-02-23T12:38:59.151Z"
+        }
+      ]
+    }
+  ]
 }
