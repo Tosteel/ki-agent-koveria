@@ -1,5 +1,5 @@
 # server/services/rag_koveria.py (im Agent-Projekt)
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Sequence
 import requests
 
 class RagService:
@@ -22,5 +22,17 @@ class RagService:
         headers = {"Authorization": f"Bearer {self.api_key}"}
         params = {"include_empty": "true"} if include_empty else None
         r = requests.get(url, params=params, headers=headers, timeout=30)
+        r.raise_for_status()
+        return r.json()
+
+    def upload(
+        self,
+        *,
+        data: Sequence[tuple[str, str]],
+        files: Sequence[tuple[str, tuple[str, bytes, str]]],
+    ) -> Dict[str, Any]:
+        url = f"{self.base}/rag/upload"
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        r = requests.post(url, headers=headers, data=list(data), files=list(files), timeout=120)
         r.raise_for_status()
         return r.json()
