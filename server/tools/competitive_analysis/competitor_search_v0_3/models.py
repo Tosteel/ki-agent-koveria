@@ -16,6 +16,7 @@ class CompanyCompetitorCandidate(BaseModel):
     competitor_type: str = "Direct competitor"
     company_website_url: str = ""
     brand_domain_whitelist: List[str] = Field(default_factory=list)
+    brand_domain_customerlist: List[str] = Field(default_factory=list)
     relevance_score: float = 0.0
 
 
@@ -31,12 +32,15 @@ class CompetitorSearchResults(BaseModel):
 class CompetitorSearchRequest(BaseModel):
     analysis_plan: Optional[Dict[str, Any]] = None
     analysis_plan_path: Optional[str] = None
+    product_competitors: Optional[Dict[str, Any]] = None
+    product_competitors_path: Optional[str] = None
     provider: str = "openai"
     max_queries: int = Field(default=20, ge=1, le=40)
     per_query_results: int = Field(default=8, ge=3, le=20)
     shortlist_size: int = Field(default=12, ge=3, le=50)
     min_relevance_score: float = Field(default=0.15, ge=0.0, le=1.0)
     verbose_terminal: bool = False
+    verbose_search_hits: bool = False
 
     @model_validator(mode="after")
     def _validate_inputs(self) -> "CompetitorSearchRequest":

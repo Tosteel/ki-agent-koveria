@@ -22,16 +22,18 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         result = search_competitors_v0_3(
             analysis_plan=req.analysis_plan,
             analysis_plan_path=req.analysis_plan_path,
+            product_competitors=req.product_competitors,
+            product_competitors_path=req.product_competitors_path,
             provider=req.provider,
             max_queries=req.max_queries,
             per_query_results=req.per_query_results,
             shortlist_size=req.shortlist_size,
             min_relevance_score=req.min_relevance_score,
             verbose_terminal=req.verbose_terminal,
+            verbose_search_hits=req.verbose_search_hits,
             user_root=s.user_dir(user_id),
             work_root=s.user_work_dir(user_id),
         )
         return CompetitorSearchResponse(competitor_search_results=result)
 
     return router
-

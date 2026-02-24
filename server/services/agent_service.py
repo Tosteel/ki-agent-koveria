@@ -233,6 +233,13 @@ def compact_tool_outputs(tool_outputs: List[Dict[str, Any]]) -> List[Dict[str, A
         payload = o.get("payload")
         if isinstance(payload, dict):
             payload = dict(payload)
+            tool = str(item.get("tool") or "").strip()
+            if tool == "query_rag" and isinstance(payload.get("hits"), list):
+                payload.pop("text", None)
+            if tool == "llm_summarize" and isinstance(payload.get("summary"), str):
+                payload.pop("text", None)
+            if tool == "llm_compose" and isinstance(payload.get("composed_text"), str):
+                payload.pop("text", None)
         if o.get("ok"):
             item["payload"] = payload
         else:
@@ -289,7 +296,7 @@ def outputs_for_final_answer(tool_outputs: List[Dict[str, Any]]) -> List[Dict[st
 
         p = dict(payload)
         tool = item["tool"]
-        if tool == "rag_knowledgebase":
+        if tool in {"rag_knowledgebase", "query_rag"}:
             p.pop("hits", None)
             if isinstance(payload.get("hits"), list):
                 p["hit_count"] = len(payload["hits"])

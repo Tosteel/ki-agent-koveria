@@ -17,16 +17,18 @@ def register(registry: ToolRegistry) -> None:
         result = search_competitors_v0_3(
             analysis_plan=req.analysis_plan,
             analysis_plan_path=req.analysis_plan_path,
+            product_competitors=req.product_competitors,
+            product_competitors_path=req.product_competitors_path,
             provider=req.provider,
             max_queries=req.max_queries,
             per_query_results=req.per_query_results,
             shortlist_size=req.shortlist_size,
             min_relevance_score=req.min_relevance_score,
             verbose_terminal=req.verbose_terminal,
+            verbose_search_hits=req.verbose_search_hits,
             user_root=ctx.settings.user_dir(ctx.user_id),
             work_root=ctx.settings.user_work_dir(ctx.user_id),
         )
         return CompetitorSearchResponse(competitor_search_results=result).model_dump()
 
     registry.register(TOOL_NAME, tool_competitor_search_v0_3, request_model=CompetitorSearchRequest)
-

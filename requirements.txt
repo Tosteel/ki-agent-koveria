@@ -2,3 +2,4 @@ python-pptx
 beautifulsoup4
 playwright
 pypdf
+langchain-core

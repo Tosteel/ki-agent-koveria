@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import base64
 import json
+import os
 import re
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
-from urllib.parse import parse_qs, quote_plus, unquote, urlparse
+from typing import Any, Dict, List, Optional, Tuple
 
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-from playwright.sync_api import sync_playwright
+import requests
+from bs4 import BeautifulSoup
 
 from server.services.llm_ionos import IonosLLM
 from server.services.llm_openai import LlmOpenai
@@ -16,41 +14,25 @@ from server.services.llm_perplexity import LlmPerplexity
 from server.tools.competitive_analysis.competitor_identification.competitor_identification import (
     _clean_text,
     _clean_url,
-    _cluster_for_url,
-    _domain,
+    _cosine_similarity,
     _iter_queries,
+    _langsearch_fallback,
     _load_json_obj,
+    _openai_search,
+    _perplexity_search,
 )
 
-from bs4 import BeautifulSoup
+from .models import (
+    ClaimValue,
+    CompetitorSearchResultsV04,
+    FeatureValue,
+    PriceIndicatorValue,
+    ProductCompetitorCandidate,
+    SoftFeatureValue,
+)
 
-from .models import CompanyCompetitorCandidate, CompetitorSearchResults
 
-_COMPETITOR_TYPES = {"Direct competitor", "Indirect competitor", "Potential new competitor"}
-_NON_COMPANY_DOMAIN_HINTS = {
-    "google.",
-    "bing.",
-    "duckduckgo.com",
-    "youtube.",
-    "wikipedia.org",
-    "reddit.com",
-    "linkedin.com",
-    "facebook.com",
-    "instagram.com",
-    "x.com",
-    "twitter.com",
-    "tiktok.com",
-    "amazon.",
-    "ebay.",
-    "idealo.",
-    "mediamarkt.",
-    "saturn.",
-    "otto.",
-    "heise.de",
-    "chip.de",
-    "computerbild.de",
-}
-_RETAILER_DOMAIN_HINTS = {
+_RETAILER_HINTS = (
     "amazon.",
     "ebay.",
     "otto.",
@@ -58,32 +40,118 @@ _RETAILER_DOMAIN_HINTS = {
     "saturn.",
     "galaxus.",
     "alltron.",
-    "idealo.",
     "kaufland.",
     "walmart.",
     "bestbuy.",
     "aliexpress.",
-}
-_GENERIC_TITLE_TOKENS = {
-    "home",
-    "start",
-    "seite",
-    "official",
-    "website",
-    "shop",
-    "store",
-    "amazon",
-    "vergleich",
+)
+_MARKETPLACE_HINTS = ("marketplace", "vergleich", "preisvergleich", "deals")
+_TESTING_HINTS = (
     "test",
-}
+    "tests",
+    "review",
+    "vergleich",
+    "bestenliste",
+    "computerbild",
+    "chip.",
+    "homeandsmart",
+    "businessinsider",
+    "blog",
+    "magazin",
+)
+_CLAIM_TYPES = {"value", "benefit", "differentiation"}
 
 
-@dataclass
-class SearchHit:
-    title: str
-    url: str
-    snippet: str
-    query: str
+def _fetch_page_text(url: str, timeout_s: int, max_chars: int) -> str:
+    try:
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            )
+        }
+        r = requests.get(url, headers=headers, timeout=timeout_s, allow_redirects=True)
+        if r.status_code >= 400:
+            return ""
+        html = r.text or ""
+        if not html:
+            return ""
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup(["script", "style", "noscript", "header", "footer", "nav", "aside", "form"]):
+            tag.decompose()
+        for sel in (
+            "[role='banner']",
+            "[role='navigation']",
+            "[role='contentinfo']",
+            ".header",
+            ".site-header",
+            ".main-header",
+            ".footer",
+            ".site-footer",
+            ".main-footer",
+            ".nav",
+            ".navbar",
+            ".breadcrumbs",
+            ".cookie",
+            ".cookie-banner",
+            ".newsletter",
+        ):
+            for tag in soup.select(sel):
+                tag.decompose()
+        text = _clean_text(soup.get_text(separator=" "))
+        if not text:
+            return ""
+        return text[: max(1000, int(max_chars))]
+    except Exception:
+        return ""
+
+
+def _http_status_code(url: str, timeout_s: int) -> Optional[int]:
+    try:
+        r = requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=timeout_s,
+            allow_redirects=True,
+            stream=True,
+        )
+        return int(r.status_code)
+    except Exception:
+        return None
+
+
+def _domain(url: str) -> str:
+    s = str(url or "").lower()
+    s = re.sub(r"^https?://", "", s)
+    s = s.split("/", 1)[0]
+    return s.replace("www.", "")
+
+
+def _search_results(
+    *,
+    provider: str,
+    query: str,
+    per_query_results: int,
+    openai_key: str,
+    openai_model: str,
+    perplexity_key: str,
+    perplexity_model: str,
+) -> Tuple[List[Dict[str, str]], str]:
+    p = str(provider or "openai").strip().lower()
+    if p == "openai" and openai_key:
+        try:
+            return _openai_search(query, per_query_results, api_key=openai_key, model=openai_model), "web_search_openai"
+        except Exception:
+            pass
+    if p == "perplexity" and perplexity_key:
+        try:
+            return _perplexity_search(query, per_query_results, api_key=perplexity_key, model=perplexity_model), "web_search_perplexity"
+        except Exception:
+            pass
+    try:
+        return _langsearch_fallback(query, per_query_results), "web_search_fallback"
+    except Exception:
+        return [], "web_search_fallback"
 
 
 def _parse_json_strictish(text: str) -> Dict[str, Any]:
@@ -112,510 +180,560 @@ def _parse_json_strictish(text: str) -> Dict[str, Any]:
     return {}
 
 
-def _classifier_schema() -> Dict[str, Any]:
+def _llm_enrichment_schema() -> Dict[str, Any]:
     return {
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "is_direct_competitor": {"type": "boolean"},
-            "competitor_type": {"type": "string"},
-            "relevance_score": {"type": "number"},
-            "reasoning": {"type": "string"},
-            "company_description": {"type": "string"},
-            "year_founded": {"type": "integer"},
-            "headquarters_country": {"type": "string"},
-            "primary_business_segments": {"type": "array", "items": {"type": "string"}},
+            "performance_parameters": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "name": {"type": "string"},
+                        "value": {"type": ["number", "string", "null"]},
+                        "unit": {"type": "string"},
+                    },
+                    "required": ["name", "value", "unit"],
+                },
+            },
+            "price_indicators": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "raw": {"type": "string"},
+                        "value": {"type": ["number", "null"]},
+                        "currency": {"type": "string"},
+                        "period": {"type": "string"},
+                        "context": {"type": "string"},
+                    },
+                    "required": ["raw", "value", "currency", "period", "context"],
+                },
+            },
+            "soft_features": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {"name": {"type": "string"}, "available": {"type": "boolean"}},
+                    "required": ["name", "available"],
+                },
+            },
+            "claims": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "text": {"type": "string"},
+                        "claim_type": {"type": "string", "enum": ["value", "benefit", "differentiation"]},
+                        "evidence": {"type": "string"},
+                    },
+                    "required": ["text", "claim_type", "evidence"],
+                },
+            },
         },
-        "required": [
-            "is_direct_competitor",
-            "competitor_type",
-            "relevance_score",
-            "reasoning",
-            "company_description",
-            "year_founded",
-            "headquarters_country",
-            "primary_business_segments",
-        ],
+        "required": ["performance_parameters", "price_indicators", "soft_features", "claims"],
     }
 
 
-def _clamp_score(value: Any) -> float:
-    try:
-        v = float(value)
-    except Exception:
-        return 0.0
-    return max(0.0, min(1.0, v))
-
-
-def _clamp_year(value: Any) -> int:
-    try:
-        year = int(value)
-    except Exception:
-        return 0
-    return year if 1800 <= year <= 2100 else 0
-
-
-def _clean_segments(values: Any) -> List[str]:
-    if not isinstance(values, list):
-        return []
-    out: List[str] = []
-    seen: set[str] = set()
-    for v in values:
-        s = _clean_text(str(v or ""))
-        if not s:
-            continue
-        key = s.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(s)
-    return out[:8]
-
-
-def _domain_brand(url: str) -> str:
-    d = _domain(url).lower()
-    if not d:
-        return ""
-    host = d.split(":")[0]
-    parts = [p for p in host.split(".") if p and p not in {"www", "com", "de", "eu", "co", "net", "org"}]
-    return parts[0] if parts else ""
-
-
-def _title_case_word(word: str) -> str:
-    if not word:
-        return ""
-    if len(word) <= 3:
-        return word.upper()
-    return word[0].upper() + word[1:].lower()
-
-
-def _is_retailer_domain(url: str) -> bool:
-    d = _domain(url).lower()
-    return bool(d and any(h in d for h in _RETAILER_DOMAIN_HINTS))
-
-
-def _normalize_cluster(url: str, title: str, snippet: str) -> str:
-    if _is_retailer_domain(url):
-        return "retailer"
-    c = _cluster_for_url(url, title, snippet)
-    if c in {"marketplace", "media", "video"}:
-        return "retailer"
-    return "manufacturer"
-
-
-def _normalize_url(value: str) -> str:
-    u = _clean_url(str(value or "").strip())
-    if not u:
-        return ""
-    if not re.match(r"^https?://", u, flags=re.IGNORECASE):
-        return ""
-    return u
-
-
-def _is_bad_company_domain(url: str) -> bool:
-    d = _domain(url).lower()
-    return bool(not d or any(h in d for h in _NON_COMPANY_DOMAIN_HINTS))
-
-
-def _company_name_key(name: str) -> str:
-    n = _clean_text(name).lower()
-    return re.sub(r"[^a-z0-9]+", " ", n).strip()
-
-
-def _candidate_name_from_title(title: str, url: str) -> str:
-    t = _clean_text(title)
-    if t:
-        chunks = [c.strip() for c in re.split(r"[|\-:•·–—]+", t) if _clean_text(c)]
-        for c in chunks:
-            words = [w for w in re.findall(r"[A-Za-zÄÖÜäöüß0-9\+\-]+", c) if w]
-            if not words:
-                continue
-            trimmed = " ".join(words[:3]).strip()
-            key = re.sub(r"[^a-z0-9]+", " ", trimmed.lower()).strip()
-            if key and key not in _GENERIC_TITLE_TOKENS:
-                return trimmed
-    brand = _domain_brand(url)
-    return _title_case_word(brand)
-
-
-def _extract_http_from_text(text: str) -> str:
-    t = str(text or "")
-    m = re.search(r"https?://[^\s\"'<>]+", t, flags=re.IGNORECASE)
-    return _clean_text(m.group(0)) if m else ""
-
-
-def _decode_bing_u_param(raw_value: str) -> str:
-    v = _clean_text(unquote(str(raw_value or "")))
-    if not v:
-        return ""
-    # Sometimes already plain URL in query param.
-    if v.startswith("http://") or v.startswith("https://"):
-        return v
-
-    # Common bing format: a1<base64-url>.
-    candidates = [v]
-    m = re.match(r"^[a-z]\d(.+)$", v, flags=re.IGNORECASE)
-    if m:
-        candidates.append(m.group(1))
-
-    for c in candidates:
-        b64 = c.strip()
-        if not b64:
-            continue
-        b64 = b64.replace("-", "+").replace("_", "/")
-        b64 += "=" * ((4 - len(b64) % 4) % 4)
-        try:
-            dec = base64.b64decode(b64).decode("utf-8", errors="ignore")
-        except Exception:
-            continue
-        url = _extract_http_from_text(dec)
-        if url:
-            return url
-    return ""
-
-
-def _clean_bing_href(href: str) -> str:
-    h = _clean_text(str(href or ""))
-    if not h:
-        return ""
-    if h.startswith("/"):
-        h = "https://www.bing.com" + h
-    if h.startswith("http://") or h.startswith("https://"):
-        parsed = urlparse(h)
-        host = (parsed.netloc or "").lower()
-        if "bing." not in host:
-            return h
-        # Bing redirect wrappers: /ck/a, /aclick, etc.
-        qs = parse_qs(parsed.query or "")
-        for key in ("u", "url", "r"):
-            vals = qs.get(key) or []
-            for v in vals:
-                dec = _decode_bing_u_param(v)
-                if dec:
-                    return dec
-        # No decodable target found.
-        return h
-    return ""
-
-
-def _extract_bing_hits(html: str, *, query: str, max_results: int) -> List[SearchHit]:
-    soup = BeautifulSoup(html or "", "html.parser")
-    out: List[SearchHit] = []
-    seen_urls: set[str] = set()
-    raw_candidates = 0
-    filtered_bad_domain = 0
-    filtered_invalid_url = 0
-    decoded_redirect = 0
-
-    # Primary pattern: Bing organic results.
-    primary_blocks = soup.select("li.b_algo")
-    if not primary_blocks:
-        primary_blocks = soup.select("main li[data-idx], #b_results > li")
-
-    for block in primary_blocks:
-        a = block.select_one("h2 a[href], a[href]")
-        if a is None:
-            continue
-        raw_candidates += 1
-        raw_href = str(a.get("href") or "")
-        cleaned = _clean_bing_href(raw_href)
-        if cleaned and cleaned != raw_href:
-            decoded_redirect += 1
-        url = _normalize_url(cleaned)
-        if not url:
-            filtered_invalid_url += 1
-            continue
-        if _is_bad_company_domain(url):
-            filtered_bad_domain += 1
-            continue
-        key = url.lower()
-        if key in seen_urls:
-            continue
-        seen_urls.add(key)
-        h3 = block.select_one("h2, h3")
-        snippet_node = block.select_one("div.b_caption p, p.b_lineclamp2, p")
-        snippet = _clean_text(snippet_node.get_text(" ", strip=True) if snippet_node else "")
-        title = _clean_text((h3 or a).get_text(" ", strip=True))
-        out.append(SearchHit(title=title, url=url, snippet=snippet, query=query))
-        if len(out) >= max_results:
-            break
-
-    # Fallback: any external absolute link on result page.
-    if len(out) < max_results:
-        for a in soup.select("a[href^='http']"):
-            raw_candidates += 1
-            raw_href = str(a.get("href") or "")
-            cleaned = _clean_bing_href(raw_href)
-            if cleaned and cleaned != raw_href:
-                decoded_redirect += 1
-            url = _normalize_url(cleaned)
-            if not url:
-                filtered_invalid_url += 1
-                continue
-            if _is_bad_company_domain(url):
-                filtered_bad_domain += 1
-                continue
-            key = url.lower()
-            if key in seen_urls:
-                continue
-            seen_urls.add(key)
-            title = _clean_text(a.get_text(" ", strip=True)) or _title_case_word(_domain_brand(url))
-            out.append(SearchHit(title=title, url=url, snippet="", query=query))
-            if len(out) >= max_results:
-                break
-
-    out.append(
-        SearchHit(
-            title=(
-                "__debug_bing__"
-                f"raw={raw_candidates};invalid={filtered_invalid_url};"
-                f"bad_domain={filtered_bad_domain};decoded_redirect={decoded_redirect};kept={len(out)}"
-            ),
-            url="debug://bing-parser",
-            snippet="",
-            query=query,
-        )
-    )
-    return out
-
-
-def _bing_search_hits_with_playwright(*, query: str, max_results: int, timeout_ms: int) -> List[SearchHit]:
-    search_url = f"https://www.bing.com/search?setlang=de&count={max(5, min(20, max_results))}&q={quote_plus(query)}"
-    html = ""
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        try:
-            context = browser.new_context(
-                locale="de-DE",
-                user_agent=(
-                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-                ),
-            )
-            page = context.new_page()
-            page.goto(search_url, wait_until="domcontentloaded", timeout=timeout_ms)
-            try:
-                page.wait_for_selector("li.b_algo, #b_results", timeout=min(5000, timeout_ms))
-            except Exception:
-                pass
-            page.wait_for_timeout(700)
-            html = page.content()
-            title = _clean_text(page.title())
-            url = _clean_text(page.url)
-            _ = (title, url)  # keep for symmetry with debug via parser below
-            context.close()
-        finally:
-            browser.close()
-
-    return _extract_bing_hits(html, query=query, max_results=max_results)
-
-
-def _extract_duckduckgo_hits(html: str, *, query: str, max_results: int) -> List[SearchHit]:
-    soup = BeautifulSoup(html or "", "html.parser")
-    out: List[SearchHit] = []
-    seen_urls: set[str] = set()
-    raw_candidates = 0
-    filtered_bad_domain = 0
-    filtered_invalid_url = 0
-
-    primary_blocks = soup.select("article[data-testid='result'], div[data-testid='result'], div.result")
-    if not primary_blocks:
-        primary_blocks = soup.select("main article, main div")
-
-    for block in primary_blocks:
-        a = block.select_one("a[data-testid='result-title-a'][href], h2 a[href], a.result__a[href], a[href]")
-        if a is None:
-            continue
-        raw_candidates += 1
-        url = _normalize_url(str(a.get("href") or ""))
-        if not url:
-            filtered_invalid_url += 1
-            continue
-        if _is_bad_company_domain(url):
-            filtered_bad_domain += 1
-            continue
-        key = url.lower()
-        if key in seen_urls:
-            continue
-        seen_urls.add(key)
-        h3 = block.select_one("h2, h3, span[data-testid='result-title']")
-        snippet_node = block.select_one("div[data-result='snippet'], div.result__snippet, p")
-        snippet = _clean_text(snippet_node.get_text(" ", strip=True) if snippet_node else "")
-        title = _clean_text((h3 or a).get_text(" ", strip=True))
-        out.append(SearchHit(title=title, url=url, snippet=snippet, query=query))
-        if len(out) >= max_results:
-            break
-
-    if len(out) < max_results:
-        for a in soup.select("a[href^='http']"):
-            raw_candidates += 1
-            url = _normalize_url(str(a.get("href") or ""))
-            if not url:
-                filtered_invalid_url += 1
-                continue
-            if _is_bad_company_domain(url):
-                filtered_bad_domain += 1
-                continue
-            key = url.lower()
-            if key in seen_urls:
-                continue
-            seen_urls.add(key)
-            title = _clean_text(a.get_text(" ", strip=True)) or _title_case_word(_domain_brand(url))
-            out.append(SearchHit(title=title, url=url, snippet="", query=query))
-            if len(out) >= max_results:
-                break
-
-    out.append(
-        SearchHit(
-            title=(
-                "__debug_ddg__"
-                f"raw={raw_candidates};invalid={filtered_invalid_url};"
-                f"bad_domain={filtered_bad_domain};kept={len(out)}"
-            ),
-            url="debug://ddg-parser",
-            snippet="",
-            query=query,
-        )
-    )
-    return out
-
-
-def _duckduckgo_search_hits_with_playwright(*, query: str, max_results: int, timeout_ms: int) -> List[SearchHit]:
-    search_url = f"https://duckduckgo.com/?q={quote_plus(query)}&kl=de-de"
-    html = ""
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        try:
-            context = browser.new_context(
-                locale="de-DE",
-                user_agent=(
-                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-                ),
-            )
-            page = context.new_page()
-            page.goto(search_url, wait_until="domcontentloaded", timeout=timeout_ms)
-            try:
-                page.wait_for_selector(
-                    "article[data-testid='result'], a[data-testid='result-title-a'], a.result__a",
-                    timeout=min(5000, timeout_ms),
-                )
-            except Exception:
-                pass
-            page.wait_for_timeout(700)
-            html = page.content()
-            context.close()
-        finally:
-            browser.close()
-
-    return _extract_duckduckgo_hits(html, query=query, max_results=max_results)
-
-
-def _llm_classify_candidate(
+def _llm_enrich_features(
     *,
     provider: str,
-    reference_company: str,
-    product_category: str,
-    query: str,
-    candidate_name: str,
-    candidate_domain: str,
-    evidence_title: str,
-    evidence_snippet: str,
-) -> Dict[str, Any]:
+    category: str,
+    product_name: str,
+    manufacturer: str,
+    url: str,
+    text: str,
+    perf: List[FeatureValue],
+    price: List[PriceIndicatorValue],
+    soft: List[SoftFeatureValue],
+    claims: List[ClaimValue],
+) -> Tuple[Dict[str, Any], str]:
+    schema = _llm_enrichment_schema()
+    payload = {
+        "category": category,
+        "product_name": product_name,
+        "manufacturer": manufacturer,
+        "url": url,
+        "content": _clean_text(text)[:9000],
+        "current": {
+            "performance_parameters": [x.model_dump() for x in perf],
+            "price_indicators": [x.model_dump() for x in price],
+            "soft_features": [x.model_dump() for x in soft],
+            "claims": [x.model_dump() for x in claims],
+        },
+    }
     system = (
-        "You classify if a company is a direct competitor in a specific product category. "
-        "Return JSON only."
+        "You enrich competitor product features from provided text evidence. "
+        "Only return valid JSON. Do not invent values without textual evidence."
     )
     user = (
-        f"Reference company: {reference_company or 'unknown'}\n"
-        f"Product category: {product_category}\n"
-        f"Search query: {query}\n"
-        f"Candidate company: {candidate_name}\n"
-        f"Candidate domain: {candidate_domain}\n"
-        f"Evidence title: {evidence_title}\n"
-        f"Evidence snippet: {evidence_snippet}\n\n"
-        "Rules:\n"
-        "1) is_direct_competitor=true only if candidate offers comparable products/services in this category.\n"
-        "2) Mark media, retailers, marketplaces and generic blogs as not direct competitors.\n"
-        "3) competitor_type must be one of: Direct competitor, Indirect competitor, Potential new competitor.\n"
-        "4) relevance_score must be between 0 and 1.\n"
-        "5) Keep reasoning concise."
+        "Update/fill the existing features and optionally add new ones if clearly supported by evidence.\n"
+        "Keep claim_type in [value, benefit, differentiation].\n"
+        f"Payload:\n{json.dumps(payload, ensure_ascii=False)}"
     )
-
     p = str(provider or "openai").strip().lower()
-    if p not in {"openai", "perplexity", "ionos"}:
-        p = "openai"
-
-    if p in {"openai", "perplexity"}:
-        client = LlmOpenai() if p == "openai" else LlmPerplexity()
-        if not client.enabled():
-            return {}
-        fmt = {
-            "type": "json_schema",
-            "name": "direct_competitor_check",
-            "schema": _classifier_schema(),
-            "strict": False,
-        }
-        try:
-            resp = client._call(
-                input_messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                text_format=fmt,
-            )
-            txt = ""
-            if p == "openai":
-                for item in resp.get("output", []):
-                    for c in item.get("content", []):
-                        if c.get("type") == "output_text":
-                            txt += str(c.get("text") or "")
-            else:
-                txt = str(resp.get("choices", [{}])[0].get("message", {}).get("content") or "")
-            return _parse_json_strictish(txt)
-        except Exception:
-            return {}
-
-    ion = IonosLLM()
-    if not ion.enabled():
-        return {}
     try:
-        completion = ion.chat_completions(
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "direct_competitor_check",
-                    "schema": _classifier_schema(),
-                    "strict": True,
-                },
-            },
-        )
-        return _parse_json_strictish(ion.extract_text(completion))
+        if p == "openai":
+            llm = LlmOpenai()
+            if not llm.enabled():
+                return {}, "openai_not_enabled"
+            resp = llm._call(
+                input_messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                text_format={"type": "json_schema", "name": "feature_enrichment", "schema": schema, "strict": False},
+            )
+            out = ""
+            for item in resp.get("output", []):
+                for c in item.get("content", []):
+                    if c.get("type") == "output_text":
+                        out += c.get("text", "")
+            parsed = _parse_json_strictish(out)
+            if not parsed:
+                return {}, "openai_empty_or_invalid_json"
+            return parsed, "ok"
+        if p == "perplexity":
+            llm = LlmPerplexity()
+            if not llm.enabled():
+                return {}, "perplexity_not_enabled"
+            resp = llm._call(
+                input_messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                response_format={"type": "json_schema", "json_schema": {"name": "feature_enrichment", "schema": schema}},
+            )
+            parsed = _parse_json_strictish(llm._extract_text(resp))
+            if not parsed:
+                return {}, "perplexity_empty_or_invalid_json"
+            return parsed, "ok"
+        if p == "ionos":
+            llm = IonosLLM()
+            if not llm.enabled():
+                return {}, "ionos_not_enabled"
+            resp = llm.chat_completions(
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                response_format={"type": "json_schema", "json_schema": {"name": "feature_enrichment", "schema": schema, "strict": False}},
+            )
+            parsed = _parse_json_strictish(IonosLLM.extract_text(resp))
+            if not parsed:
+                return {}, "ionos_empty_or_invalid_json"
+            return parsed, "ok"
+    except Exception as exc:
+        return {}, f"exception:{exc.__class__.__name__}"
+    return {}, "provider_not_supported"
+
+
+def _url_type(url: str) -> str:
+    u = _clean_url(url).lower()
+    d = _domain(u)
+    if not d:
+        return "unknown"
+    if any(h in d for h in _RETAILER_HINTS):
+        return "retailer"
+    if any(h in u for h in _MARKETPLACE_HINTS):
+        return "marketplace"
+    if any(h in u for h in _TESTING_HINTS) or any(h in d for h in _TESTING_HINTS):
+        return "testing"
+    if d:
+        return "official"
+    return "unknown"
+
+
+def _company_from_domain(url: str) -> str:
+    d = _domain(url)
+    if not d:
+        return ""
+    base = d.split(".")[0]
+    if base in {"de", "en", "eu", "us", "at", "ch"}:
+        parts = d.split(".")
+        if len(parts) >= 3:
+            base = parts[1]
+    return _clean_text(base.title())
+
+
+def _extract_number_unit(text: str) -> Tuple[Optional[float], str]:
+    m = re.search(r"(\d+(?:[\.,]\d+)?)\s*(pa|°c|c|l|ml|mm|cm|m|w|wh|v|min|h|eur|€)", text.lower())
+    if not m:
+        return None, ""
+    raw = m.group(1).replace(",", ".")
+    try:
+        v = float(raw)
     except Exception:
-        return {}
+        v = None
+    return v, m.group(2)
+
+
+def _feature_name(item: Any) -> str:
+    if isinstance(item, dict):
+        return _clean_text(str(item.get("name") or item.get("feature") or item.get("term") or ""))
+    return _clean_text(str(item or ""))
+
+
+def _feature_unit(item: Any) -> str:
+    if isinstance(item, dict):
+        return _clean_text(str(item.get("unit") or ""))
+    return ""
+
+
+def _clone_perf_features(source: Any) -> List[FeatureValue]:
+    out: List[FeatureValue] = []
+    if not isinstance(source, list):
+        return out
+    for x in source:
+        n = _feature_name(x)
+        if not n:
+            continue
+        out.append(FeatureValue(name=n, value=None, unit=_feature_unit(x)))
+    return out
+
+
+def _build_price_indicators_template() -> List[PriceIndicatorValue]:
+    return [
+        PriceIndicatorValue(raw="", value=None, currency="", period="", context="Preis"),
+        PriceIndicatorValue(raw="", value=None, currency="", period="", context="UVP"),
+    ]
+
+
+def _clone_soft_features(source: Any) -> List[SoftFeatureValue]:
+    out: List[SoftFeatureValue] = []
+    if not isinstance(source, list):
+        return out
+    for x in source:
+        n = _feature_name(x)
+        if not n:
+            continue
+        out.append(SoftFeatureValue(name=n, available=False))
+    return out
+
+
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9äöüß]+", " ", (s or "").lower())).strip()
+
+
+def _mentioned(feature_name: str, text: str) -> bool:
+    fn = _norm(feature_name)
+    tx = _norm(text)
+    if not fn or not tx:
+        return False
+    if fn in tx:
+        return True
+    toks = [t for t in fn.split() if len(t) >= 3]
+    if not toks:
+        return False
+    hit = sum(1 for t in toks if t in tx)
+    return (hit / len(toks)) >= 0.6
+
+
+def _fill_features(
+    *,
+    text: str,
+    perf: List[FeatureValue],
+    price: List[PriceIndicatorValue],
+    soft: List[SoftFeatureValue],
+) -> None:
+    txt = _clean_text(text)
+    for p in perf:
+        if _mentioned(p.name, txt):
+            v, u = _extract_number_unit(txt)
+            if p.value is None and v is not None:
+                p.value = v
+            if not p.unit and u:
+                p.unit = u
+    lower = txt.lower()
+    parsed_value: Optional[float] = None
+    parsed_currency = ""
+    m_price = re.search(r"(\d{2,6}(?:[.,]\d{1,2})?)\s*(€|eur)", lower, flags=re.IGNORECASE)
+    if m_price:
+        try:
+            parsed_value = float(m_price.group(1).replace(",", "."))
+            parsed_currency = "EUR"
+        except Exception:
+            parsed_value = None
+            parsed_currency = ""
+    for pr in price:
+        ctx = (pr.context or "").lower()
+        if ctx == "uvp":
+            if "uvp" in lower or "listenpreis" in lower:
+                pr.raw = txt
+                pr.value = parsed_value
+                pr.currency = parsed_currency
+        else:
+            if "preis" in lower or "angebot" in lower or parsed_value is not None:
+                pr.raw = txt
+                pr.value = parsed_value
+                pr.currency = parsed_currency
+    for s in soft:
+        if _mentioned(s.name, txt):
+            s.available = True
+
+
+
+def _augment_detected_features(text: str, perf: List[FeatureValue], soft: List[SoftFeatureValue]) -> None:
+    txt = _clean_text(text)
+    matches = re.findall(r"(\d+(?:[\.,]\d+)?)\s*(pa|°c|l|ml|mm|cm|h|min)", txt.lower())
+    existing = {_norm(x.name) for x in perf}
+    for raw_v, unit in matches[:4]:
+        name = f"Detected metric ({unit})"
+        if _norm(name) in existing:
+            continue
+        try:
+            v = float(raw_v.replace(",", "."))
+        except Exception:
+            continue
+        perf.append(FeatureValue(name=name, value=v, unit=unit))
+        existing.add(_norm(name))
+
+    keyword_soft = {
+        "navigation": "Navigation",
+        "anti": "Anti-Haarverhedderung",
+        "entleer": "Automatische Staubentleerung",
+        "mopp": "Mopp-Trocknung",
+    }
+    existing_soft = {_norm(x.name): x for x in soft}
+    lower = txt.lower()
+    for kw, name in keyword_soft.items():
+        if kw in lower:
+            key = _norm(name)
+            if key in existing_soft:
+                existing_soft[key].available = True
+            else:
+                sf = SoftFeatureValue(name=name, available=True)
+                soft.append(sf)
+                existing_soft[key] = sf
+
+
+
+def _claims_from_features(
+    *,
+    perf: List[FeatureValue],
+    price: List[PriceIndicatorValue],
+    soft: List[SoftFeatureValue],
+    evidence_text: str,
+) -> List[ClaimValue]:
+    claims: List[ClaimValue] = []
+    claim_types = ["value", "benefit", "differentiation"]
+
+    scored: List[Tuple[str, bool]] = []
+    for p in perf:
+        scored.append((p.name, p.value is not None))
+    for pr in price:
+        scored.append((pr.context, pr.value is not None))
+    for s in soft:
+        scored.append((s.name, s.available))
+
+    scored.sort(key=lambda x: (1 if x[1] else 0), reverse=True)
+    evidence = _clean_text(evidence_text)[:240]
+    for i, (name, _available) in enumerate(scored[:3]):
+        claims.append(
+            ClaimValue(
+                text=name,
+                claim_type=claim_types[i % len(claim_types)],
+                evidence=evidence,
+            )
+        )
+
+    while len(claims) < 3:
+        i = len(claims)
+        claims.append(
+            ClaimValue(
+                text=f"General claim {i + 1}",
+                claim_type=claim_types[i % len(claim_types)],
+                evidence=evidence,
+            )
+        )
+    return claims
+
+
+
+def _differentiators_from_snippet(snippet: str) -> List[str]:
+    txt = _clean_text(snippet)
+    if not txt:
+        return []
+    parts = [p.strip() for p in re.split(r"[.;]\s+", txt) if _clean_text(p)]
+    return parts[:3]
+
+
+def _merge_perf(existing: List[FeatureValue], incoming: Any) -> List[FeatureValue]:
+    out: List[FeatureValue] = []
+    seen: set[str] = set()
+    base = existing if isinstance(existing, list) else []
+    cand = incoming if isinstance(incoming, list) else []
+    for src in [base, cand]:
+        for x in src:
+            if isinstance(x, FeatureValue):
+                name = _clean_text(x.name)
+                val = x.value
+                unit = _clean_text(x.unit)
+            elif isinstance(x, dict):
+                name = _clean_text(str(x.get("name") or ""))
+                val = x.get("value")
+                unit = _clean_text(str(x.get("unit") or ""))
+            else:
+                continue
+            if not name:
+                continue
+            k = _norm(name)
+            if k in seen:
+                continue
+            seen.add(k)
+            if isinstance(val, str):
+                try:
+                    val = float(val.replace(",", "."))
+                except Exception:
+                    pass
+            out.append(FeatureValue(name=name, value=val, unit=unit))
+    return out
+
+
+def _merge_price(existing: List[PriceIndicatorValue], incoming: Any) -> List[PriceIndicatorValue]:
+    if not isinstance(existing, list):
+        existing = []
+    ctx_map: Dict[str, PriceIndicatorValue] = {}
+    for x in existing:
+        if not isinstance(x, PriceIndicatorValue):
+            continue
+        key = _norm(x.context) or _norm(x.raw) or f"ctx_{len(ctx_map)}"
+        ctx_map[key] = x
+    if isinstance(incoming, list):
+        for r in incoming:
+            if not isinstance(r, dict):
+                continue
+            context = _clean_text(str(r.get("context") or "")) or "Preis"
+            key = _norm(context)
+            value = r.get("value")
+            if isinstance(value, str):
+                try:
+                    value = float(value.replace(",", "."))
+                except Exception:
+                    value = None
+            cand = PriceIndicatorValue(
+                raw=_clean_text(str(r.get("raw") or "")),
+                value=value if isinstance(value, (int, float)) else None,
+                currency=_clean_text(str(r.get("currency") or "")),
+                period=_clean_text(str(r.get("period") or "")),
+                context=context,
+            )
+            if key in ctx_map:
+                prev = ctx_map[key]
+                if prev.value is None and cand.value is not None:
+                    ctx_map[key] = cand
+                elif not prev.raw and cand.raw:
+                    ctx_map[key] = cand
+            else:
+                ctx_map[key] = cand
+    out = list(ctx_map.values())
+    return out if out else _build_price_indicators_template()
+
+
+def _merge_soft(existing: List[SoftFeatureValue], incoming: Any) -> List[SoftFeatureValue]:
+    out_map: Dict[str, SoftFeatureValue] = {}
+    for x in existing:
+        if not isinstance(x, SoftFeatureValue):
+            continue
+        k = _norm(x.name)
+        if k:
+            out_map[k] = x
+    if isinstance(incoming, list):
+        for r in incoming:
+            if not isinstance(r, dict):
+                continue
+            name = _clean_text(str(r.get("name") or ""))
+            if not name:
+                continue
+            k = _norm(name)
+            avail = bool(r.get("available"))
+            if k in out_map:
+                out_map[k].available = out_map[k].available or avail
+            else:
+                out_map[k] = SoftFeatureValue(name=name, available=avail)
+    return list(out_map.values())
+
+
+def _merge_claims(existing: List[ClaimValue], incoming: Any) -> List[ClaimValue]:
+    out: List[ClaimValue] = []
+    if isinstance(incoming, list):
+        for r in incoming:
+            if not isinstance(r, dict):
+                continue
+            text = _clean_text(str(r.get("text") or ""))
+            if not text:
+                continue
+            ctype = _clean_text(str(r.get("claim_type") or "value")).lower()
+            if ctype not in _CLAIM_TYPES:
+                ctype = "value"
+            evidence = _clean_text(str(r.get("evidence") or ""))
+            out.append(ClaimValue(text=text, claim_type=ctype, evidence=evidence[:240]))
+            if len(out) >= 3:
+                break
+    if out:
+        return out
+    return existing[:3]
+
+
+def _count_filled(
+    perf: List[FeatureValue],
+    price: List[PriceIndicatorValue],
+    soft: List[SoftFeatureValue],
+    claims: List[ClaimValue],
+) -> Dict[str, int]:
+    return {
+        "performance_filled": sum(1 for x in perf if x.value is not None),
+        "price_filled": sum(1 for x in price if x.value is not None),
+        "soft_available": sum(1 for x in soft if x.available),
+        "claims_count": len([c for c in claims if _clean_text(c.text)]),
+    }
+
+
+
+def _manufacturer_from_title_or_domain(title: str, url: str) -> str:
+    t = _clean_text(title)
+    if t:
+        first = re.split(r"\s+", t, maxsplit=1)[0]
+        first = _clean_text(first)
+        if first and len(first) >= 2:
+            return first
+    return _company_from_domain(url)
+
+
+
+def _reference_text(profile: Dict[str, Any]) -> str:
+    chunks: List[str] = []
+    for key in ("name", "product_name", "category", "description"):
+        v = profile.get(key)
+        if isinstance(v, str):
+            chunks.append(_clean_text(v))
+    for key in ("performance_parameters", "price_indicators", "soft_features"):
+        vals = profile.get(key)
+        if isinstance(vals, list):
+            for x in vals:
+                n = _feature_name(x)
+                if n:
+                    chunks.append(n)
+    return "\n".join([c for c in chunks if c])
+
 
 
 def search_competitors_v0_4(
     *,
     analysis_plan: Optional[Dict[str, Any]],
     analysis_plan_path: Optional[str],
+    product_profile: Optional[Dict[str, Any]],
+    product_profile_path: Optional[str],
     provider: str = "openai",
     max_queries: int = 20,
     per_query_results: int = 10,
-    shortlist_size: int = 12,
-    max_candidates_to_check: int = 40,
-    min_relevance_score: float = 0.15,
-    search_timeout_ms: int = 20000,
+    max_candidates_to_check: int = 200,
+    use_llm_feature_enrichment: bool = False,
+    llm_min_relevance_for_enrichment: float = 0.2,
+    include_page_fetch: bool = False,
+    page_fetch_timeout_s: int = 8,
+    page_fetch_max_chars: int = 6000,
     verbose_terminal: bool = False,
-    user_root,
-    work_root,
-) -> CompetitorSearchResults:
+    verbose_search_hits: bool = False,
+    user_root=None,
+    work_root=None,
+) -> CompetitorSearchResultsV04:
     def _log(msg: str) -> None:
         if verbose_terminal:
             print(f"[competitor_search_v0_4] {msg}")
@@ -627,227 +745,203 @@ def search_competitors_v0_4(
         user_root=user_root,
         work_root=work_root,
     )
-    warnings = [str(w).strip() for w in (plan.get("extraction_warnings") or []) if str(w).strip()]
+    profile = _load_json_obj(
+        inline_obj=product_profile,
+        path=product_profile_path,
+        root_key="product_profile",
+        user_root=user_root,
+        work_root=work_root,
+    )
 
-    def _load_v0_2_queries() -> List[str]:
-        candidates = [
-            "work/analysis_plan_v0_2.json",
-            "analysis_plan_v0_2.json",
-        ]
-        for rel in candidates:
-            try:
-                obj = _load_json_obj(
-                    inline_obj=None,
-                    path=rel,
-                    root_key="analysis_plan",
-                    user_root=user_root,
-                    work_root=work_root,
-                )
-            except Exception:
-                _log(f"analysis_plan_v0_2 candidate not usable: {rel}")
-                continue
-            raw = obj.get("search_queries") if isinstance(obj.get("search_queries"), list) else []
-            qs = [_clean_text(str(q or "")) for q in raw if _clean_text(str(q or ""))]
-            if qs:
-                _log(f"loaded search_queries from {rel}: {len(qs)}")
-                return qs
-        return []
+    warnings: List[str] = [str(w).strip() for w in (plan.get("extraction_warnings") or []) if str(w).strip()]
 
     p = str(provider or "openai").strip().lower()
     if p not in {"openai", "perplexity", "ionos"}:
         p = "openai"
+    llm_min_rel = max(0.0, min(1.0, float(llm_min_relevance_for_enrichment)))
 
-    category = _clean_text(str(plan.get("product_category") or "")) or "product"
-    search_terms = plan.get("search_terms") if isinstance(plan.get("search_terms"), list) else []
-    ref_company = ""
-    for term_obj in search_terms:
-        if not isinstance(term_obj, dict):
-            continue
-        intent = _clean_text(str(term_obj.get("intent") or "")).lower()
-        if intent == "brand":
-            ref_company = _clean_text(str(term_obj.get("term") or ""))
-            if ref_company:
-                break
+    openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+    openai_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+    perplexity_key = os.getenv("PERPLEXITY_API_KEY", "").strip()
+    perplexity_model = os.getenv("PERPLEXITY_MODEL", "sonar-pro").strip() or "sonar-pro"
 
-    v0_2_queries = _load_v0_2_queries()
     raw_queries = plan.get("search_queries") if isinstance(plan.get("search_queries"), list) else []
     queries = [_clean_text(str(q or "")) for q in raw_queries if _clean_text(str(q or ""))]
-    if v0_2_queries:
-        queries = v0_2_queries
-        _log(f"using analysis_plan_v0_2 queries: {len(queries)}")
-    else:
-        warnings.append("v0.4 analysis_plan_v0_2.json not found or without search_queries; using request plan queries.")
-        _log(f"using request/fallback queries: {len(queries)}")
     if not queries:
         queries = _iter_queries(plan, max_queries=max_queries)
         warnings.append("v0.4 fallback to generated queries because analysis_plan.search_queries was empty.")
-    # Add competitor-focused queries to avoid purely informational SERPs.
-    focused_queries: List[str] = []
-    if category:
-        focused_queries.extend(
-            [
-                f"{category} hersteller marken",
-                f"{category} direktvergleich marken",
-                f"beste {category} marken",
-            ]
-        )
-    if ref_company and category:
-        focused_queries.extend(
-            [
-                f"alternativen zu {ref_company} {category}",
-                f"{ref_company} wettbewerber {category}",
-            ]
-        )
-    for fq in focused_queries:
-        q = _clean_text(fq)
-        if q and q not in queries:
-            queries.append(q)
     queries = queries[: max(1, int(max_queries))]
 
-    min_comp = int(plan.get("min_competitors") or 6)
-    min_comp = max(2, min(50, min_comp))
-    target_count = max(min_comp, min(50, int(shortlist_size)))
-    min_rel = max(0.0, min(1.0, float(min_relevance_score)))
+    category = _clean_text(str(plan.get("product_category") or profile.get("category") or "product")) or "product"
+    perf_template = _clone_perf_features(profile.get("performance_parameters"))
+    price_template = _build_price_indicators_template()
+    soft_template = _clone_soft_features(profile.get("soft_features"))
+    ref_text = _reference_text(profile)
 
     _log(
-        f"start provider={p} category={category} queries={len(queries)} "
-        f"target_count={target_count} min_relevance={min_rel:.2f}"
+        f"start provider={p} queries={len(queries)} per_query_results={per_query_results} "
+        f"max_candidates_to_check={max_candidates_to_check}"
     )
 
-    all_hits: List[SearchHit] = []
-    for idx, q in enumerate(queries, start=1):
-        _log(f"query {idx}/{len(queries)}: {q}")
-        try:
-            hits = _duckduckgo_search_hits_with_playwright(query=q, max_results=per_query_results, timeout_ms=search_timeout_ms)
-            real_hits: List[SearchHit] = []
-            for h in hits:
-                if h.url == "debug://ddg-parser":
-                    _log(h.title)
-                    continue
-                real_hits.append(h)
-            _log(f"ddg_hits={len(real_hits)}")
-            all_hits.extend(real_hits)
-        except PlaywrightTimeoutError:
-            warnings.append(f"v0.4 Playwright/DuckDuckGo timeout for query: {q}")
-        except Exception as exc:
-            warnings.append(f"v0.4 DuckDuckGo search failed for query '{q}': {type(exc).__name__}")
+    candidates: List[ProductCompetitorCandidate] = []
+    seen_urls: set[str] = set()
+    generated_queries: List[str] = []
 
-        if len(all_hits) >= max_candidates_to_check * 2:
-            _log("hit soft limit for collected SERP results")
-            break
-
-    # Deduplicate by domain and keep first hit as representative evidence.
-    by_domain: Dict[str, SearchHit] = {}
-    for hit in all_hits:
-        d = _domain(hit.url).lower()
-        if not d:
-            continue
-        if d not in by_domain:
-            by_domain[d] = hit
-        if len(by_domain) >= max_candidates_to_check:
-            break
-    _log(f"candidate domains after dedupe: {len(by_domain)}")
-
-    competitors: List[CompanyCompetitorCandidate] = []
-    by_name_index: Dict[str, int] = {}
-
-    if not by_domain:
-        warnings.append("v0.4 no parsable DuckDuckGo SERP hits extracted (possible block/selector mismatch).")
-
-    for d, hit in by_domain.items():
-        candidate_url = f"https://{d}"
-        if _is_bad_company_domain(candidate_url):
-            _log(f"drop candidate bad-domain: {candidate_url}")
-            continue
-
-        candidate_name = _candidate_name_from_title(hit.title, candidate_url)
-        if not candidate_name:
-            _log(f"drop candidate no-name: domain={d}")
-            continue
-        _log(f"classify candidate: {candidate_name} ({candidate_url})")
-
-        llm_obj = _llm_classify_candidate(
+    for i, q in enumerate(queries, start=1):
+        _log(f"query {i}/{len(queries)}: {q}")
+        generated_queries.append(q)
+        results, source_label = _search_results(
             provider=p,
-            reference_company=ref_company,
-            product_category=category,
-            query=hit.query,
-            candidate_name=candidate_name,
-            candidate_domain=d,
-            evidence_title=hit.title,
-            evidence_snippet=hit.snippet,
+            query=q,
+            per_query_results=per_query_results,
+            openai_key=openai_key,
+            openai_model=openai_model,
+            perplexity_key=perplexity_key,
+            perplexity_model=perplexity_model,
         )
-        if not isinstance(llm_obj, dict) or not llm_obj:
-            warnings.append(f"v0.4 LLM classification failed for candidate: {candidate_name}")
-            _log(f"drop candidate llm-failed: {candidate_name}")
-            continue
+        _log(f"search_results={len(results)} source={source_label}")
 
-        is_direct = bool(llm_obj.get("is_direct_competitor"))
-        competitor_type = _clean_text(str(llm_obj.get("competitor_type") or "Direct competitor"))
-        competitor_type_l = competitor_type.lower()
-        score = _clamp_score(llm_obj.get("relevance_score"))
+        for ridx, r in enumerate(results, start=1):
+            if len(candidates) >= max_candidates_to_check:
+                break
+            title = _clean_text(str(r.get("title") or ""))
+            url = _clean_url(str(r.get("url") or ""))
+            snippet = _clean_text(str(r.get("snippet") or ""))
+            if not title or not url:
+                continue
+            if url in seen_urls:
+                continue
+            status_code = _http_status_code(url, timeout_s=page_fetch_timeout_s)
+            if status_code == 404:
+                if verbose_terminal:
+                    _log(f"skip 404 url={url}")
+                continue
+            seen_urls.add(url)
 
-        if competitor_type not in _COMPETITOR_TYPES:
-            if "direct" in competitor_type_l or "direkt" in competitor_type_l:
-                competitor_type = "Direct competitor"
-            elif "indirect" in competitor_type_l or "indirekt" in competitor_type_l:
-                competitor_type = "Indirect competitor"
-            else:
-                competitor_type = "Direct competitor" if is_direct else "Indirect competitor"
+            if verbose_terminal and verbose_search_hits:
+                _log(f"result {ridx}/{len(results)} title={title}")
+                _log(f"result {ridx}/{len(results)} url={url}")
+                _log(f"result {ridx}/{len(results)} snippet={snippet[:220]}")
 
-        if not is_direct:
-            _log(f"drop candidate not-direct: {candidate_name} type={competitor_type} score={score:.3f}")
-            continue
-        if competitor_type != "Direct competitor":
-            _log(f"drop candidate wrong-type: {candidate_name} type={competitor_type}")
-            continue
-        if score < min_rel:
-            _log(f"drop candidate low-score: {candidate_name} score={score:.3f} min={min_rel:.3f}")
-            continue
+            product_name = title
+            manufacturer = _manufacturer_from_title_or_domain(title, url)
+            url_type = _url_type(url)
 
-        item = CompanyCompetitorCandidate(
-            name=candidate_name,
-            cluster=_normalize_cluster(hit.url, hit.title, hit.snippet),
-            year_founded=_clamp_year(llm_obj.get("year_founded")),
-            headquarters_country=_clean_text(str(llm_obj.get("headquarters_country") or "")),
-            company_description=_clean_text(str(llm_obj.get("company_description") or "")),
-            primary_business_segments=_clean_segments(llm_obj.get("primary_business_segments")),
-            relevance_in_reference_segment=_clean_text(str(llm_obj.get("reasoning") or "")),
-            competitor_type="Direct competitor",
-            company_website_url=candidate_url,
-            brand_domain_whitelist=[candidate_url],
-            relevance_score=score,
-        )
+            perf = [FeatureValue(name=x.name, value=x.value, unit=x.unit) for x in perf_template]
+            price = [
+                PriceIndicatorValue(
+                    raw=x.raw,
+                    value=x.value,
+                    currency=x.currency,
+                    period=x.period,
+                    context=x.context,
+                )
+                for x in price_template
+            ]
+            soft = [SoftFeatureValue(name=x.name, available=x.available) for x in soft_template]
 
-        nkey = _company_name_key(item.name)
-        if not nkey:
-            continue
-        if nkey in by_name_index:
-            existing_idx = by_name_index[nkey]
-            existing = competitors[existing_idx]
-            if item.relevance_score > existing.relevance_score + 1e-6:
-                competitors[existing_idx] = item
-                _log(f"replace duplicate by higher score: {item.name} {existing.relevance_score:.3f}->{item.relevance_score:.3f}")
-            else:
-                _log(f"drop duplicate: {item.name}")
-            continue
+            page_text = ""
+            if include_page_fetch:
+                page_text = _fetch_page_text(url, timeout_s=page_fetch_timeout_s, max_chars=page_fetch_max_chars)
+                if verbose_terminal:
+                    _log(f"page_fetch={'ok' if page_text else 'skip'} url={url}")
 
-        by_name_index[nkey] = len(competitors)
-        competitors.append(item)
-        _log(f"accepted {item.name} relevance={item.relevance_score:.3f}")
-        if len(competitors) >= target_count:
+            text = f"{title}\n{snippet}\n{page_text}"
+            _fill_features(text=text, perf=perf, price=price, soft=soft)
+            _augment_detected_features(text=text, perf=perf, soft=soft)
+
+            claims = _claims_from_features(perf=perf, price=price, soft=soft, evidence_text=snippet or title)
+            differentiators = _differentiators_from_snippet(snippet)
+            before_counts = _count_filled(perf, price, soft, claims)
+            after_counts = dict(before_counts)
+            enrich_status = "not_requested"
+
+            matched_fields = sum(1 for x in perf if x.value is not None) + sum(1 for x in price if x.value is not None) + sum(
+                1 for x in soft if x.available
+            )
+            total_fields = max(1, len(perf) + len(price) + len(soft))
+            feature_coverage = matched_fields / total_fields
+            semantic = _cosine_similarity(ref_text, text) if ref_text else 0.0
+
+            relevance_score = max(0.0, min(1.0, 0.55 * semantic + 0.45 * feature_coverage))
+            similarity_score = max(0.0, min(1.0, 0.65 * semantic + 0.35 * feature_coverage))
+
+            if use_llm_feature_enrichment and relevance_score >= llm_min_rel:
+                enriched, enrich_status = _llm_enrich_features(
+                    provider=p,
+                    category=category,
+                    product_name=product_name,
+                    manufacturer=manufacturer,
+                    url=url,
+                    text=text,
+                    perf=perf,
+                    price=price,
+                    soft=soft,
+                    claims=claims,
+                )
+                if enriched:
+                    perf = _merge_perf(perf, enriched.get("performance_parameters"))
+                    price = _merge_price(price, enriched.get("price_indicators"))
+                    soft = _merge_soft(soft, enriched.get("soft_features"))
+                    claims = _merge_claims(claims, enriched.get("claims"))
+                    after_counts = _count_filled(perf, price, soft, claims)
+                    if verbose_terminal:
+                        _log(f"llm_enrichment=applied url={url} before={before_counts} after={after_counts}")
+                else:
+                    after_counts = dict(before_counts)
+                    if verbose_terminal:
+                        _log(f"llm_enrichment=failed url={url} reason={enrich_status}")
+                    warnings.append(f"v0.4 llm enrichment skipped/failed for url: {url} ({enrich_status})")
+            elif use_llm_feature_enrichment and relevance_score < llm_min_rel:
+                enrich_status = "skipped_relevance"
+                if verbose_terminal:
+                    _log(
+                        f"llm_enrichment=skipped url={url} "
+                        f"reason=relevance_below_threshold score={relevance_score:.4f} threshold={llm_min_rel:.4f}"
+                    )
+
+            candidates.append(
+                ProductCompetitorCandidate(
+                    product_name=product_name,
+                    manufacturer=manufacturer,
+                    url=url,
+                    url_type=url_type,
+                    performance_parameters=perf,
+                    price_indicators=price,
+                    soft_features=soft,
+                    claims=claims,
+                    differentiators=differentiators,
+                    enrichment_delta={
+                        "status": enrich_status,
+                        "before": before_counts,
+                        "after": after_counts,
+                        "delta": {
+                            "performance_filled": int(after_counts.get("performance_filled", 0))
+                            - int(before_counts.get("performance_filled", 0)),
+                            "price_filled": int(after_counts.get("price_filled", 0))
+                            - int(before_counts.get("price_filled", 0)),
+                            "soft_available": int(after_counts.get("soft_available", 0))
+                            - int(before_counts.get("soft_available", 0)),
+                            "claims_count": int(after_counts.get("claims_count", 0))
+                            - int(before_counts.get("claims_count", 0)),
+                        },
+                    },
+                    relevance_score=round(float(relevance_score), 4),
+                    similarity_score=round(float(similarity_score), 4),
+                )
+            )
+        if len(candidates) >= max_candidates_to_check:
+            warnings.append(f"v0.4 candidate limit reached ({max_candidates_to_check}).")
             break
 
-    if len(competitors) < min_comp:
-        warnings.append(f"v0.4 only {len(competitors)} companies found, below min_competitors={min_comp}.")
-
-    warnings.append("Generated via Playwright + BeautifulSoup search parsing and LLM direct-competitor gate v0.4.")
+    warnings.append("Generated via hit-level competitor product extraction v0.4.")
     warnings = list(dict.fromkeys([w for w in warnings if _clean_text(w)]))
-    _log(f"done companies={len(competitors)} warnings={len(warnings)}")
+    _log(f"done competitors={len(candidates)} warnings={len(warnings)}")
 
-    return CompetitorSearchResults(
+    return CompetitorSearchResultsV04(
+        schema_version="1.0",
         provider=p,
-        generated_queries=queries,
-        min_competitors_target=min_comp,
-        competitors=competitors,
+        generated_queries=generated_queries,
+        competitors=candidates,
         extraction_warnings=warnings,
     )

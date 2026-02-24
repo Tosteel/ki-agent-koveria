@@ -4,7 +4,11 @@ import json
 import re
 from typing import Any, Dict, List
 
-from ..agent.policies import is_phase1_tool_allowed
+from pydantic import ValidationError
+
+from ..agent.models import AgentStep
+from ..agent.langchain_runtime import dispatch_tool_chain
+from ..agent.policies import tools_allowed
 from ..agent.tool_registry import ToolRegistry, ToolContext
 
 
@@ -16,7 +20,21 @@ class Orchestrator:
         outputs: List[Dict[str, Any]] = []
         payload: Dict[str, Any] = {}
 
-        for i, step in enumerate(steps, start=1):
+        for i, raw_step in enumerate(steps, start=1):
+            try:
+                step = AgentStep.model_validate(raw_step).model_dump()
+            except ValidationError as e:
+                entry = {
+                    "step": i,
+                    "tool": str((raw_step or {}).get("tool") if isinstance(raw_step, dict) else ""),
+                    "ok": False,
+                    "error": f"invalid_step_schema: {e.errors()}",
+                    "payload": payload,
+                }
+                outputs.append(entry)
+                self._log_step_output(entry)
+                continue
+
             tool = (step.get("tool") or "").strip()
             args = self._merge_with_payload(step.get("args") or {}, payload)
             goal = (getattr(ctx, "goal", "") or "").strip()
@@ -26,14 +44,14 @@ class Orchestrator:
             expected = self.registry.expected_input(tool)
             self._log_step_input(i, tool, args, expected)
 
-            if not is_phase1_tool_allowed(tool):
+            if not tools_allowed(tool):
                 entry = {"step": i, "tool": tool, "ok": False, "error": "tool_not_allowed", "payload": payload}
                 outputs.append(entry)
                 self._log_step_output(entry)
                 continue
 
             try:
-                res = self.registry.dispatch(tool, ctx, args)
+                res = dispatch_tool_chain(registry=self.registry, tool_name=tool, ctx=ctx, args=args)
                 payload = self._as_payload(res, i, tool)
                 entry = {"step": i, "tool": tool, "ok": True, "result": res, "payload": payload}
                 outputs.append(entry)

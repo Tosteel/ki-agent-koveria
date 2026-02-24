@@ -1,7 +1,8 @@
-PHASE1_ALLOWED_TOOLS = {
+BASIC_TOOLS = {
     "read_file",
     "write_file",
     "rag_knowledgebase",
+    "query_rag",
     "llm_smalltalk",
     "llm_summarize",
     "llm_compose",
@@ -10,7 +11,6 @@ PHASE1_ALLOWED_TOOLS = {
     "websearch_table",
     "search_multitable",
     "websearch_videoanalyzer",
-    "websearch_videoanalizer",
     "langsearch",
     #"google_search",
     "search_ebay",
@@ -20,8 +20,11 @@ PHASE1_ALLOWED_TOOLS = {
     "answer_mail",
     "fetch_inbox_mails",
     "fetch_unanswered_mails",
-    "list_skills",
-    "competitive_parse_document",
+    "list_skills"
+}
+
+COMPETITIVE_ANALYSIS_TOOLS = {
+"competitive_parse_document",
     "competitive_quality_gate",
     "competitive_extract_product_profile",
     "competitive_extract_product_profile_v0_2",
@@ -43,9 +46,9 @@ PHASE1_ALLOWED_TOOLS = {
     "competitive_feature_matrix_gap_analysis_quality_gate",
     "competitive_strategic_analysis",
     "competitive_generate_final_report",
-    "competitive_publish_pdf_report",
+    "competitive_publish_pdf_report"
 }
 
-def is_phase1_tool_allowed(tool_name: str) -> bool:
+def tools_allowed(tool_name: str) -> bool:
     name = str(tool_name or "").strip()
-    return bool(name in PHASE1_ALLOWED_TOOLS or name.startswith("agent_"))
+    return bool(name in BASIC_TOOLS or COMPETITIVE_ANALYSIS_TOOLS or name.startswith("agent_"))

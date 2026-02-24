@@ -325,6 +325,7 @@ def _build_company_queries(
     q: List[str] = []
     cn = _clean_text(company_name)
     cat = _clean_text(category) or "product"
+    cat_compact = _clean_text(re.sub(r"[-_/,&+]+", " ", cat))
     domains: List[str] = []
     seen_domains: set[str] = set()
     primary = _domain(company_website_url)
@@ -344,8 +345,9 @@ def _build_company_queries(
     # Prioritize competitor-domain queries first.
     for d in domains:
         q.append(f"site:{d} {cat}")
-        q.append(f"site:{d} robot vacuum")
-        q.append(f"site:{d} {cn} product")
+    # Additional brand-oriented site query requested by user.
+    if cn:
+        q.append(f"site:{cn} {cat_compact or cat}")
     if manufacturer_domain_only:
         out: List[str] = []
         seen: set[str] = set()
@@ -364,6 +366,7 @@ def _build_company_queries(
     # Then broader queries.
     q.append(f"{cn} {cat} products")
     q.append(f"{cn} {cat} product page")
+    q.append(f"{cn} {cat} models")
     q.append(f"{cn} {cat} specifications")
 
     out: List[str] = []
@@ -380,6 +383,38 @@ def _build_company_queries(
         if len(out) >= max_queries_per_company:
             break
     return out
+
+
+def _brand_tokens(company_name: str) -> List[str]:
+    return [t for t in re.findall(r"[a-z0-9]{3,}", _clean_text(company_name).lower()) if t][:4]
+
+
+def _contains_brand_token(text: str, token: str) -> bool:
+    t = _clean_text(text).lower()
+    if not t or not token:
+        return False
+    return re.search(rf"\b{re.escape(token)}\b", t) is not None
+
+
+def _belongs_to_competitor_product(
+    *,
+    product_name: str,
+    snippet: str,
+    url: str,
+    company_name: str,
+    allowed_domains: set[str],
+) -> bool:
+    d = _domain(_clean_url(url)).lower()
+    if d and d in allowed_domains:
+        return True
+    tokens = _brand_tokens(company_name)
+    if not tokens:
+        return False
+    # Third-party result: keep only if the product name itself carries a brand token.
+    # This avoids accepting unrelated products where only article context mentions the brand.
+    if any(_contains_brand_token(product_name, tok) for tok in tokens):
+        return True
+    return False
 
 
 def _candidate_score(
@@ -624,6 +659,29 @@ def extract_competitor_products(
                     similarity_score=round(float(score), 4),
                 )
             )
+
+        # Final ownership guard: keep third-party URLs only if product still clearly belongs to the competitor.
+        allowed_domains = company_domains
+        if allowed_domains or company_name:
+            before = len(reference_products)
+            reference_products = [
+                rp
+                for rp in reference_products
+                if _belongs_to_competitor_product(
+                    product_name=rp.product_name,
+                    snippet=rp.snippet,
+                    url=rp.url,
+                    company_name=company_name,
+                    allowed_domains=allowed_domains,
+                )
+            ]
+            removed = before - len(reference_products)
+            if removed > 0:
+                warnings.append(
+                    f"competitor_products: removed {removed} products failing ownership check for company '{company_name}'."
+                )
+            if not emit_all_candidates and len(reference_products) > top_products_per_company:
+                reference_products = reference_products[:top_products_per_company]
 
         if not reference_products:
             warnings.append(f"competitor_products: no reference products found for company '{company_name}'.")

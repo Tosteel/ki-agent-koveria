@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from server.agent.policies import PHASE1_ALLOWED_TOOLS
+from server.agent.policies import BASIC_TOOLS
 
 
 _TOOL_DESCRIPTIONS: Dict[str, str] = {
@@ -28,7 +28,7 @@ _TOOL_DESCRIPTIONS: Dict[str, str] = {
 
 
 def list_skills(*, include_descriptions: bool = True) -> Dict[str, Any]:
-    skill_names: List[str] = sorted(PHASE1_ALLOWED_TOOLS)
+    skill_names: List[str] = sorted(BASIC_TOOLS)
     skills: List[Dict[str, str]] = []
     for name in skill_names:
         desc = _TOOL_DESCRIPTIONS.get(name, "Tool verfügbar.")

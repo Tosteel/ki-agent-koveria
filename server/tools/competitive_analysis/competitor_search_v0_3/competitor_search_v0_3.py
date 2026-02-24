@@ -115,6 +115,7 @@ def _company_schema() -> Dict[str, Any]:
             "competitor_type": {"type": "string"},
             "company_website_url": {"type": "string"},
             "brand_domain_whitelist": {"type": "array", "items": {"type": "string"}},
+            "brand_domain_customerlist": {"type": "array", "items": {"type": "string"}},
             "relevance_score": {"type": "number"},
         },
         "required": [
@@ -199,7 +200,7 @@ def _normalize_company_name(raw_name: str, company_url: str) -> str:
 
     out = _clean_text(" ".join(kept))
     # Avoid generic non-company outputs.
-    if out.lower() in {"robot", "vacuum", "saugroboter", "wischroboter"}:
+    if out.lower() in {"product", "products", "model", "models", "category"}:
         out = ""
 
     if not out:
@@ -249,6 +250,26 @@ def _domain_matches_company(domain: str, company_name: str, company_url: str) ->
     return False
 
 
+def _is_strong_company_domain_match(domain: str, company_name: str, company_url: str) -> bool:
+    d = (domain or "").lower().strip()
+    if not d:
+        return False
+    brand = _domain_brand(f"https://{d}")
+    if not brand:
+        return False
+    tokens = _company_name_tokens(company_name)
+    if company_url:
+        tokens.extend(_company_name_tokens(_domain_brand(company_url)))
+    for tok in tokens:
+        if len(tok) < 4:
+            continue
+        if brand.startswith(tok) or tok.startswith(brand):
+            return True
+        if tok in brand:
+            return True
+    return False
+
+
 def _normalize_brand_domain_whitelist(values: Any, company_url: str, company_name: str, observed_domains: set[str]) -> List[str]:
     out: List[str] = []
     seen: set[str] = set()
@@ -271,7 +292,9 @@ def _normalize_brand_domain_whitelist(values: Any, company_url: str, company_nam
         if not d:
             continue
         dl = d.lower()
-        if observed_domains and dl not in observed_domains:
+        # Relax strict "must be observed" gate: keep strong brand-domain matches
+        # so official sites with suffixes (e.g. dreametech.com) are not dropped.
+        if observed_domains and dl not in observed_domains and not _is_strong_company_domain_match(dl, company_name, company_url):
             continue
         if not _domain_matches_company(dl, company_name, company_url):
             continue
@@ -297,8 +320,9 @@ def _discover_brand_domains_via_search(
 ) -> set[str]:
     queries = [
         f"{company_name} official website",
+        f"{company_name} {product_category}",
         f"{company_name} {product_category} official website",
-        f"{company_name} robot vacuum official site",
+        f"{company_name} {product_category} official site",
         f"{company_name} global site",
     ]
     domains: set[str] = set()
@@ -364,6 +388,41 @@ def _clamp_score(value: Any) -> float:
     return max(0.0, min(1.0, v))
 
 
+def _extract_customer_links(payload: Dict[str, Any]) -> List[str]:
+    vals = payload.get("competitor_links")
+    if not isinstance(vals, list):
+        return []
+    out: List[str] = []
+    seen: set[str] = set()
+    for v in vals:
+        u = _clean_url(str(v or "").strip())
+        if not u:
+            continue
+        k = u.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(u)
+    return out
+
+
+def _link_matches_competitor(link: str, item: CompanyCompetitorCandidate) -> bool:
+    d = _domain(link).lower()
+    if not d:
+        return False
+    if item.company_website_url:
+        cd = _domain(item.company_website_url).lower()
+        if d == cd or d.endswith("." + cd) or cd.endswith("." + d):
+            return True
+    for u in item.brand_domain_whitelist:
+        wd = _domain(u).lower()
+        if not wd:
+            continue
+        if d == wd or d.endswith("." + wd) or wd.endswith("." + d):
+            return True
+    return _domain_matches_company(d, item.name, item.company_website_url)
+
+
 def _llm_extract_company(
     *,
     provider: str,
@@ -395,6 +454,7 @@ def _llm_extract_company(
         "7) If evidence shows a model name, map it to the owning company (e.g., 'MIDEA S8+' -> 'Midea').\n"
         "8) company_website_url must be the official company domain (not media/test/shop article URL).\n"
         "9) brand_domain_whitelist must contain official brand domains (regional hosts allowed), as URLs.\n"
+        "10) brand_domain_customerlist should be an empty array unless explicit customer links are provided externally.\n"
     )
 
     p = str(provider or "openai").strip().lower()
@@ -485,12 +545,15 @@ def search_competitors_v0_3(
     *,
     analysis_plan: Optional[Dict[str, Any]],
     analysis_plan_path: Optional[str],
+    product_competitors: Optional[Dict[str, Any]] = None,
+    product_competitors_path: Optional[str] = None,
     provider: str = "openai",
     max_queries: int = 20,
     per_query_results: int = 8,
     shortlist_size: int = 12,
     min_relevance_score: float = 0.15,
     verbose_terminal: bool = False,
+    verbose_search_hits: bool = False,
     user_root,
     work_root,
 ) -> CompetitorSearchResults:
@@ -505,6 +568,16 @@ def search_competitors_v0_3(
         user_root=user_root,
         work_root=work_root,
     )
+    customer_payload: Dict[str, Any] = {}
+    if (isinstance(product_competitors, dict) and product_competitors) or (product_competitors_path or "").strip():
+        customer_payload = _load_json_obj(
+            inline_obj=product_competitors,
+            path=product_competitors_path,
+            root_key="product_competitors",
+            user_root=user_root,
+            work_root=work_root,
+        )
+    customer_links = _extract_customer_links(customer_payload) if customer_payload else []
     warnings = [str(w).strip() for w in (plan.get("extraction_warnings") or []) if str(w).strip()]
 
     p = str(provider or "openai").strip().lower()
@@ -533,6 +606,8 @@ def search_competitors_v0_3(
         f"start provider={p} category={category} queries={len(queries)} "
         f"target_count={target_count} min_relevance={min_rel:.2f}"
     )
+    if customer_links:
+        _log(f"customer_links={len(customer_links)}")
 
     competitors: List[CompanyCompetitorCandidate] = []
     by_name_index: Dict[str, int] = {}
@@ -557,6 +632,16 @@ def search_competitors_v0_3(
             continue
 
         _log(f"search_results={len(results)} source={source_label}")
+        if verbose_terminal and verbose_search_hits:
+            for ridx, r in enumerate(results, start=1):
+                r_title = _clean_text(str(r.get("title") or ""))
+                r_url = _clean_url(str(r.get("url") or ""))
+                r_snippet = _clean_text(str(r.get("snippet") or ""))
+                if len(r_snippet) > 220:
+                    r_snippet = r_snippet[:217].rstrip() + "..."
+                _log(f"result {ridx}/{len(results)} title={r_title}")
+                _log(f"result {ridx}/{len(results)} url={r_url}")
+                _log(f"result {ridx}/{len(results)} snippet={r_snippet}")
         obj = _llm_extract_company(
             provider=p,
             product_category=category,
@@ -642,6 +727,7 @@ def search_competitors_v0_3(
             competitor_type=competitor_type,
             company_website_url=company_url,
             brand_domain_whitelist=whitelist,
+            brand_domain_customerlist=[],
             relevance_score=_clamp_score(obj.get("relevance_score")),
         )
 
@@ -679,6 +765,94 @@ def search_competitors_v0_3(
         by_name_index[nkey] = len(competitors)
         competitors.append(item)
         _log(f"accepted {item.name} ({item.competitor_type}) relevance={item.relevance_score:.3f}")
+
+    # Map user-provided competitor links to detected competitors.
+    unresolved_customer_links: List[str] = []
+    if customer_links:
+        for link in customer_links:
+            mapped = False
+            for i, c in enumerate(competitors):
+                if _link_matches_competitor(link, c):
+                    current = list(c.brand_domain_customerlist or [])
+                    if link not in current:
+                        current.append(link)
+                    competitors[i] = c.model_copy(update={"brand_domain_customerlist": current})
+                    mapped = True
+            if not mapped:
+                unresolved_customer_links.append(link)
+
+    # If user provided competitor links that did not map, create competitors from those links.
+    for link in unresolved_customer_links:
+        if len(competitors) >= target_count:
+            break
+        _log(f"customer link unresolved -> seed competitor from {link}")
+        link_results, source_label = _search_results(
+            provider=p,
+            query=link,
+            per_query_results=max(5, per_query_results),
+            openai_key=openai_key,
+            openai_model=openai_model,
+            perplexity_key=perplexity_key,
+            perplexity_model=perplexity_model,
+        )
+        _log(f"customer_link_search_results={len(link_results)} source={source_label}")
+        if not link_results:
+            link_results = [{"title": "", "url": link, "snippet": ""}]
+        obj = _llm_extract_company(
+            provider=p,
+            product_category=category,
+            query=link,
+            evidence_items=link_results,
+        )
+        raw_name = _clean_text(str((obj or {}).get("name") or ""))
+        company_url = _normalize_url(str((obj or {}).get("company_website_url") or ""))
+        if company_url and _is_bad_company_domain(company_url):
+            company_url = ""
+        normalized_name = _normalize_company_name(raw_name, company_url or link)
+        if not normalized_name:
+            normalized_name = _title_case_word(_domain_brand(link))
+        if not normalized_name:
+            warnings.append(f"v0.3 could not derive company from customer link: {link}")
+            continue
+        nkey = _company_name_key(normalized_name)
+        if nkey in by_name_index:
+            existing = competitors[by_name_index[nkey]]
+            current = list(existing.brand_domain_customerlist or [])
+            if link not in current:
+                current.append(link)
+                competitors[by_name_index[nkey]] = existing.model_copy(update={"brand_domain_customerlist": current})
+            continue
+        observed_domains = {_domain(link).lower()} if _domain(link) else set()
+        whitelist = _normalize_brand_domain_whitelist(
+            (obj or {}).get("brand_domain_whitelist"),
+            company_url,
+            normalized_name,
+            observed_domains,
+        )
+        if link and _domain(link):
+            lu = f"https://{_domain(link)}"
+            if lu not in whitelist:
+                whitelist.append(lu)
+        competitor_type = _clean_text(str((obj or {}).get("competitor_type") or "Direct competitor"))
+        if competitor_type not in _COMPETITOR_TYPES:
+            competitor_type = "Direct competitor"
+        item = CompanyCompetitorCandidate(
+            name=normalized_name,
+            cluster=_normalize_cluster(_clean_text(str((obj or {}).get("cluster") or "")), company_url, link),
+            year_founded=_clamp_year((obj or {}).get("year_founded")),
+            headquarters_country=_clean_text(str((obj or {}).get("headquarters_country") or "")),
+            company_description=_clean_text(str((obj or {}).get("company_description") or "")),
+            primary_business_segments=_clean_segments((obj or {}).get("primary_business_segments")),
+            relevance_in_reference_segment=_clean_text(str((obj or {}).get("relevance_in_reference_segment") or "")),
+            competitor_type=competitor_type,
+            company_website_url=company_url,
+            brand_domain_whitelist=whitelist[:12],
+            brand_domain_customerlist=[link],
+            relevance_score=max(min_rel, _clamp_score((obj or {}).get("relevance_score"))),
+        )
+        by_name_index[nkey] = len(competitors)
+        competitors.append(item)
+        warnings.append(f"v0.3 competitor added from customer link: {link}")
 
     if len(competitors) < min_comp:
         warnings.append(

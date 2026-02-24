@@ -152,3 +152,16 @@ Nicht nur Count, sondern pro entferntem Feature maschinenlesbar: `reason_code`, 
 
 10. Gold-Set + Regression-Tests  
 20-30 manuell kuratierte Produkte als Referenz; bei jeder Prompt-/Rule-Änderung automatisch Precision/Recall + Price-Accuracy prüfen.
+
+## Idee: Agentenmodus ReAct vs. Plan-Execute
+
+Nein, ReAct ist nicht zwingend der Standard.
+
+`ReAct` ist ein häufiges Standardmuster für Tool-Agents, aber nicht der einzige Standard.  
+Genauso üblich sind:
+
+- `Plan -> Execute` (wie bei euch)
+- Workflow/State-Machine-Agents (z. B. feste Ketten/Graphs)
+- Hybrid (Plan zuerst, dann punktuell ReAct)
+
+Für produktive Systeme wird ReAct oft eingeschränkt (Step-Limits, Tool-Whitelists), weil es sonst zu unkontrolliert werden kann.

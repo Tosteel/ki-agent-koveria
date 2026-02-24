@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, Type
 from fastapi import HTTPException
 from pydantic import BaseModel
 
-from .policies import is_phase1_tool_allowed
+from .policies import tools_allowed
 
 
 @dataclass
@@ -34,8 +34,11 @@ class ToolRegistry:
     def register(self, name: str, handler: ToolHandler, *, request_model: Type[BaseModel]) -> None:
         self._tools[name] = ToolDef(name=name, handler=handler, request_model=request_model)
 
+    def get_tool(self, name: str) -> ToolDef | None:
+        return self._tools.get(name)
+
     def dispatch(self, name: str, ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
-        tool = self._tools.get(name)
+        tool = self.get_tool(name)
         if tool is None:
             raise HTTPException(status_code=400, detail=f"Unknown tool: {name}")
         return tool.handler(ctx, args)
@@ -73,7 +76,7 @@ class ToolRegistry:
         one_of = []
 
         for tool in self._tools.values():
-            if not is_phase1_tool_allowed(tool.name):
+            if not tools_allowed(tool.name):
                 continue
 
             one_of.append(

@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
+from server.agent.langchain_runtime import planner_runtime_mode, tool_dispatch_runtime_mode
 from server.core.models import (
     AgentRunRequest,
     AgentRunResponse,
@@ -65,6 +66,12 @@ def create_agent_router(
             goal = f"{goal}\n\nZusatzhinweise fuer Replan:\n" + "\n".join(lines)
         return append_agent_tools_hint(goal, s, user_id)
 
+    def _log_runtime_mode() -> None:
+        print("\n===== RUNTIME =====")
+        print(f"planner_runtime={planner_runtime_mode()}")
+        print(f"tool_dispatch_runtime={tool_dispatch_runtime_mode()}")
+        print("===================\n")
+
     def _apply_planner_guard(
         llm: Any,
         provider: str,
@@ -106,6 +113,7 @@ def create_agent_router(
         credentials: HTTPAuthorizationCredentials = Depends(security),
     ) -> AgentRunResponse:
         ensure_user_dirs(s, user_id)
+        _log_runtime_mode()
 
         if not req.steps:
             raise HTTPException(status_code=422, detail='steps must not be empty for /agent/run')
@@ -133,6 +141,7 @@ def create_agent_router(
         s: Settings = Depends(dep_settings),
     ) -> AgentPlanResponse:
         ensure_user_dirs(s, user_id)
+        _log_runtime_mode()
 
         registry = build_registry(user_id, s)
         llm = llm_for_provider(req.provider)
@@ -225,6 +234,7 @@ def create_agent_router(
         credentials: HTTPAuthorizationCredentials = Depends(security),
     ) -> AgentAskResponse:
         ensure_user_dirs(s, user_id)
+        _log_runtime_mode()
         provider = str(req.provider or "ionos").strip().lower()
         if provider not in {"ionos", "openai"}:
             provider = "ionos"

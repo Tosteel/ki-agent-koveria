@@ -33,7 +33,7 @@ cp -r server/tools/_template server/tools/<toolname>
 
 6. Allow planner usage (optional):
 
-- Add `<toolname>` to `server/agent/policies.py` `PHASE1_ALLOWED_TOOLS`.
+- Add `<toolname>` to `server/agent/policies.py` `BASIC_TOOLS`.
 
 ## Notes
 
