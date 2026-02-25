@@ -1,0 +1,6 @@
+{
+  "name": "offerflow_step_3_clarification",
+  "description": "Step 3: Gap-Analyse und priorisierte Klärungsfragen.",
+  "input": "offer_id, qualification_decision (go), lead_profile, optionale answers/metadata",
+  "output": "3_question_set.json und 3_clarified_requirements.json."
+}

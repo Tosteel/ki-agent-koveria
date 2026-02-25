@@ -4,8 +4,8 @@ from typing import Any, Dict
 
 from server.agent.tool_registry import ToolContext, ToolRegistry
 
-from .models import RagQueryRequest
-from .rag_knowledgebase import RagService
+from .models import RagQueryRequest, RagQueryResponse
+from .service import RagService
 
 
 def _hit_text(hit: Dict[str, Any]) -> str:
@@ -46,4 +46,9 @@ def register(registry: ToolRegistry) -> None:
         result["text"] = _rag_result_to_text(req.query, result)
         return result
 
-    registry.register("rag_knowledgebase", tool_rag_knowledgebase, request_model=RagQueryRequest)
+    registry.register(
+        "rag_knowledgebase",
+        tool_rag_knowledgebase,
+        request_model=RagQueryRequest,
+        response_model=RagQueryResponse,
+    )

@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 from server.agent.tool_registry import ToolContext, ToolRegistry
 
-from .models import VideoAnalyzeSyncRequest
+from .models import VideoAnalyzeSyncRequest, VideoAnalyzeSyncResponse
 from .websearch_videoanalyzer import VideoAnalyzerService
 
 
@@ -40,5 +40,15 @@ def register(registry: ToolRegistry) -> None:
         result["text"] = _video_result_to_text(req.prompt, result)
         return result
 
-    registry.register("websearch_videoanalyzer", tool_websearch_videoanalyzer, request_model=VideoAnalyzeSyncRequest)
-    registry.register("websearch_videoanalizer", tool_websearch_videoanalyzer, request_model=VideoAnalyzeSyncRequest)
+    registry.register(
+        "websearch_videoanalyzer",
+        tool_websearch_videoanalyzer,
+        request_model=VideoAnalyzeSyncRequest,
+        response_model=VideoAnalyzeSyncResponse,
+    )
+    registry.register(
+        "websearch_videoanalizer",
+        tool_websearch_videoanalyzer,
+        request_model=VideoAnalyzeSyncRequest,
+        response_model=VideoAnalyzeSyncResponse,
+    )

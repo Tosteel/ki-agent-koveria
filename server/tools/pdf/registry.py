@@ -64,5 +64,15 @@ def register(registry: ToolRegistry) -> None:
             text=text,
         ).model_dump()
 
-    registry.register("pdf_export", tool_pdf_export, request_model=PdfExportRequest)
-    registry.register("read_pdf", tool_read_pdf, request_model=PdfReadRequest)
+    registry.register(
+        "pdf_export",
+        tool_pdf_export,
+        request_model=PdfExportRequest,
+        response_model=PdfExportResponse,
+    )
+    registry.register(
+        "read_pdf",
+        tool_read_pdf,
+        request_model=PdfReadRequest,
+        response_model=PdfReadResponse,
+    )

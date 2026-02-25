@@ -9,7 +9,7 @@ from server.core.settings import Settings
 from server.deps import get_current_user, settings as dep_settings
 
 from .models import RagQueryRequest
-from .rag_knowledgebase import RagService
+from .service import RagService
 
 security = HTTPBearer(auto_error=False)
 

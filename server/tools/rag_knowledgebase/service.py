@@ -1,5 +1,5 @@
 # server/services/rag_koveria.py (im Agent-Projekt)
-from typing import Any, Dict, Sequence
+from typing import Any, Dict, Optional, Sequence
 import requests
 
 class RagService:

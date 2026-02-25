@@ -29,4 +29,9 @@ def register(registry: ToolRegistry) -> None:
             layout_mode=str(result.get("layout_mode") or "heuristic"),
         ).model_dump()
 
-    registry.register("ppt_export", tool_ppt_export, request_model=PptExportRequest)
+    registry.register(
+        "ppt_export",
+        tool_ppt_export,
+        request_model=PptExportRequest,
+        response_model=PptExportResponse,
+    )

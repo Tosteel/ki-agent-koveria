@@ -1,0 +1,6 @@
+{
+  "name": "offerflow_step_7_validation",
+  "description": "Step 7: Risiko- und Plausibilitätscheck vor Freigabe.",
+  "input": "offer_id, boq_draft, pricing_sheet, optionale constraints/metadata",
+  "output": "7_validation_report.json und 7_final_inputs_snapshot.json."
+}

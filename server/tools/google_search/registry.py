@@ -26,5 +26,15 @@ def register(registry: ToolRegistry) -> None:
         )
         return GoogleSearchResponse(**result).model_dump()
 
-    registry.register(TOOL_NAME, tool_google_search, request_model=GoogleSearchRequest)
-    registry.register(TOOL_ALIAS, tool_google_search, request_model=GoogleSearchRequest)
+    registry.register(
+        TOOL_NAME,
+        tool_google_search,
+        request_model=GoogleSearchRequest,
+        response_model=GoogleSearchResponse,
+    )
+    registry.register(
+        TOOL_ALIAS,
+        tool_google_search,
+        request_model=GoogleSearchRequest,
+        response_model=GoogleSearchResponse,
+    )

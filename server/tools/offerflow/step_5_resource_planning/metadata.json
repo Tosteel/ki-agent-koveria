@@ -1,0 +1,6 @@
+{
+  "name": "offerflow_step_5_resource_planning",
+  "description": "Step 5: Material- und Ressourcenplanung.",
+  "input": "offer_id, boq_draft, optionale planning_rules/metadata",
+  "output": "5_materials_plan.json und 5_work_plan.json."
+}

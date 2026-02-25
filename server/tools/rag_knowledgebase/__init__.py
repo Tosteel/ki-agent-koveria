@@ -1,1 +1,3 @@
-from .rag_knowledgebase import RagService
+"""RAG knowledgebase tool package."""
+
+__all__ = []

@@ -17,5 +17,9 @@ def register(registry: ToolRegistry) -> None:
         result = list_skills(include_descriptions=req.include_descriptions)
         return ListSkillsResponse(**result).model_dump()
 
-    registry.register(TOOL_NAME, tool_list_skills, request_model=ListSkillsRequest)
-
+    registry.register(
+        TOOL_NAME,
+        tool_list_skills,
+        request_model=ListSkillsRequest,
+        response_model=ListSkillsResponse,
+    )

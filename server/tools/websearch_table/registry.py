@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 from server.agent.tool_registry import ToolContext, ToolRegistry
 
-from .models import SearchGenerateJsonRequest
+from .models import SearchGenerateJsonRequest, SearchGenerateJsonResponse
 from .websearch_table import SearchService
 
 
@@ -41,6 +41,16 @@ def register(registry: ToolRegistry) -> None:
         return result
 
     # New canonical tool name.
-    registry.register("websearch_table", tool_search_multitable, request_model=SearchGenerateJsonRequest)
+    registry.register(
+        "websearch_table",
+        tool_search_multitable,
+        request_model=SearchGenerateJsonRequest,
+        response_model=SearchGenerateJsonResponse,
+    )
     # Backward-compatible alias for existing plans/integrations.
-    registry.register("search_multitable", tool_search_multitable, request_model=SearchGenerateJsonRequest)
+    registry.register(
+        "search_multitable",
+        tool_search_multitable,
+        request_model=SearchGenerateJsonRequest,
+        response_model=SearchGenerateJsonResponse,
+    )

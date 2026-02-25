@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OfferFlow</title>
+  <style>
+    :root {
+      --bg: #f2f0e9;
+      --panel: #fffef9;
+      --line: #d8d2c0;
+      --text: #3b3528;
+      --muted: #756b58;
+      --accent: #b45a2a;
+      --accent-strong: #8c3f17;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "Source Sans 3", sans-serif;
+      background: radial-gradient(circle at top right, #f7f3e7, #ece8d8 45%, #e6e1cf 100%);
+      color: var(--text);
+      padding: 16px;
+    }
+    .app {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 14px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+    }
+    .steps { display: grid; gap: 8px; }
+    .step-btn {
+      text-align: left;
+      border: 1px solid #d9c8b3;
+      background: #fff8ed;
+      color: #5d432e;
+      border-radius: 10px;
+      padding: 9px 10px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .step-btn.active { border-color: var(--accent); background: #fdeedb; }
+    .row { display: flex; gap: 8px; margin-bottom: 8px; }
+    input, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 8px;
+      font: inherit;
+      color: var(--text);
+      background: #fff;
+    }
+    textarea { min-height: 280px; resize: vertical; font-family: "IBM Plex Mono", monospace; }
+    button {
+      border: 1px solid #9f4f25;
+      background: linear-gradient(180deg, #c96a36, #b45728);
+      color: #fff;
+      border-radius: 9px;
+      padding: 9px 12px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+    button.secondary {
+      border-color: var(--line);
+      background: #f6f1e5;
+      color: var(--muted);
+    }
+    .out {
+      margin-top: 8px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      min-height: 260px;
+      background: #faf7ef;
+      padding: 10px;
+      white-space: pre-wrap;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 12px;
+      overflow: auto;
+    }
+    .hint { color: var(--muted); font-size: 12px; }
+    @media (max-width: 980px) { .app { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="card">
+      <h3>OfferFlow</h3>
+      <div class="steps" id="steps"></div>
+      <p class="hint">Jeder Step ruft direkt `/offerflow/step-{n}/run` auf.</p>
+    </aside>
+
+    <main class="card">
+      <div class="row">
+        <input id="userId" placeholder="user_id (z. B. user3)" value="user3" />
+        <button class="secondary" id="loadCfg">Config laden</button>
+      </div>
+      <div class="row">
+        <input id="apiBase" placeholder="API Base URL" value="http://127.0.0.1:8012" />
+        <input id="apiKey" placeholder="Bearer API Key" />
+        <button id="saveCfg">Config speichern</button>
+      </div>
+      <div class="row">
+        <input id="offerId" placeholder="offer_id" value="offer_demo_001" />
+        <button id="runStep">Step ausführen</button>
+      </div>
+
+      <label for="payload">Payload (JSON)</label>
+      <textarea id="payload"></textarea>
+      <div class="out" id="output"></div>
+    </main>
+  </div>
+
+  <script>
+    const steps = [
+      [1, "Intake & Normalisierung"],
+      [2, "Qualifizierung"],
+      [3, "Klärungsfragen"],
+      [4, "Scope Mapping"],
+      [5, "Ressourcenplanung"],
+      [6, "Kalkulation"],
+      [7, "Validierung"],
+    ];
+    const stepsBox = document.getElementById('steps');
+    const payloadEl = document.getElementById('payload');
+    const outEl = document.getElementById('output');
+    let currentStep = 1;
+
+    function basePayload(step) {
+      const offerId = document.getElementById('offerId').value || 'offer_demo_001';
+      return {
+        offer_id: offerId,
+        metadata: {
+          trade: "",
+          region: "",
+          project_type: "",
+          scope_tags: [],
+          size: "",
+          outcome: ""
+        }
+      };
+    }
+
+    function renderSteps() {
+      stepsBox.innerHTML = '';
+      for (const [idx, label] of steps) {
+        const b = document.createElement('button');
+        b.className = 'step-btn' + (idx === currentStep ? ' active' : '');
+        b.textContent = `${idx}. ${label}`;
+        b.onclick = () => {
+          currentStep = idx;
+          renderSteps();
+          payloadEl.value = JSON.stringify(basePayload(idx), null, 2);
+        };
+        stepsBox.appendChild(b);
+      }
+    }
+
+    async function fetchJson(url, opts) {
+      const r = await fetch(url, opts);
+      const t = await r.text();
+      let data = {};
+      try { data = JSON.parse(t); } catch { data = { raw: t }; }
+      if (!r.ok) throw new Error(data.detail || t || `HTTP ${r.status}`);
+      return data;
+    }
+
+    document.getElementById('saveCfg').onclick = async () => {
+      const body = {
+        user_id: document.getElementById('userId').value,
+        api_base_url: document.getElementById('apiBase').value,
+        api_key: document.getElementById('apiKey').value,
+      };
+      try {
+        const data = await fetchJson('/api/config', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        });
+        outEl.textContent = JSON.stringify(data, null, 2);
+      } catch (e) { outEl.textContent = String(e); }
+    };
+
+    document.getElementById('loadCfg').onclick = async () => {
+      const uid = encodeURIComponent(document.getElementById('userId').value || '');
+      try {
+        const data = await fetchJson(`/api/config?user_id=${uid}`);
+        document.getElementById('apiBase').value = data.api_base_url || '';
+        document.getElementById('apiKey').value = data.api_key || '';
+        outEl.textContent = JSON.stringify(data, null, 2);
+      } catch (e) { outEl.textContent = String(e); }
+    };
+
+    document.getElementById('runStep').onclick = async () => {
+      let payload;
+      try { payload = JSON.parse(payloadEl.value || '{}'); }
+      catch (e) { outEl.textContent = `Ungültiges JSON: ${e}`; return; }
+      payload.offer_id = document.getElementById('offerId').value || payload.offer_id;
+
+      try {
+        const data = await fetchJson('/api/step/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            step: currentStep,
+            payload,
+            user_id: document.getElementById('userId').value,
+          })
+        });
+        outEl.textContent = JSON.stringify(data, null, 2);
+      } catch (e) { outEl.textContent = String(e); }
+    };
+
+    renderSteps();
+    payloadEl.value = JSON.stringify(basePayload(1), null, 2);
+  </script>
+</body>
+</html>

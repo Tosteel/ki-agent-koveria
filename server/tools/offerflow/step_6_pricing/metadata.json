@@ -1,0 +1,6 @@
+{
+  "name": "offerflow_step_6_pricing",
+  "description": "Step 6: Kalkulation und Preisblatt-Erstellung.",
+  "input": "offer_id, materials_plan, work_plan, optionale pricing_rules/include_rationale/metadata",
+  "output": "6_pricing_sheet.json und optional 6_pricing_rationale.md."
+}

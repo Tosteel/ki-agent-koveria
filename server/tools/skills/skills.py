@@ -24,6 +24,13 @@ _TOOL_DESCRIPTIONS: Dict[str, str] = {
     "browse_website": "Website mit Navigation/Klicks über Unterseiten durchsuchen.",
     "send_mail": "E-Mails versenden (optional mit Anhang).",
     "competitor_search_v0_4": "Wettbewerber über Playwright+BeautifulSoup suchen und per LLM auf direkte Konkurrenz prüfen.",
+    "offerflow_step_1_intake": "OfferFlow Step 1: Intake und Normalisierung.",
+    "offerflow_step_2_qualification": "OfferFlow Step 2: Qualifizierung (Go/No-Go).",
+    "offerflow_step_3_clarification": "OfferFlow Step 3: Klärungsfragen.",
+    "offerflow_step_4_scope_mapping": "OfferFlow Step 4: Scope-to-Positions Mapping.",
+    "offerflow_step_5_resource_planning": "OfferFlow Step 5: Material- und Ressourcenplanung.",
+    "offerflow_step_6_pricing": "OfferFlow Step 6: Kalkulation.",
+    "offerflow_step_7_validation": "OfferFlow Step 7: Risiko- und Plausibilitätscheck.",
 }
 
 

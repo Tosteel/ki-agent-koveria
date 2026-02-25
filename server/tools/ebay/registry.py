@@ -17,4 +17,9 @@ def register(registry: ToolRegistry) -> None:
         result = search_ebay(query=req.query, limit=req.limit, sort_order=req.sort_order)
         return EbaySearchResponse(**result).model_dump()
 
-    registry.register(TOOL_NAME, tool_search_ebay, request_model=EbaySearchRequest)
+    registry.register(
+        TOOL_NAME,
+        tool_search_ebay,
+        request_model=EbaySearchRequest,
+        response_model=EbaySearchResponse,
+    )

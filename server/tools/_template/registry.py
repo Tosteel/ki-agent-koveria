@@ -19,5 +19,10 @@ def register(registry: ToolRegistry) -> None:
         result = run_tool(text=req.text, extra=req.extra)
         return TemplateToolResponse(**result).model_dump()
 
-    # 3) Register tool with request model used by planner schema
-    registry.register(TOOL_NAME, tool_handler, request_model=TemplateToolRequest)
+    # 3) Register tool with request/output models used by planner schema
+    registry.register(
+        TOOL_NAME,
+        tool_handler,
+        request_model=TemplateToolRequest,
+        response_model=TemplateToolResponse,
+    )

@@ -20,7 +20,14 @@ BASIC_TOOLS = {
     "answer_mail",
     "fetch_inbox_mails",
     "fetch_unanswered_mails",
-    "list_skills"
+    "list_skills",
+    "offerflow_step_1_intake",
+    "offerflow_step_2_qualification",
+    "offerflow_step_3_clarification",
+    "offerflow_step_4_scope_mapping",
+    "offerflow_step_5_resource_planning",
+    "offerflow_step_6_pricing",
+    "offerflow_step_7_validation",
 }
 
 COMPETITIVE_ANALYSIS_TOOLS = {

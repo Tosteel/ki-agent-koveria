@@ -148,6 +148,8 @@ class IonosLLM:
           {"name": "...", "schema": {...}}  oder direkt {"schema": {...}}.
         """
         schema_obj = tool_schema.get("schema", tool_schema)
+        schema_obj = _sanitize_schema_for_ionos(schema_obj)
+        schema_obj = _make_ionos_planner_schema(schema_obj)
         schema_name = tool_schema.get("name", "tool_plan")
 
         response_format = {
@@ -155,26 +157,34 @@ class IonosLLM:
             "json_schema": {
                 "name": schema_name,
                 "schema": schema_obj,
-                "strict": True,
+                "strict": False,
             },
         }
 
         planner_system = get_planner_system_prompt("ionos")
 
         # Primär: json_schema erzwingen
-        completion = self.chat_completions(
-            messages=[
-                {"role": "system", "content": planner_system},
-                {"role": "user", "content": f"Goal: {goal}"},
-            ],
-            response_format=response_format,
-        )
+        try:
+            completion = self.chat_completions(
+                messages=[
+                    {"role": "system", "content": planner_system},
+                    {"role": "user", "content": f"Goal: {goal}"},
+                ],
+                response_format=response_format,
+            )
 
-        text = self.extract_text(completion)
-        parsed = _parse_json_strictish(text)
-        steps = parsed.get("steps") or []
-        if isinstance(steps, list) and steps:
-            return {"steps": steps}
+            text = self.extract_text(completion)
+            parsed = _parse_json_strictish(text)
+            steps = parsed.get("steps") or []
+            if isinstance(steps, list) and steps:
+                return {"steps": steps}
+        except Exception as e:
+            print("\n===== IONOS PLANNER FALLBACK =====")
+            print("json_schema planning failed; switching to json_object fallback")
+            print(f"error={e}")
+            print("===================================\n")
+            # Fallback below (json_object) instead of bubbling up as 500
+            pass
 
         # Fallback: wenigstens JSON erzwingen (falls json_schema/oneOf nicht sauber unterstützt wird)
         completion2 = self.chat_completions(
@@ -282,3 +292,70 @@ def _parse_json_strictish(text: str) -> Dict[str, Any]:
             return {}
 
     return {}
+
+
+def _sanitize_schema_for_ionos(schema: Any) -> Any:
+    """
+    IONOS' OpenAI-compatible endpoint can be strict about JSON-Schema size/keywords.
+    Keep semantic structure, drop verbose/meta keys.
+    """
+    if isinstance(schema, dict):
+        out: Dict[str, Any] = {}
+        for k, v in schema.items():
+            if k in {"description", "title", "examples", "default"}:
+                continue
+            out[k] = _sanitize_schema_for_ionos(v)
+        return out
+    if isinstance(schema, list):
+        return [_sanitize_schema_for_ionos(x) for x in schema]
+    return schema
+
+
+def _make_ionos_planner_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert verbose oneOf planner schemas to a compact IONOS-friendly variant:
+    steps[].tool as enum + free-form args object.
+    """
+    try:
+        one_of = (
+            schema.get("properties", {})
+            .get("steps", {})
+            .get("items", {})
+            .get("oneOf", [])
+        )
+        tools: List[str] = []
+        for item in one_of:
+            if not isinstance(item, dict):
+                continue
+            name = (
+                item.get("properties", {})
+                .get("tool", {})
+                .get("const")
+            )
+            if isinstance(name, str) and name.strip():
+                tools.append(name.strip())
+        tools = sorted(set(tools))
+        if not tools:
+            return schema
+
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "tool": {"type": "string", "enum": tools},
+                            "args": {"type": "object", "additionalProperties": True},
+                        },
+                        "required": ["tool", "args"],
+                    },
+                }
+            },
+            "required": ["steps"],
+        }
+    except Exception:
+        return schema

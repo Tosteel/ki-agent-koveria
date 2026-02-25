@@ -1,0 +1,6 @@
+{
+  "name": "offerflow_step_2_qualification",
+  "description": "Step 2: Go/No-Go Qualifizierung inkl. Risiko-Flags.",
+  "input": "offer_id, lead_profile oder vorhandene Step-1-Datei, optionale rules/metadata",
+  "output": "2_qualification_decision.json mit Entscheidung, Begründung und Flags."
+}

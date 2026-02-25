@@ -19,4 +19,9 @@ def register(registry: ToolRegistry) -> None:
         )
         return LlmSummaryResponse(**result).model_dump()
 
-    registry.register("llm_summarize", tool_llm_summarize, request_model=LlmSummaryRequest)
+    registry.register(
+        "llm_summarize",
+        tool_llm_summarize,
+        request_model=LlmSummaryRequest,
+        response_model=LlmSummaryResponse,
+    )

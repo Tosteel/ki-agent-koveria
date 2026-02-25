@@ -16,7 +16,7 @@ class MailSendRequest(BaseModel):
     )
     subject: str = Field(..., min_length=1, description="Betreff der neuen E-Mail.")
     body: str = Field(..., min_length=1, description="Inhalt der neuen E-Mail.")
-    attachment_paths: List[str] = Field(
+    attachments: List[str] = Field(
         default_factory=list,
         description="Optionale Dateipfade fuer Anhaenge bei neuer E-Mail.",
     )
@@ -33,7 +33,7 @@ class MailSendRequest(BaseModel):
 class MailSendResponse(BaseModel):
     sent: bool = True
     message_id: str = ""
-    recipients: List[str] = Field(default_factory=list)
+    to: List[str] = Field(default_factory=list)
     subject: str = ""
     attachments: List[str] = Field(default_factory=list)
 
@@ -64,7 +64,7 @@ class MailAnswerResponse(BaseModel):
     sent: bool = True
     message_id: str = ""
     in_reply_to: str = ""
-    recipients: List[str] = Field(default_factory=list)
+    to: List[str] = Field(default_factory=list)
     subject: str = ""
     marked_answered: bool = False
 

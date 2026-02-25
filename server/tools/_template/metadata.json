@@ -1,0 +1,7 @@
+{
+  "name": "template_tool",
+  "version": "0",
+  "description": "Kurzbeschreibung, wann dieses Tool genutzt werden soll.",
+  "input": "Kurz und fachlich: wichtigste Eingaben (lesbarer Fließtext).",
+  "output": "Kurz und fachlich: wichtigstes Ergebnis/Artefakte (lesbarer Fließtext)."
+}

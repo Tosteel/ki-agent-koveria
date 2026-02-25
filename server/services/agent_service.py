@@ -276,6 +276,34 @@ def sanitize_execution_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]
             if max_chars > 1200:
                 max_chars = 1200
             args_out["max_chars"] = max_chars
+        elif tool == "send_mail":
+            # Planner-friendly aliases -> canonical API fields
+            if "to" not in args_out and "recipient" in args_out:
+                rec = args_out.get("recipient")
+                if isinstance(rec, str) and rec.strip():
+                    args_out["to"] = [rec.strip()]
+                elif isinstance(rec, list):
+                    args_out["to"] = [str(x).strip() for x in rec if str(x).strip()]
+            if "to" not in args_out and "recipients" in args_out:
+                rec = args_out.get("recipients")
+                if isinstance(rec, str) and rec.strip():
+                    args_out["to"] = [rec.strip()]
+                elif isinstance(rec, list):
+                    args_out["to"] = [str(x).strip() for x in rec if str(x).strip()]
+
+            if "attachments" not in args_out and "attachment_paths" in args_out:
+                at = args_out.get("attachment_paths")
+                if isinstance(at, str) and at.strip():
+                    args_out["attachments"] = [at.strip()]
+                elif isinstance(at, list):
+                    args_out["attachments"] = [str(x).strip() for x in at if str(x).strip()]
+
+            to_val = args_out.get("to")
+            if isinstance(to_val, str):
+                args_out["to"] = [to_val.strip()] if to_val.strip() else []
+            at_val = args_out.get("attachments")
+            if isinstance(at_val, str):
+                args_out["attachments"] = [at_val.strip()] if at_val.strip() else []
         out.append({"tool": tool, "args": args_out})
     return out
 
@@ -986,7 +1014,9 @@ def _execution_facts(tool_outputs_full: List[Dict[str, Any]]) -> Dict[str, Any]:
             sent_flag = payload.get("sent")
             if sent_flag is True or tool == "answer_mail":
                 facts["mail_sent"] = True
-                rcpts = payload.get("recipients")
+                rcpts = payload.get("to")
+                if not isinstance(rcpts, list):
+                    rcpts = payload.get("recipients")
                 if isinstance(rcpts, list):
                     for r in rcpts:
                         rs = str(r).strip()

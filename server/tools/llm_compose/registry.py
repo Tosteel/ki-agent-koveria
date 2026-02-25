@@ -19,4 +19,9 @@ def register(registry: ToolRegistry) -> None:
         )
         return LlmComposeResponse(**result).model_dump()
 
-    registry.register("llm_compose", tool_llm_compose, request_model=LlmComposeRequest)
+    registry.register(
+        "llm_compose",
+        tool_llm_compose,
+        request_model=LlmComposeRequest,
+        response_model=LlmComposeResponse,
+    )

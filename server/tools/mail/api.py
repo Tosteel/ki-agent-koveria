@@ -23,7 +23,7 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
             to=req.to,
             subject=req.subject,
             body=req.body,
-            attachment_paths=req.attachment_paths,
+            attachments=req.attachments,
             work_dir=s.user_work_dir(user_id),
             cc=req.cc,
             bcc=req.bcc,

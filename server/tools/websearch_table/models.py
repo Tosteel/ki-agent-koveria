@@ -7,4 +7,10 @@ class SearchGenerateJsonRequest(BaseModel):
     user_prompt: str
 
 
-__all__ = ["SearchGenerateJsonRequest"]
+class SearchGenerateJsonResponse(BaseModel):
+    text: str = ""
+
+    model_config = {"extra": "allow"}
+
+
+__all__ = ["SearchGenerateJsonRequest", "SearchGenerateJsonResponse"]

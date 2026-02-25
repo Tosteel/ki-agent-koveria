@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+from dataclasses import field
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Type
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Callable, Dict, Optional, Type
 
 from fastapi import HTTPException
 from pydantic import BaseModel
@@ -25,14 +29,91 @@ class ToolDef:
     name: str
     handler: ToolHandler
     request_model: Type[BaseModel]
+    response_model: Optional[Type[BaseModel]] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@lru_cache(maxsize=1)
+def _load_tool_metadata_map() -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    base_dir = Path(__file__).resolve().parents[1] / "tools"
+    if not base_dir.exists():
+        return out
+
+    for path in base_dir.rglob("metadata.json"):
+        if not path.is_file():
+            continue
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(raw, dict):
+            continue
+        tool_name = str(path.parent.name or "").strip()
+        if not tool_name:
+            continue
+        display_name = str(raw.get("name") or tool_name).strip() or tool_name
+        out[tool_name] = {
+            "name": display_name,
+            "description": str(raw.get("description") or "").strip(),
+            "input": str(raw.get("input") or "").strip(),
+            "output": str(raw.get("output") or "").strip(),
+        }
+    return out
+
+
+def _tool_schema_description(tool_name: str, meta: Dict[str, Any]) -> str:
+    parts = [f"Tool: {tool_name}"]
+    desc = str(meta.get("description") or "").strip()
+    inp = str(meta.get("input") or "").strip()
+    out = str(meta.get("output") or "").strip()
+    if desc:
+        parts.append(f"Description: {desc}")
+    if inp:
+        parts.append(f"Input: {inp}")
+    if out:
+        parts.append(f"Output: {out}")
+    return "\n".join(parts)
+
+
+def _output_schema_hint(response_model: Optional[Type[BaseModel]]) -> str:
+    if response_model is None:
+        return ""
+    try:
+        schema = response_model.model_json_schema()
+    except Exception:
+        return ""
+
+    props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+    required = schema.get("required") if isinstance(schema.get("required"), list) else []
+    field_names = [str(k) for k in props.keys()]
+    if not field_names:
+        return ""
+    fields_txt = ", ".join(field_names[:12])
+    req_txt = ", ".join(str(x) for x in required[:12]) if required else "-"
+    return f"Output fields: {fields_txt}\nRequired output fields: {req_txt}"
 
 
 class ToolRegistry:
     def __init__(self):
         self._tools: Dict[str, ToolDef] = {}
 
-    def register(self, name: str, handler: ToolHandler, *, request_model: Type[BaseModel]) -> None:
-        self._tools[name] = ToolDef(name=name, handler=handler, request_model=request_model)
+    def register(
+        self,
+        name: str,
+        handler: ToolHandler,
+        *,
+        request_model: Type[BaseModel],
+        response_model: Optional[Type[BaseModel]] = None,
+    ) -> None:
+        meta = _load_tool_metadata_map().get(name, {})
+        self._tools[name] = ToolDef(
+            name=name,
+            handler=handler,
+            request_model=request_model,
+            response_model=response_model,
+            metadata=meta,
+        )
 
     def get_tool(self, name: str) -> ToolDef | None:
         return self._tools.get(name)
@@ -78,14 +159,22 @@ class ToolRegistry:
         for tool in self._tools.values():
             if not tools_allowed(tool.name):
                 continue
+            args_schema = tool.request_model.model_json_schema()
+            if isinstance(args_schema, dict) and "additionalProperties" not in args_schema:
+                args_schema["additionalProperties"] = False
+            desc = _tool_schema_description(tool.name, tool.metadata)
+            out_hint = _output_schema_hint(tool.response_model)
+            if out_hint:
+                desc = f"{desc}\n{out_hint}"
 
             one_of.append(
                 {
                     "type": "object",
+                    "description": desc,
                     "additionalProperties": False,
                     "properties": {
                         "tool": {"const": tool.name},
-                        "args": tool.request_model.model_json_schema(),
+                        "args": args_schema,
                     },
                     "required": ["tool", "args"],
                 }

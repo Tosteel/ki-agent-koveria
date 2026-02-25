@@ -174,7 +174,7 @@ def send_mail(
     to: List[str],
     subject: str,
     body: str,
-    attachment_paths: List[str] | None = None,
+    attachments: List[str] | None = None,
     work_dir: Path | None = None,
     cc: List[str] | None = None,
     bcc: List[str] | None = None,
@@ -208,7 +208,7 @@ def send_mail(
         msg.set_content(body or "")
 
     attachment_names: List[str] = []
-    for rel_path in (attachment_paths or []):
+    for rel_path in (attachments or []):
         if not isinstance(rel_path, str) or not rel_path.strip():
             continue
         if work_dir is None:
@@ -242,7 +242,7 @@ def send_mail(
     return {
         "sent": True,
         "message_id": message_id,
-        "recipients": all_recipients,
+        "to": all_recipients,
         "subject": msg["Subject"],
         "attachments": attachment_names,
     }
@@ -350,7 +350,7 @@ def answer_mail(
         "sent": True,
         "message_id": (msg.get("Message-Id") or "").strip(),
         "in_reply_to": orig_mid,
-        "recipients": recipients,
+        "to": recipients,
         "subject": final_subject,
         "marked_answered": marked_answered,
     }

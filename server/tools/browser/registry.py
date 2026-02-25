@@ -40,5 +40,15 @@ def register(registry: ToolRegistry) -> None:
         )
         return WebsiteSearchResponse(**result).model_dump()
 
-    registry.register(TOOL_VIEW, tool_view_website, request_model=ViewWebsiteRequest)
-    registry.register(TOOL_BROWSE, tool_browse_website, request_model=BrowseWebsiteRequest)
+    registry.register(
+        TOOL_VIEW,
+        tool_view_website,
+        request_model=ViewWebsiteRequest,
+        response_model=WebsiteSearchResponse,
+    )
+    registry.register(
+        TOOL_BROWSE,
+        tool_browse_website,
+        request_model=BrowseWebsiteRequest,
+        response_model=WebsiteSearchResponse,
+    )

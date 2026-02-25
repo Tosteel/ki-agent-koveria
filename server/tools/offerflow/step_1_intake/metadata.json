@@ -1,0 +1,6 @@
+{
+  "name": "offerflow_step_1_intake",
+  "description": "Step 1: Intake und Normalisierung eingehender Angebotsanfragen.",
+  "input": "offer_id, raw_request, optional customer_data/attachments/metadata, top_k",
+  "output": "1_lead_profile.json, 1_attachments_index.json sowie RAG Query/Upload-Status."
+}

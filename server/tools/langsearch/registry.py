@@ -22,5 +22,9 @@ def register(registry: ToolRegistry) -> None:
         )
         return LangSearchResponse(**result).model_dump()
 
-    registry.register(TOOL_NAME, tool_langsearch, request_model=LangSearchRequest)
-
+    registry.register(
+        TOOL_NAME,
+        tool_langsearch,
+        request_model=LangSearchRequest,
+        response_model=LangSearchResponse,
+    )

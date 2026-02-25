@@ -14,5 +14,9 @@ def register(registry: ToolRegistry) -> None:
         result = llm_smalltalk(message=req.message, tone=req.tone, max_chars=req.max_chars)
         return LlmSmalltalkResponse(**result).model_dump()
 
-    registry.register("llm_smalltalk", tool_llm_smalltalk, request_model=LlmSmalltalkRequest)
-
+    registry.register(
+        "llm_smalltalk",
+        tool_llm_smalltalk,
+        request_model=LlmSmalltalkRequest,
+        response_model=LlmSmalltalkResponse,
+    )

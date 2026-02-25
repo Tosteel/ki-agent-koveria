@@ -1,0 +1,6 @@
+{
+  "name": "offerflow_step_4_scope_mapping",
+  "description": "Step 4: Scope-to-Positions Mapping und BOQ-Draft.",
+  "input": "offer_id, clarified_requirements, optional service_catalog/metadata",
+  "output": "4_boq_draft.json mit Positionen, Mengen und Varianten."
+}

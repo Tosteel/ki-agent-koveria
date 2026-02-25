@@ -1,0 +1,8 @@
+{
+  "name": "PowerPoint",
+  "version": "0.1",
+  "description": "Durchsucht die RAG-Wissensbasis mit semantischer Query und liefert Treffer.",
+  "input": "query (string, required), top_k (int, optional), classification (string, optional)",
+  "output": "Trefferliste mit Quellen/Scores/Textausschnitten; zusätzlich textuelle Zusammenfassung im Feld text."
+}
+

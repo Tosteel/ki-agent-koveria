@@ -7,4 +7,10 @@ class VideoAnalyzeSyncRequest(BaseModel):
     prompt: str
 
 
-__all__ = ["VideoAnalyzeSyncRequest"]
+class VideoAnalyzeSyncResponse(BaseModel):
+    text: str = ""
+
+    model_config = {"extra": "allow"}
+
+
+__all__ = ["VideoAnalyzeSyncRequest", "VideoAnalyzeSyncResponse"]

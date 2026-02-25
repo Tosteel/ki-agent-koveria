@@ -23,7 +23,7 @@ def register(registry: ToolRegistry) -> None:
             to=req.to,
             subject=req.subject,
             body=req.body,
-            attachment_paths=req.attachment_paths,
+            attachments=req.attachments,
             work_dir=ctx.settings.user_work_dir(ctx.user_id),
             cc=req.cc,
             bcc=req.bcc,
@@ -62,7 +62,27 @@ def register(registry: ToolRegistry) -> None:
         )
         return MailAnswerResponse(**result).model_dump()
 
-    registry.register("send_mail", tool_send_mail, request_model=MailSendRequest)
-    registry.register("fetch_inbox_mails", tool_fetch_inbox_mails, request_model=MailInboxFetchRequest)
-    registry.register("fetch_unanswered_mails", tool_fetch_unanswered_mails, request_model=MailUnansweredFetchRequest)
-    registry.register("answer_mail", tool_answer_mail, request_model=MailAnswerRequest)
+    registry.register(
+        "send_mail",
+        tool_send_mail,
+        request_model=MailSendRequest,
+        response_model=MailSendResponse,
+    )
+    registry.register(
+        "fetch_inbox_mails",
+        tool_fetch_inbox_mails,
+        request_model=MailInboxFetchRequest,
+        response_model=MailInboxFetchResponse,
+    )
+    registry.register(
+        "fetch_unanswered_mails",
+        tool_fetch_unanswered_mails,
+        request_model=MailUnansweredFetchRequest,
+        response_model=MailInboxFetchResponse,
+    )
+    registry.register(
+        "answer_mail",
+        tool_answer_mail,
+        request_model=MailAnswerRequest,
+        response_model=MailAnswerResponse,
+    )
