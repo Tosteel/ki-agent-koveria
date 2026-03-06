@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "updated_at": "2026-02-25T14:17:56Z",
+  "updated_at": "2026-02-26T12:41:42Z",
   "chats": [
     {
-      "id": 22,
-      "title": "suche auf www.tagesschau.de nach Friedrich Merz. Exportiere die zusammenfassung als PDF und sende sie an tobias_stahl@outlook.de",
+      "id": 27,
+      "title": "suche auf www.tagesschau.de nach Friedrich Merz. Fasse die Ergebnisse zusammen und ende sie an tobias_stahl@outlook.de als PDF",
       "messages": [
         {
           "role": "bot",
@@ -13,38 +13,38 @@
           "downloadLabel": "",
           "plannedSteps": [],
           "options": [],
-          "timestamp": "2026-02-25T14:17:22.297Z"
+          "timestamp": "2026-02-26T12:41:05.333Z"
         },
         {
           "role": "user",
-          "text": "suche auf www.tagesschau.de nach Friedrich Merz. Exportiere die zusammenfassung als PDF und sende sie an tobias_stahl@outlook.de",
+          "text": "suche auf www.tagesschau.de nach Friedrich Merz. Fasse die Ergebnisse zusammen und ende sie an tobias_stahl@outlook.de als PDF",
           "downloadUrl": "",
           "downloadLabel": "",
           "plannedSteps": [],
           "options": [],
-          "timestamp": "2026-02-25T14:17:32.244Z"
+          "timestamp": "2026-02-26T12:41:27.679Z"
         },
         {
           "role": "bot",
-          "text": "Auf der Website tagesschau.de wurden drei Treffer zum Thema Friedrich Merz gefunden. Laut den Artikeln besuchte Merz Peking und sieht \"großes Potenzial\" zwischen Deutschland und China. Der Kanzler möchte die Abhängigkeiten von China vermindern und gleichzeitig die Beziehungen zwischen den beiden Ländern stärken.\n\nEine PDF-Zusammenfassung wurde erstellt und erfolgreich an tobias_stahl@outlook.de mit dem Betreff \"Zusammenfassung Friedrich Merz\" gesendet.",
-          "downloadUrl": "/api/download?path=friedrich_merz_zusammenfassung.pdf&user_id=user1",
-          "downloadLabel": "Download: friedrich_merz_zusammenfassung.pdf",
+          "text": "Die Suche nach Friedrich Merz auf www.tagesschau.de ergab 6 Treffer, die hauptsächlich seinen Besuch in China thematisieren. Die Ergebnisse wurden als PDF erstellt und erfolgreich an tobias_stahl@outlook.de gesendet.",
+          "downloadUrl": "/api/download?path=ergebnis.pdf&user_id=user1",
+          "downloadLabel": "Download: ergebnis.pdf",
           "plannedSteps": [
-            "1. tool=view_website args={\"url\":\"https://www.tagesschau.de\",\"query\":\"Friedrich Merz\"}",
-            "2. tool=llm_compose args={\"text\":\"{steps[0].text}\"}",
-            "3. tool=pdf_export args={\"text\":\"{steps[1].text}\",\"output_path\":\"friedrich_merz_zusammenfassung.pdf\"}",
-            "4. tool=send_mail args={\"recipient\":\"tobias_stahl@outlook.de\",\"subject\":\"Zusammenfassung Friedrich Merz\",\"body\":\"Bitte finden Sie die Zusammenfassung im Anhang.\",\"attachments\":[\"friedrich_merz_zusammenfassung.pdf\"]}"
+            "1. tool=view_website args={\"url\":\"https://www.tagesschau.de/\",\"query\":\"Friedrich Merz\"}",
+            "2. tool=llm_compose args={\"text\":\"{last.text}\"}",
+            "3. tool=pdf_export args={\"output_path\":\"ergebnis.pdf\",\"text\":\"{last.text}\"}",
+            "4. tool=send_mail args={\"to\":[\"tobias_stahl@outlook.de\"],\"subject\":\"Ergebnisse der Suche nach Friedrich Merz\",\"body\":\"Anhang: Ergebnisse der Suche nach Friedrich Merz\",\"attachments\":[\"ergebnis.pdf\"]}"
           ],
           "options": [],
-          "timestamp": "2026-02-25T14:17:55.755Z"
+          "timestamp": "2026-02-26T12:41:41.986Z"
         }
       ],
-      "created_at": "2026-02-25T14:17:22.297Z",
-      "updated_at": "2026-02-25T14:17:55.755Z"
+      "created_at": "2026-02-26T12:41:05.333Z",
+      "updated_at": "2026-02-26T12:41:41.986Z"
     },
     {
-      "id": 21,
-      "title": "suche auf www.tagesschau.de nach Friedrich Merz. Exportiere die zusammenfassung als PDF und sende sie an tobias_stahl@outlook.de",
+      "id": 26,
+      "title": "was kannst du?",
       "messages": [
         {
           "role": "bot",
@@ -53,94 +53,54 @@
           "downloadLabel": "",
           "plannedSteps": [],
           "options": [],
-          "timestamp": "2026-02-25T14:12:27.496Z"
+          "timestamp": "2026-02-26T12:39:29.341Z"
         },
         {
           "role": "user",
-          "text": "suche auf www.tagesschau.de nach Friedrich Merz. Exportiere die zusammenfassung als PDF und sende sie an tobias_stahl@outlook.de",
+          "text": "was kannst du?",
           "downloadUrl": "",
           "downloadLabel": "",
           "plannedSteps": [],
           "options": [],
-          "timestamp": "2026-02-25T14:12:29.400Z"
+          "timestamp": "2026-02-26T12:39:32.487Z"
         },
         {
           "role": "bot",
-          "text": "Auf der Website tagesschau.de wurden drei Treffer zum Thema Friedrich Merz gefunden. Laut den Artikeln besuchte Merz Peking und sieht \"großes Potenzial\" zwischen Deutschland und China. Der Kanzler möchte die Abhängigkeiten von China vermindern und gleichzeitig die Beziehungen zwischen den beiden Ländern stärken.\n\nEine PDF-Zusammenfassung wurde erstellt und erfolgreich an tobias_stahl@outlook.de mit dem Betreff \"Zusammenfassung Friedrich Merz\" gesendet.",
-          "downloadUrl": "/api/download?path=friedrich_merz_zusammenfassung.pdf&user_id=user1",
-          "downloadLabel": "Download: friedrich_merz_zusammenfassung.pdf",
+          "text": "Es stehen 21 Fähigkeiten zur Verfügung, darunter das Versenden von E-Mails, das Durchsuchen von Websites, das Lesen und Schreiben von Dateien, die Durchführung von Webrecherchen und das Exportieren von Texten als PDF oder PowerPoint. Eine E-Mail wurde nicht versendet.",
+          "downloadUrl": "",
+          "downloadLabel": "",
           "plannedSteps": [
-            "1. tool=view_website args={\"url\":\"https://www.tagesschau.de\",\"query\":\"Friedrich Merz\"}",
-            "2. tool=llm_compose args={\"text\":\"{steps[0].text}\"}",
-            "3. tool=pdf_export args={\"text\":\"{steps[1].text}\",\"output_path\":\"friedrich_merz_zusammenfassung.pdf\"}",
-            "4. tool=send_mail args={\"recipient\":\"tobias_stahl@outlook.de\",\"subject\":\"Zusammenfassung Friedrich Merz\",\"body\":\"Bitte finden Sie die Zusammenfassung im Anhang.\",\"attachments\":[\"friedrich_merz_zusammenfassung.pdf\"]}"
+            "1. tool=list_skills args={}"
           ],
           "options": [],
-          "timestamp": "2026-02-25T14:12:53.259Z"
-        }
-      ],
-      "created_at": "2026-02-25T14:12:27.496Z",
-      "updated_at": "2026-02-25T14:12:53.259Z"
-    },
-    {
-      "id": 20,
-      "title": "suche auf www.tagesschau.de nach Friedrich Merz. Exportiere die zusammenfassung als PDF und sende sie an tobias_stahl@outlook.de",
-      "messages": [
-        {
-          "role": "bot",
-          "text": "Hallo! Wie kann ich Ihnen heute helfen?",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "plannedSteps": [],
-          "options": [],
-          "timestamp": "2026-02-25T14:11:13.572Z"
+          "timestamp": "2026-02-26T12:39:38.488Z"
         },
         {
           "role": "user",
-          "text": "suche auf www.tagesschau.de nach Friedrich Merz. Exportiere die zusammenfassung als PDF und sende sie an tobias_stahl@outlook.de",
+          "text": "sende eine Mail mit Hallo Tobias an tobias_stahl@outlook.de",
           "downloadUrl": "",
           "downloadLabel": "",
           "plannedSteps": [],
           "options": [],
-          "timestamp": "2026-02-25T14:11:15.463Z"
+          "timestamp": "2026-02-26T12:40:34.687Z"
         },
         {
           "role": "bot",
-          "text": "Die Zusammenfassung zu Friedrich Merz wurde erfolgreich als PDF erstellt und an tobias_stahl@outlook.de gesendet.",
-          "downloadUrl": "/api/download?path=summary.pdf&user_id=user1",
-          "downloadLabel": "Download: summary.pdf",
+          "text": "Eine E-Mail mit dem Betreff \"Hallo\" an tobias_stahl@outlook.de wurde erfolgreich versendet.",
+          "downloadUrl": "",
+          "downloadLabel": "",
           "plannedSteps": [
-            "1. tool=browse_website args={\"url\":\"https://www.tagesschau.de\",\"query\":\"Friedrich Merz\",\"max_matches\":5,\"max_pages\":1}",
-            "2. tool=llm_compose args={\"text\":\"{steps[0].text}\",\"instruction\":\"Erstelle eine Zusammenfassung der gefundenen Informationen zu Friedrich Merz.\",\"goal\":\"Zusammenfassung erstellen\"}",
-            "3. tool=pdf_export args={\"output_path\":\"summary.pdf\",\"title\":\"Zusammenfassung zu Friedrich Merz\",\"text\":\"{steps[1].summary}\"}",
-            "4. tool=send_mail args={\"to\":[\"tobias_stahl@outlook.de\"],\"subject\":\"Zusammenfassung zu Friedrich Merz\",\"body\":\"Bitte finden Sie im Anhang die Zusammenfassung zu Friedrich Merz.\",\"attachments\":[\"summary.pdf\"]}"
+            "1. tool=send_mail args={\"to\":[\"tobias_stahl@outlook.de\"],\"subject\":\"Hallo\",\"body\":\"Hallo Tobias\"}"
           ],
           "options": [],
-          "timestamp": "2026-02-25T14:11:44.448Z"
+          "timestamp": "2026-02-26T12:40:38.598Z"
         }
       ],
-      "created_at": "2026-02-25T14:11:13.572Z",
-      "updated_at": "2026-02-25T14:11:44.448Z"
+      "created_at": "2026-02-26T12:39:29.341Z",
+      "updated_at": "2026-02-26T12:40:38.598Z"
     },
     {
-      "id": 19,
-      "title": "Neuer Chat",
-      "messages": [
-        {
-          "role": "bot",
-          "text": "Hallo! Wie kann ich Ihnen heute helfen?",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "plannedSteps": [],
-          "options": [],
-          "timestamp": "2026-02-25T14:11:13.476Z"
-        }
-      ],
-      "created_at": "2026-02-25T14:11:13.476Z",
-      "updated_at": "2026-02-25T14:11:13.476Z"
-    },
-    {
-      "id": 18,
+      "id": 25,
       "title": "suche auf www.tagesschau.de nach Friedrich Merz. Exportiere die zusammenfassung als PDF und sende sie an tobias_stahl@outlook.de",
       "messages": [
         {
@@ -150,7 +110,7 @@
           "downloadLabel": "",
           "plannedSteps": [],
           "options": [],
-          "timestamp": "2026-02-25T14:10:42.738Z"
+          "timestamp": "2026-02-25T14:53:44.986Z"
         },
         {
           "role": "user",
@@ -159,240 +119,26 @@
           "downloadLabel": "",
           "plannedSteps": [],
           "options": [],
-          "timestamp": "2026-02-25T14:10:44.169Z"
+          "timestamp": "2026-02-25T14:53:46.143Z"
         },
         {
           "role": "bot",
-          "text": "Auf der Website tagesschau.de wurden drei Treffer zum Thema Friedrich Merz gefunden. Laut den Artikeln besuchte Merz Peking und sieht \"großes Potenzial\" zwischen Deutschland und China. Der Kanzler möchte die Abhängigkeiten von China vermindern und gleichzeitig die Beziehungen zwischen den beiden Ländern stärken.\n\nEine PDF-Zusammenfassung wurde erstellt und erfolgreich an tobias_stahl@outlook.de mit dem Betreff \"Zusammenfassung Friedrich Merz\" gesendet.",
-          "downloadUrl": "/api/download?path=friedrich_merz_zusammenfassung.pdf&user_id=user1",
-          "downloadLabel": "Download: friedrich_merz_zusammenfassung.pdf",
-          "plannedSteps": [
-            "1. tool=view_website args={\"url\":\"https://www.tagesschau.de\",\"query\":\"Friedrich Merz\"}",
-            "2. tool=llm_compose args={\"text\":\"{steps[0].text}\"}",
-            "3. tool=pdf_export args={\"text\":\"{steps[1].text}\",\"output_path\":\"friedrich_merz_zusammenfassung.pdf\"}",
-            "4. tool=send_mail args={\"recipient\":\"tobias_stahl@outlook.de\",\"subject\":\"Zusammenfassung Friedrich Merz\",\"body\":\"Bitte finden Sie die Zusammenfassung im Anhang.\",\"attachments\":[\"friedrich_merz_zusammenfassung.pdf\"]}"
-          ],
-          "options": [],
-          "timestamp": "2026-02-25T14:11:17.716Z"
-        }
-      ],
-      "created_at": "2026-02-25T14:10:42.738Z",
-      "updated_at": "2026-02-25T14:11:17.716Z"
-    },
-    {
-      "id": 17,
-      "title": "suche auf www.tagesschau.de nach Friedrich Merz. Exportiere die zusammenfassung als PDF und sende sie an tobias_stahl@outlook.de",
-      "messages": [
-        {
-          "role": "bot",
-          "text": "Hallo! Wie kann ich Ihnen heute helfen?",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "plannedSteps": [],
-          "options": [],
-          "timestamp": "2026-02-25T14:08:00.228Z"
-        },
-        {
-          "role": "user",
-          "text": "suche auf www.tagesschau.de nach Friedrich Merz. Exportiere die zusammenfassung als PDF und sende sie an tobias_stahl@outlook.de",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "plannedSteps": [],
-          "options": [],
-          "timestamp": "2026-02-25T14:08:02.002Z"
-        },
-        {
-          "role": "bot",
-          "text": "Auf der Website tagesschau.de wurden drei Treffer zum Thema Friedrich Merz gefunden. Laut den Artikeln besuchte Merz Peking und sieht \"großes Potenzial\" zwischen Deutschland und China. Der Kanzler möchte die Abhängigkeiten von China vermindern und gleichzeitig die Beziehungen zwischen den beiden Ländern stärken.\n\nDie Zusammenfassung wurde als PDF exportiert und befindet sich im Datei \"friedrich_merz_zusammenfassung.pdf\". Der Versand der E-Mail an tobias_stahl@outlook.de ist jedoch fehlgeschlagen, da die Empfängeradresse nicht korrekt angegeben wurde.",
-          "downloadUrl": "/api/download?path=friedrich_merz_zusammenfassung.pdf&user_id=user1",
-          "downloadLabel": "Download: friedrich_merz_zusammenfassung.pdf",
-          "plannedSteps": [
-            "1. tool=view_website args={\"url\":\"https://www.tagesschau.de\",\"query\":\"Friedrich Merz\"}",
-            "2. tool=llm_compose args={\"text\":\"{steps[0].text}\"}",
-            "3. tool=pdf_export args={\"text\":\"{steps[1].text}\",\"output_path\":\"friedrich_merz_zusammenfassung.pdf\"}",
-            "4. tool=send_mail args={\"recipient\":\"tobias_stahl@outlook.de\",\"subject\":\"Zusammenfassung Friedrich Merz\",\"body\":\"Bitte finden Sie die Zusammenfassung im Anhang.\",\"attachments\":[\"friedrich_merz_zusammenfassung.pdf\"]}"
-          ],
-          "options": [],
-          "timestamp": "2026-02-25T14:08:29.165Z"
-        }
-      ],
-      "created_at": "2026-02-25T14:08:00.228Z",
-      "updated_at": "2026-02-25T14:08:29.165Z"
-    },
-    {
-      "id": 16,
-      "title": "suche auf www.tagesschau.de nach Friedrich Merz. Exportiere die zusammenfassung als PDF und sende sie an tobias_stahl@outlook.de",
-      "messages": [
-        {
-          "role": "bot",
-          "text": "Hallo! Wie kann ich Ihnen heute helfen?",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "plannedSteps": [],
-          "options": [],
-          "timestamp": "2026-02-25T13:58:19.487Z"
-        },
-        {
-          "role": "user",
-          "text": "suche auf www.tagesschau.de nach Friedrich Merz. Exportiere die zusammenfassung als PDF und sende sie an tobias_stahl@outlook.de",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "plannedSteps": [],
-          "options": [],
-          "timestamp": "2026-02-25T13:58:22.222Z"
-        },
-        {
-          "role": "bot",
-          "text": "Auf der Website tagesschau.de wurden drei Treffer zum Thema Friedrich Merz gefunden. Laut den Artikeln besuchte Merz Peking und sieht \"großes Potenzial\" zwischen Deutschland und China. Der Kanzler möchte die Abhängigkeiten von China vermindern und gleichzeitig die Beziehungen zwischen den beiden Ländern stärken.\n\nDie Zusammenfassung wurde als PDF exportiert, aber der Versand an tobias_stahl@outlook.de ist fehlgeschlagen, da die Empfängeradresse nicht korrekt angegeben wurde.",
+          "text": "Bundeskanzler Friedrich Merz hat sich in Peking mit Chinas Präsident Xi getroffen, um über eine Vertiefung der deutsch-chinesischen Beziehungen zu sprechen. Laut Merz und Xi soll die Partnerschaft auf ein \"neues Niveau\" gehoben werden. Der Bundeskanzler sieht \"großes Potenzial\" zwischen Deutschland und China, möchte jedoch auch die Abhängigkeiten von China vermindern.\n\nEine E-Mail mit der Zusammenfassung als PDF-Anhang wurde erfolgreich an tobias_stahl@outlook.de gesendet.",
           "downloadUrl": "/api/download?path=zusammenfassung.pdf&user_id=user1",
           "downloadLabel": "Download: zusammenfassung.pdf",
           "plannedSteps": [
             "1. tool=view_website args={\"url\":\"https://www.tagesschau.de\",\"query\":\"Friedrich Merz\"}",
             "2. tool=llm_compose args={\"text\":\"{steps[0].text}\"}",
-            "3. tool=pdf_export args={\"text\":\"{steps[1].text}\",\"output_path\":\"zusammenfassung.pdf\"}",
-            "4. tool=send_mail args={\"recipient\":\"tobias_stahl@outlook.de\",\"subject\":\"Zusammenfassung Friedrich Merz\",\"body\":\"Bitte finden Sie die Zusammenfassung im Anhang.\",\"attachments\":[\"{steps[2].output_path}\"]}"
+            "3. tool=pdf_export args={\"output_path\":\"zusammenfassung.pdf\",\"text\":\"{steps[1].text}\"}",
+            "4. tool=send_mail args={\"to\":[\"tobias_stahl@outlook.de\"],\"subject\":\"Zusammenfassung Friedrich Merz\",\"body\":\"Bitte finden Sie die Zusammenfassung im Anhang.\",\"attachments\":[\"{steps[2].output_path}\"]}"
           ],
           "options": [],
-          "timestamp": "2026-02-25T13:59:14.143Z"
+          "timestamp": "2026-02-25T14:54:09.931Z"
         }
       ],
-      "created_at": "2026-02-25T13:58:19.487Z",
-      "updated_at": "2026-02-25T13:59:14.143Z"
-    },
-    {
-      "id": 15,
-      "title": "was kannst du?",
-      "messages": [
-        {
-          "role": "bot",
-          "text": "Hallo! Wie kann ich Ihnen heute helfen?",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "plannedSteps": [],
-          "options": [],
-          "timestamp": "2026-02-25T13:49:58.014Z"
-        },
-        {
-          "role": "user",
-          "text": "was kannst du?",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "plannedSteps": [],
-          "options": [],
-          "timestamp": "2026-02-25T13:50:02.149Z"
-        },
-        {
-          "role": "bot",
-          "text": "Ich kann insgesamt 28 verschiedene Fähigkeiten anbieten, darunter:\n\n- E-Mail-Tools (z.B. send_mail, answer_mail, fetch_inbox_mails)\n- Webrecherche-Tools (z.B. browse_website, view_website, websearch_table)\n- Textverarbeitungs-Tools (z.B. llm_compose, llm_summarize)\n- Datei-Tools (z.B. read_file, write_file, pdf_export)\n- Wissensbasis-Tools (z.B. rag_knowledgebase, query_rag)\n- Weitere Tools (z.B. offerflow, langsearch, search_ebay)\n\nIch kann keine spezifischen Ergebnisse oder Ausgaben ohne weitere Anweisungen liefern. Bitte teile mir mit, was ich für dich tun kann.",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "plannedSteps": [
-            "1. tool=list_skills args={}"
-          ],
-          "options": [],
-          "timestamp": "2026-02-25T13:50:15.812Z"
-        },
-        {
-          "role": "user",
-          "text": "suche auf www.tagesschau.de nach Friedrich Merz. Exportiere die zusammenfassung als PDF und sende sie an tobias_stahl@outlook.de",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "plannedSteps": [],
-          "options": [],
-          "timestamp": "2026-02-25T13:51:05.305Z"
-        },
-        {
-          "role": "bot",
-          "text": "Auf der Website tagesschau.de wurden drei Treffer zum Thema Friedrich Merz gefunden. Laut den Artikeln besuchte Merz Peking und sieht \"großes Potenzial\" zwischen Deutschland und China. Der Kanzler möchte die Abhängigkeiten von China vermindern und gleichzeitig die Beziehungen zwischen den beiden Ländern stärken.\n\nEine PDF-Datei mit der Zusammenfassung wurde erstellt (zusammenfassung.pdf). Der Versand der E-Mail an tobias_stahl@outlook.de ist jedoch fehlgeschlagen.",
-          "downloadUrl": "/api/download?path=zusammenfassung.pdf&user_id=user1",
-          "downloadLabel": "Download: zusammenfassung.pdf",
-          "plannedSteps": [
-            "1. tool=view_website args={\"url\":\"https://www.tagesschau.de\",\"query\":\"Friedrich Merz\"}",
-            "2. tool=llm_compose args={\"text\":\"{steps[0].text}\"}",
-            "3. tool=pdf_export args={\"text\":\"{steps[1].text}\",\"output_path\":\"zusammenfassung.pdf\"}",
-            "4. tool=send_mail args={\"recipient\":\"tobias_stahl@outlook.de\",\"subject\":\"Zusammenfassung Friedrich Merz\",\"body\":\"Bitte finden Sie die Zusammenfassung im Anhang.\",\"attachments\":[\"zusammenfassung.pdf\"]}"
-          ],
-          "options": [],
-          "timestamp": "2026-02-25T13:51:32.920Z"
-        }
-      ],
-      "created_at": "2026-02-25T13:49:58.014Z",
-      "updated_at": "2026-02-25T13:51:32.920Z"
-    },
-    {
-      "id": 14,
-      "title": "was kannst du?",
-      "messages": [
-        {
-          "role": "bot",
-          "text": "Hallo! Wie kann ich Ihnen heute helfen?",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "plannedSteps": [],
-          "options": [],
-          "timestamp": "2026-02-25T13:44:54.188Z"
-        },
-        {
-          "role": "user",
-          "text": "was kannst du?",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "plannedSteps": [],
-          "options": [],
-          "timestamp": "2026-02-25T13:44:57.586Z"
-        },
-        {
-          "role": "bot",
-          "text": "Ich kann insgesamt 28 verschiedene Fähigkeiten anbieten, darunter:\n\n- E-Mail-Tools (z.B. send_mail, answer_mail, fetch_inbox_mails)\n- Webrecherche-Tools (z.B. browse_website, view_website, websearch_table)\n- Textverarbeitungs-Tools (z.B. llm_compose, llm_summarize)\n- Datei-Tools (z.B. read_file, write_file, pdf_export)\n- Wissensbasis-Tools (z.B. rag_knowledgebase, query_rag)\n- Weitere Tools (z.B. offerflow, langsearch, search_ebay)\n\nIch kann keine spezifischen Ergebnisse oder Ausgaben ohne weitere Anweisungen liefern. Bitte teile mir mit, was ich für dich tun kann.",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "plannedSteps": [
-            "1. tool=list_skills args={}"
-          ],
-          "options": [],
-          "timestamp": "2026-02-25T13:45:43.009Z"
-        }
-      ],
-      "created_at": "2026-02-25T13:44:54.188Z",
-      "updated_at": "2026-02-25T13:45:43.009Z"
-    },
-    {
-      "id": 13,
-      "title": "was kannst du?",
-      "messages": [
-        {
-          "role": "bot",
-          "text": "Hallo! Wie kann ich Ihnen heute helfen?",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "plannedSteps": [],
-          "options": [],
-          "timestamp": "2026-02-25T13:41:16.128Z"
-        },
-        {
-          "role": "user",
-          "text": "was kannst du?",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "plannedSteps": [],
-          "options": [],
-          "timestamp": "2026-02-25T13:41:17.769Z"
-        },
-        {
-          "role": "bot",
-          "text": "Ich kann insgesamt 28 verschiedene Fähigkeiten anbieten, darunter:\n\n- E-Mail-Tools (z.B. send_mail, answer_mail, fetch_inbox_mails)\n- Webrecherche-Tools (z.B. browse_website, view_website, websearch_table)\n- Textverarbeitungs-Tools (z.B. llm_compose, llm_summarize)\n- Datei-Tools (z.B. read_file, write_file, pdf_export)\n- Wissensbasis-Tools (z.B. rag_knowledgebase, query_rag)\n- Weitere Tools (z.B. offerflow, langsearch, search_ebay)\n\nIch kann keine spezifischen Ergebnisse oder Ausgaben ohne weitere Anweisungen liefern. Bitte teile mir mit, was ich für dich tun kann.",
-          "downloadUrl": "",
-          "downloadLabel": "",
-          "plannedSteps": [
-            "1. tool=list_skills args={}"
-          ],
-          "options": [],
-          "timestamp": "2026-02-25T13:41:52.707Z"
-        }
-      ],
-      "created_at": "2026-02-25T13:41:16.128Z",
-      "updated_at": "2026-02-25T13:41:52.707Z"
+      "created_at": "2026-02-25T14:53:44.986Z",
+      "updated_at": "2026-02-25T14:54:09.931Z"
     }
   ],
-  "active_chat_id": 22
+  "active_chat_id": 27
 }

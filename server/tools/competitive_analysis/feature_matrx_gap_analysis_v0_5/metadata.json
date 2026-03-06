@@ -1,0 +1,7 @@
+{
+  "name": "Feature Matrix Gap Analysis - Schritt 6",
+  "version": "0.5",
+  "description": "Erstellt eine Gap-Analyse auf Basis von Produktprofil und Wettbewerberprofilen v0.5 mit Strukturtreue für Performance-, Preis- und Soft-Features.",
+  "input": "product_profile.json und competitor_profile_results_v0_5.json (inline oder per path).",
+  "output": "feature_matrix_gap (comparison_matrix, gaps_and_usps, cluster_assignment) für Ausgabe nach feature_matrix_gap_v0_5.json."
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Final Report Generator - Schritt 10",
+  "version": "0.5",
+  "description": "Erzeugt den finalen Analysebericht für v0.5-Artefakte inklusive aktualisierter Wettbewerbsübersicht und Feature-Matrix-Section.",
+  "input": "artifact_paths oder artifacts mit product_profile, competitor_profile_results_v0_5, feature_matrix_gap_v0_5, strategic_analysis_v0_5.",
+  "output": "final_report payload zur Ablage als final_analysis_report_v0_5.json."
+}

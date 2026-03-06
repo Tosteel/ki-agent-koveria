@@ -1,0 +1,7 @@
+{
+  "name": "Strategic Analysis SWOT Positioning - Schritt 7",
+  "version": "0.5",
+  "description": "Leitet SWOT, Positionierung und strategische Implikationen aus feature_matrix_gap_v0_5 ab.",
+  "input": "feature_matrix_gap_v0_5.json oder comparison_matrix + gaps_and_usps.",
+  "output": "Strategie-Output analog zur Basisversion (swot, positioning_data, strategic_implications, extraction_warnings)."
+}

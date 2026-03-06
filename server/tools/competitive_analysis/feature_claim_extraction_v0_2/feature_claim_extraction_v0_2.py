@@ -9,7 +9,7 @@ from server.services.llm_ionos import IonosLLM
 from server.services.llm_openai import LlmOpenai
 from server.services.llm_perplexity import LlmPerplexity
 from server.tools.competitive_analysis.document_import.models import ParsedDocument
-from server.tools.competitive_analysis.feature_claim_extraction.feature_claim_extraction import (
+from server.tools.competitive_analysis.backup.feature_claim_extraction.feature_claim_extraction import (
     _dedupe_by_key,
     _load_parsed_doc,
     _normalize_feature,
@@ -170,13 +170,20 @@ def _llm_step(
         system = (
             system
             + " Extrahiere aus normalized_features ALLE messbaren Leistungs-/Spezifikationsmerkmale in einheitlicher Form."
-            + " Beispiele: Saugleistung, Laufzeit, Kapazitäten, Temperatur, Abmessungen, Gewicht, Schwellenhöhe."
+            + " Messbar bedeutet: numerischer Wert und/oder explizite Einheit im Featurekontext."
+            + " Solche Merkmale muessen immer in performance_parameters erscheinen, niemals nur in soft_features."
+            + " Beispiele (generisch): Leistung, Laufzeit, Kapazitaet, Volumen, Temperatur, Abmessungen, Gewicht, Reichweite, Durchsatz, Geschwindigkeit."
+            + " Leistungsangaben (z. B. Saugleistung, Motorleistung, Durchsatz) immer als performance_parameters ausgeben."
+            + " Wenn ein Merkmal semantisch funktional wirkt, aber einen messbaren Wert/Einheit hat, trotzdem als performance_parameter aufnehmen."
+            + " Bei mehrdimensionalen Maßangaben (z. B. 350 x 350 x 88 mm) splitte in eigene Parameter mit Achsenname: Breite, Tiefe, Hoehe."
+            + " Bei 2D-Maßen nutze Breite und Hoehe."
         )
     if step == "soft_features":
         system = (
             system
             + " Extrahiere aus normalized_features und performance_parameters NUR soft_features (nicht-messbare Features wie spezielle Funktionen, App, Technologien)."
             + " Nimm NICHTS auf, was messbar ist oder bereits als performance_parameter enthalten ist."
+            + " Merkmale mit Zahl/Einheit sind ausgeschlossen und gehoeren in performance_parameters."
             + " Keine Claims, keine Segmente, keine Use-Cases."
             + " Gib ein leeres Array nur zurück, wenn wirklich keine nicht-messbaren Merkmale vorkommen."
         )
@@ -272,6 +279,129 @@ def _repair_base_feature_names(features: List[NormalizedFeature]) -> List[Normal
             f.name = _derive_feature_name_from_source(f.source, n or "measurement")
         out.append(f)
     return out
+
+
+def _to_float_or_none(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        s = value.strip().replace(",", ".")
+        m = re.search(r"[-+]?\d+(?:\.\d+)?", s)
+        if m:
+            try:
+                return float(m.group(0))
+            except Exception:
+                return None
+    return None
+
+
+def _looks_measurable_feature(f: NormalizedFeature) -> bool:
+    if _to_float_or_none(f.normalized_value) is not None:
+        return True
+    if _to_float_or_none(f.value) is not None:
+        return True
+    unit = str(f.normalized_unit or f.unit or "").strip()
+    if unit:
+        return True
+    src = str(f.source or "")
+    if re.search(r"[-+]?\d+(?:[.,]\d+)?\s*[A-Za-z%°/]+", src):
+        return True
+    return False
+
+
+def _merge_missing_measurables_into_performance(
+    *,
+    normalized_features: List[NormalizedFeature],
+    performance_parameters: List[NormalizedFeature],
+) -> List[NormalizedFeature]:
+    existing_keys = {
+        f"{(str(f.name or '')).strip().lower()}|{str(f.normalized_unit or f.unit or '').strip().lower()}"
+        for f in (performance_parameters or [])
+    }
+    merged = list(performance_parameters or [])
+    for f in normalized_features or []:
+        if not _looks_measurable_feature(f):
+            continue
+        key = f"{(str(f.name or '')).strip().lower()}|{str(f.normalized_unit or f.unit or '').strip().lower()}"
+        if key in existing_keys:
+            continue
+        merged.append(f)
+        existing_keys.add(key)
+    return _dedupe_by_key(
+        merged,
+        lambda x: f"{x.name.lower()}|{x.normalized_value}|{x.normalized_unit.lower()}",
+    )
+
+
+def _extract_dim_values(value: Any) -> List[float]:
+    txt = str(value or "")
+    if not txt:
+        return []
+    # Support common separators for dimensions: x, X, ×
+    parts = re.split(r"\s*[xX×]\s*", txt)
+    if len(parts) < 2:
+        return []
+    out: List[float] = []
+    for p in parts:
+        m = re.search(r"[-+]?\d+(?:[.,]\d+)?", p)
+        if not m:
+            continue
+        try:
+            out.append(float(m.group(0).replace(",", ".")))
+        except Exception:
+            continue
+    return out if len(out) >= 2 else []
+
+
+def _axis_labels_for_dims(dim_count: int) -> List[str]:
+    if dim_count >= 3:
+        return ["Breite", "Tiefe", "Hoehe"][:dim_count]
+    if dim_count == 2:
+        return ["Breite", "Hoehe"]
+    return [f"Dimension {i+1}" for i in range(dim_count)]
+
+
+def _base_measure_name(name: str) -> str:
+    n = str(name or "").strip()
+    if not n:
+        return "Masse"
+    # Remove common brackets/tails to produce stable base
+    n = re.sub(r"\(.*?\)", "", n).strip()
+    n = re.sub(r"\s+", " ", n).strip(" -:_")
+    return n or "Masse"
+
+
+def _fix_multidim_features(features: List[NormalizedFeature]) -> List[NormalizedFeature]:
+    out: List[NormalizedFeature] = []
+    for f in features or []:
+        dims = _extract_dim_values(f.value)
+        if dims:
+            # Keep original dimensional string as normalized value to avoid collapsing to one axis.
+            f.normalized_value = str(f.value)
+            if not (f.normalized_unit or "").strip():
+                f.normalized_unit = str(f.unit or "").strip()
+            out.append(f)
+            unit = str(f.unit or f.normalized_unit or "").strip()
+            labels = _axis_labels_for_dims(len(dims))
+            base_name = _base_measure_name(f.name)
+            for i, v in enumerate(dims):
+                axis = labels[i] if i < len(labels) else f"Dimension {i+1}"
+                out.append(
+                    NormalizedFeature(
+                        name=f"{base_name} - {axis}",
+                        value=v,
+                        unit=unit,
+                        normalized_value=v,
+                        normalized_unit=unit,
+                        source=f.source,
+                    )
+                )
+            continue
+        out.append(f)
+    return _dedupe_by_key(
+        out,
+        lambda x: f"{x.name.lower()}|{x.normalized_value}|{x.normalized_unit.lower()}",
+    )
 
 
 def _to_feature_list(raw: Any) -> List[NormalizedFeature]:
@@ -430,6 +560,7 @@ def extract_feature_claim_profile_v0_2(
         normalized_features,
         lambda f: f"{f.name.lower()}|{f.normalized_value}|{f.normalized_unit.lower()}",
     )
+    normalized_features = _fix_multidim_features(normalized_features)
     mp = staged.get("metadata_patch") if isinstance(staged.get("metadata_patch"), dict) else {}
     if str(mp.get("product_name") or "").strip():
         metadata["product_name"] = str(mp.get("product_name")).strip()
@@ -468,6 +599,11 @@ def extract_feature_claim_profile_v0_2(
     performance_parameters = _dedupe_by_key(
         performance_parameters,
         lambda f: f"{f.name.lower()}|{f.normalized_value}|{f.normalized_unit.lower()}",
+    )
+    performance_parameters = _fix_multidim_features(performance_parameters)
+    performance_parameters = _merge_missing_measurables_into_performance(
+        normalized_features=normalized_features,
+        performance_parameters=performance_parameters,
     )
 
     # Step 3: price_indicators

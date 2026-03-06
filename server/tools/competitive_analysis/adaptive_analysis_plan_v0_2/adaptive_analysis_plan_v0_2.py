@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 from server.services.llm_ionos import IonosLLM
 from server.services.llm_openai import LlmOpenai
 from server.services.llm_perplexity import LlmPerplexity
-from server.tools.competitive_analysis.adaptive_analysis_plan.adaptive_analysis_plan import (
+from server.tools.competitive_analysis.backup.adaptive_analysis_plan.adaptive_analysis_plan import (
     _heuristic_plan,
     _load_product_profile,
     _openai_extract_output_text,
@@ -16,8 +16,8 @@ from server.tools.competitive_analysis.adaptive_analysis_plan.adaptive_analysis_
     _sanitize_llm_queries,
     _sanitize_plan,
 )
-from server.tools.competitive_analysis.adaptive_analysis_plan.models import AnalysisPlan, ComparisonDimension, SearchTerm
-from server.tools.competitive_analysis.competitor_identification.competitor_identification import (
+from server.tools.competitive_analysis.backup.adaptive_analysis_plan.models import AnalysisPlan, ComparisonDimension, SearchTerm
+from server.tools.competitive_analysis.backup.competitor_identification.competitor_identification import (
     _langsearch_fallback,
     _openai_search,
     _perplexity_search,

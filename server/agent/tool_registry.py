@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import field
 from dataclasses import dataclass
+from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Type
@@ -94,6 +95,50 @@ def _output_schema_hint(response_model: Optional[Type[BaseModel]]) -> str:
     return f"Output fields: {fields_txt}\nRequired output fields: {req_txt}"
 
 
+def _inline_local_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolve local #/$defs/* references into inline schemas."""
+    defs = schema.get("$defs")
+    if not isinstance(defs, dict):
+        out = deepcopy(schema)
+        if isinstance(out, dict):
+            out.pop("$defs", None)
+        return out
+
+    def _resolve(node: Any, seen: set[str]) -> Any:
+        if isinstance(node, list):
+            return [_resolve(item, seen) for item in node]
+        if not isinstance(node, dict):
+            return node
+
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/$defs/"):
+            key = ref.split("/", 2)[-1]
+            if key in seen:
+                return {}
+            target = defs.get(key)
+            if not isinstance(target, dict):
+                return {}
+            resolved = _resolve(deepcopy(target), seen | {key})
+            siblings = {k: v for k, v in node.items() if k != "$ref"}
+            if siblings:
+                if isinstance(resolved, dict):
+                    merged = deepcopy(resolved)
+                    for k, v in siblings.items():
+                        merged[k] = _resolve(v, seen)
+                    return merged
+                return {"allOf": [resolved, _resolve(siblings, seen)]}
+            return resolved
+
+        out: Dict[str, Any] = {}
+        for k, v in node.items():
+            if k == "$defs":
+                continue
+            out[k] = _resolve(v, seen)
+        return out
+
+    return _resolve(deepcopy(schema), set())
+
+
 class ToolRegistry:
     def __init__(self):
         self._tools: Dict[str, ToolDef] = {}
@@ -159,7 +204,7 @@ class ToolRegistry:
         for tool in self._tools.values():
             if not tools_allowed(tool.name):
                 continue
-            args_schema = tool.request_model.model_json_schema()
+            args_schema = _inline_local_refs(tool.request_model.model_json_schema())
             if isinstance(args_schema, dict) and "additionalProperties" not in args_schema:
                 args_schema["additionalProperties"] = False
             desc = _tool_schema_description(tool.name, tool.metadata)

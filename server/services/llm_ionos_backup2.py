@@ -118,29 +118,6 @@ class IonosLLM:
                 resp.raise_for_status()
                 return resp.json()
             except Exception as e:
-                status_code = getattr(getattr(e, "response", None), "status_code", None)
-                response_text = ""
-                try:
-                    response_text = str(getattr(getattr(e, "response", None), "text", "") or "")
-                except Exception:
-                    response_text = ""
-                try:
-                    rf_preview = json.dumps(payload.get("response_format"), ensure_ascii=False)
-                except Exception:
-                    rf_preview = str(payload.get("response_format"))
-                if len(rf_preview) > 2000:
-                    rf_preview = rf_preview[:2000] + "...(truncated)"
-                if len(response_text) > 4000:
-                    response_text = response_text[:4000] + "...(truncated)"
-                if status_code is not None:
-                    print("\n===== IONOS HTTP ERROR =====")
-                    print(f"attempt={attempt + 1}/{n_retries + 1}")
-                    print(f"status={status_code}")
-                    print(f"url={url}")
-                    print(f"response_format={rf_preview}")
-                    if response_text:
-                        print(f"body={response_text}")
-                    print("============================\n")
                 last_err = e
                 time.sleep(0.8 * (attempt + 1))
 
@@ -185,25 +162,19 @@ class IonosLLM:
         planner_system = get_planner_system_prompt("ionos")
 
         # Primär: json_schema erzwingen
-        try:
-            completion = self.chat_completions(
-                messages=[
-                    {"role": "system", "content": planner_system},
-                    {"role": "user", "content": f"Goal: {goal}"},
-                ],
-                response_format=response_format,
-            )
+        completion = self.chat_completions(
+            messages=[
+                {"role": "system", "content": planner_system},
+                {"role": "user", "content": f"Goal: {goal}"},
+            ],
+            response_format=response_format,
+        )
 
-            text = self.extract_text(completion)
-            parsed = _parse_json_strictish(text)
-            steps = parsed.get("steps") or []
-            if isinstance(steps, list) and steps:
-                return {"steps": steps}
-        except Exception as e:
-            print("\n===== IONOS PLANNER FALLBACK =====")
-            print("json_schema planning failed; switching to json_object fallback")
-            print(f"error={e}")
-            print("===================================\n")
+        text = self.extract_text(completion)
+        parsed = _parse_json_strictish(text)
+        steps = parsed.get("steps") or []
+        if isinstance(steps, list) and steps:
+            return {"steps": steps}
 
         # Fallback: wenigstens JSON erzwingen (falls json_schema/oneOf nicht sauber unterstützt wird)
         completion2 = self.chat_completions(

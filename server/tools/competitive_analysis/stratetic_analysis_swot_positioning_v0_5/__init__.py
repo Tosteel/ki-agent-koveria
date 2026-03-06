@@ -1,0 +1,3 @@
+from .stratetic_analysis_swot_positioning_v0_5 import run_stratetic_analysis_swot_positioning_v0_5
+
+__all__ = ["run_stratetic_analysis_swot_positioning_v0_5"]

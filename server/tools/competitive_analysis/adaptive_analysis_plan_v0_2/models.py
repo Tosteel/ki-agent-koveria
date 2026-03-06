@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from server.tools.competitive_analysis.adaptive_analysis_plan.models import (
+from server.tools.competitive_analysis.backup.adaptive_analysis_plan.models import (
     AdaptiveAnalysisPlanRequest,
     AdaptiveAnalysisPlanResponse,
     AnalysisPlan,

@@ -21,13 +21,6 @@ BASIC_TOOLS = {
     "fetch_inbox_mails",
     "fetch_unanswered_mails",
     "list_skills",
-    "offerflow_step_1_intake",
-    "offerflow_step_2_qualification",
-    "offerflow_step_3_clarification",
-    "offerflow_step_4_scope_mapping",
-    "offerflow_step_5_resource_planning",
-    "offerflow_step_6_pricing",
-    "offerflow_step_7_validation",
 }
 
 COMPETITIVE_ANALYSIS_TOOLS = {
@@ -43,17 +36,32 @@ COMPETITIVE_ANALYSIS_TOOLS = {
     "competitor_identification_v0_2",
     "competitor_search_v0_3",
     "competitor_search_v0_4",
+    "competitor_search_v0_5",
     "competitor_products",
     "competitor_identification_quality_gate",
     "competitive_extract_competitor_profiles",
     "competitor_profile_extraction_quality_gate",
+    "competitor_profile_extraction_v0_5",
     "competitive_merge_competitor_profiles",
     "competitive_verify_competitor_source_registry",
     "competitive_feature_matrix_gap_analysis",
+    "feature_matrix_gap_analysis_v0_5",
     "competitive_feature_matrix_gap_analysis_quality_gate",
     "competitive_strategic_analysis",
+    "stratetic_analysis_swot_positioning_v0_5",
+    "final_report_generator_v0_5",
     "competitive_generate_final_report",
     "competitive_publish_pdf_report"
+}
+
+OFFER_FLOW = {
+"offerflow_step_1_intake",
+    "offerflow_step_2_qualification",
+    "offerflow_step_3_clarification",
+    "offerflow_step_4_scope_mapping",
+    "offerflow_step_5_resource_planning",
+    "offerflow_step_6_pricing",
+    "offerflow_step_7_validation",
 }
 
 def tools_allowed(tool_name: str) -> bool:
