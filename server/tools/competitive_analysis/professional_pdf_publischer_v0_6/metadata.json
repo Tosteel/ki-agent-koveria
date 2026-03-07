@@ -1,0 +1,7 @@
+{
+  "name": "PDF Publisher - Schritt 9 (v0.6)",
+  "version": "0.6",
+  "description": "Publiziert den finalen v0.6-Bericht als professionell strukturiertes PDF mit Fliesstext-Abschnitten und Tabellenlayout.",
+  "input": "final_report_v0_6 payload oder final_report_path zu final_analysis_report_v0_6.json.",
+  "output": "Professionelles PDF inklusive optionalem Render-Log."
+}

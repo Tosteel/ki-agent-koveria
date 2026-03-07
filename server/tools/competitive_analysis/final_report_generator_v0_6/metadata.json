@@ -1,0 +1,7 @@
+{
+  "name": "Final Report Generator - Schritt 8 (v0.6)",
+  "version": "0.6",
+  "description": "Erzeugt einen professionell formulierten Abschlussbericht mit deduplizierter Wettbewerbsuebersicht, aufgeloesten Clustern und narrativen Abschnittstexten.",
+  "input": "artifact_paths oder artifacts mit product_profile, competitor_profile_results_v0_5, feature_matrix_gap_v0_5 und strategic_analysis_v0_5.",
+  "output": "final_report inklusive report_sections_v0_6 fuer den professionellen PDF-Export."
+}

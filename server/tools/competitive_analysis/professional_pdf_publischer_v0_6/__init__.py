@@ -1,0 +1,1 @@
+from .professional_pdf_publischer_v0_6 import publish_competition_pdf_v0_6

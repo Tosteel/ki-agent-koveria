@@ -50,8 +50,10 @@ COMPETITIVE_ANALYSIS_TOOLS = {
     "competitive_strategic_analysis",
     "stratetic_analysis_swot_positioning_v0_5",
     "final_report_generator_v0_5",
+    "final_report_generator_v0_6",
     "competitive_generate_final_report",
-    "competitive_publish_pdf_report"
+    "competitive_publish_pdf_report",
+    "professional_pdf_publischer_v0_6",
 }
 
 OFFER_FLOW = {
