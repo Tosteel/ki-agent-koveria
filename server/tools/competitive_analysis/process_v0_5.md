@@ -125,6 +125,11 @@ Input: `competitor_search_results_v0_5.json` + `product_profile.json`
 Tool: `competitor_profile_extraction_v0_5`  
 Output: `competitor_profile_results_v0_5.json`
 
+Optionale Steuerung:
+- `exclude_same_manufacturer`: schließt Produkte des gleichen Herstellers wie das Zielprodukt aus.
+- `top_n_by_relevance`: begrenzt Kandidaten auf die Top-N nach `relevance_score` (absteigend), bevor die Anreicherung startet.
+- Null-only-Retry nutzt mehrere Brave-Queries (Performance, Preis, Soft-Features, Claims/Differentiators) und führt die Antworten anschließend zusammen.
+
 ```json
 {
   "steps": [
@@ -137,6 +142,8 @@ Output: `competitor_profile_results_v0_5.json`
         "product_profile_path": "product_profile.json",
         "provider": "brave",
         "max_competitors": 200,
+        "exclude_same_manufacturer": true,
+        "top_n_by_relevance": 80,
         "include_page_fetch": true,
         "page_fetch_timeout_s": 8,
         "page_fetch_max_chars": 8000,
@@ -281,4 +288,3 @@ Output: `competition_analysis_report_v0_5.pdf`
   ]
 }
 ```
-

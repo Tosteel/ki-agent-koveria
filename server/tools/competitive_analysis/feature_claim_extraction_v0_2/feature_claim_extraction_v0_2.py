@@ -159,6 +159,22 @@ def _llm_step(
 ) -> Dict[str, Any]:
     schema = _llm_step_schema(step)
     system = "Du extrahierst Produktprofil-Daten schrittweise als JSON. Nur Fakten aus Kontext verwenden. Nichts halluzinieren."
+    system = (
+        system
+        + " Produktunabhaengige Extraktionsregeln:"
+        + " (1) performance_parameters enthalten nur echte messbare Merkmale mit plausibler Einheit."
+        + " (2) Niemals Identifikatoren als Features: keine SKU/Artikelnummer/EAN/GTIN/interne IDs/Zubehoercodes."
+        + " (3) Feld-und-Einheit muessen semantisch passen; bei Konflikt nicht uebernehmen."
+        + " (4) 3er-Masse nur in Breite/Tiefe/Hoehe aufspalten, wenn Achsenreihenfolge explizit und eindeutig ist; sonst nur Gesamtmass."
+        + " (5) Duplikate konsolidieren (name+unit), pro Merkmal nur ein finaler Eintrag."
+        + " (6) Bei Unsicherheit null statt Schaetzung; keine impliziten Annahmen."
+        + " (7) Preise nur in price_indicators."
+        + " (8) Jeder uebernommene Wert braucht ein direktes, kurzes evidence/source-Snippet mit dem Wert."
+        + " (9) Plausibilitaetspruefung vor Ausgabe; unplausible Zuordnungen verwerfen."
+        + " (10) Keine Vermischung von Produkt- und Zubehoerdaten."
+        + " (11) soft_features sind nicht-messbar; numerische Leistungsangaben gehoeren immer in performance_parameters."
+        + " (12) Output strikt schema-konform, ohne Platzhaltertexte."
+    )
     if step == "normalized_features":
         system = (
             system
@@ -177,6 +193,7 @@ def _llm_step(
             + " Wenn ein Merkmal semantisch funktional wirkt, aber einen messbaren Wert/Einheit hat, trotzdem als performance_parameter aufnehmen."
             + " Bei mehrdimensionalen Maßangaben (z. B. 350 x 350 x 88 mm) splitte in eigene Parameter mit Achsenname: Breite, Tiefe, Hoehe."
             + " Bei 2D-Maßen nutze Breite und Hoehe."
+            + " Falls ein Eintrag wie SKU/Zubehoercode aussieht (z. B. alphanumerischer Code ohne physikalische Groesse), verwerfe ihn."
         )
     if step == "soft_features":
         system = (

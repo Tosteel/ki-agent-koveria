@@ -4,6 +4,9 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from server.services.llm_ionos import IonosLLM
+from server.services.llm_openai import LlmOpenai
+from server.services.llm_perplexity import LlmPerplexity
 from server.tools.competitive_analysis.backup.competitor_identification import (
     _clean_text,
     _clean_url,
@@ -117,6 +120,113 @@ def _manufacturer_from_title_or_domain(title: str, url: str) -> str:
     return _company_from_domain(url)
 
 
+def _parse_json_strictish(text: str) -> Dict[str, Any]:
+    if not text:
+        return {}
+    t = str(text).strip()
+    if t.startswith("```"):
+        t = t.strip("`").strip()
+        if "\n" in t:
+            first, rest = t.split("\n", 1)
+            if first.strip().lower() in {"json", "javascript"}:
+                t = rest.strip()
+    try:
+        obj = __import__("json").loads(t)
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        pass
+    s = t.find("{")
+    e = t.rfind("}")
+    if s >= 0 and e > s:
+        try:
+            obj = __import__("json").loads(t[s : e + 1])
+            return obj if isinstance(obj, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _extract_manufacturer_llm(
+    *,
+    provider: str,
+    title: str,
+    url: str,
+    snippet: str,
+    warnings: List[str],
+) -> str:
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {"manufacturer": {"type": "string"}},
+        "required": ["manufacturer"],
+    }
+    system = (
+        "Extrahiere den Hersteller/Brand aus einem Web-Suchergebnis. "
+        "Gib nur JSON gemaess Schema zurueck. "
+        "Nicht das erste Titelwort raten, sondern Marke/Hersteller normalisiert extrahieren. "
+        "Falls unklar: leeren String."
+    )
+    user = f"title={title}\nurl={url}\nsnippet={snippet}"
+
+    p = str(provider or "openai").strip().lower()
+    order = [p] + [x for x in ("openai", "perplexity", "ionos") if x != p]
+    for engine in order:
+        try:
+            if engine == "openai":
+                c = LlmOpenai()
+                if not c.enabled():
+                    continue
+                resp = c._call(
+                    input_messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                    text_format={"type": "json_schema", "name": "manufacturer_extract", "schema": schema, "strict": False},
+                )
+                text = ""
+                for item in resp.get("output", []):
+                    for cc in item.get("content", []):
+                        if cc.get("type") == "output_text":
+                            text += str(cc.get("text") or "")
+                parsed = _parse_json_strictish(text)
+                m = _clean_text(str(parsed.get("manufacturer") or ""))
+                if m:
+                    return m
+            elif engine == "perplexity":
+                c = LlmPerplexity()
+                if not c.enabled():
+                    continue
+                resp = c._call(
+                    input_messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                    text_format={"type": "json_schema", "name": "manufacturer_extract", "schema": schema, "strict": False},
+                )
+                text = ""
+                for item in resp.get("output", []):
+                    for cc in item.get("content", []):
+                        if cc.get("type") == "output_text":
+                            text += str(cc.get("text") or "")
+                parsed = _parse_json_strictish(text)
+                m = _clean_text(str(parsed.get("manufacturer") or ""))
+                if m:
+                    return m
+            else:
+                c = IonosLLM()
+                if not c.enabled():
+                    continue
+                comp = c.chat_completions(
+                    messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": {"name": "manufacturer_extract", "schema": schema, "strict": True},
+                    },
+                )
+                parsed = _parse_json_strictish(c.extract_text(comp))
+                m = _clean_text(str(parsed.get("manufacturer") or ""))
+                if m:
+                    return m
+        except Exception as exc:
+            warnings.append(f"manufacturer llm extraction failed ({engine}): {exc}")
+            continue
+    return ""
+
+
 def _reference_text(plan: Dict[str, Any]) -> str:
     chunks: List[str] = []
     for k in ("product_category",):
@@ -183,6 +293,7 @@ def search_competitors_v0_5(
     generated_queries: List[str] = []
     competitors: List[ProductCompetitorSlim] = []
     seen_urls: set[str] = set()
+    manufacturer_cache: Dict[str, str] = {}
 
     _log(
         f"start provider={p} queries={len(queries)} per_query_results={per_query_results} "
@@ -222,7 +333,18 @@ def search_competitors_v0_5(
                 _log(f"result {ridx}/{len(results)} url={url}")
                 _log(f"result {ridx}/{len(results)} snippet={snippet[:220]}")
 
-            manufacturer = _manufacturer_from_title_or_domain(title, url)
+            manufacturer = manufacturer_cache.get(url, "")
+            if not manufacturer:
+                manufacturer = _extract_manufacturer_llm(
+                    provider=p,
+                    title=title,
+                    url=url,
+                    snippet=snippet,
+                    warnings=warnings,
+                )
+                if not manufacturer:
+                    manufacturer = _manufacturer_from_title_or_domain(title, url)
+                manufacturer_cache[url] = manufacturer
             url_type = _url_type(url)
             text = f"{title}\n{snippet}"
             semantic = _cosine_similarity(ref_text, text) if ref_text else 0.0

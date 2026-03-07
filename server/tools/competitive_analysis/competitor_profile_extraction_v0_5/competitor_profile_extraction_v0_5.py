@@ -281,7 +281,9 @@ def _build_retry_query(
     perf_template: List[FeatureValue],
     price_template: List[PriceIndicatorValue],
     soft_template: List[SoftFeatureValue],
-) -> str:
+    claims_template: List[ClaimValue],
+    differentiators_template: List[str],
+) -> List[str]:
     seeds: List[str] = []
     if product_name:
         seeds.append(product_name)
@@ -291,12 +293,212 @@ def _build_retry_query(
     if category:
         seeds.append(category)
     seeds.append("weitere Features")
-    seeds.extend([x.name for x in perf_template if x.name])
-    seeds.extend([x.context for x in price_template if x.context])
-    seeds.extend([x.name for x in soft_template if x.name])
-    seeds.append("official product specifications")
-    query = _clean_text(", ".join(seeds))
-    return query
+
+    terms_by_category = _collect_query_terms(
+        candidate,
+        perf_template,
+        price_template,
+        soft_template,
+        claims_template,
+        differentiators_template,
+    )
+
+    def _uniq(vals: List[str], max_terms: int = 18) -> List[str]:
+        out: List[str] = []
+        seen: set[str] = set()
+        for v in vals:
+            s = _clean_text(str(v or ""))
+            if not s:
+                continue
+            k = s.lower()
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(s)
+            if len(out) >= max_terms:
+                break
+        return out
+
+    perf_terms = _uniq(terms_by_category.get("performance_parameters", []))
+    price_terms = _uniq(terms_by_category.get("price_indicators", []))
+    soft_terms = _uniq(terms_by_category.get("soft_features", []))
+    claims_diff_terms = _uniq(
+        (terms_by_category.get("claims", []) or [])
+        + (terms_by_category.get("differentiators", []) or [])
+    )
+
+    queries: List[str] = []
+    query_groups = [
+        perf_terms,
+        price_terms,
+        soft_terms,
+        claims_diff_terms,
+    ]
+    for group in query_groups:
+        q = _clean_text(", ".join(seeds + group + ["official product specifications"]))[:600]
+        if q:
+            queries.append(q)
+    return queries
+
+
+def _enrichment_score(enriched: Dict[str, Any]) -> int:
+    if not isinstance(enriched, dict):
+        return 0
+    score = 0
+    for item in (enriched.get("performance_parameters") or []):
+        if isinstance(item, dict) and item.get("value") is not None:
+            score += 2
+    for item in (enriched.get("price_indicators") or []):
+        if isinstance(item, dict) and (
+            item.get("value") is not None or _clean_text(str(item.get("raw") or ""))
+        ):
+            score += 2
+    for item in (enriched.get("soft_features") or []):
+        if isinstance(item, dict) and bool(item.get("available")):
+            score += 1
+    for item in (enriched.get("claims") or []):
+        if isinstance(item, dict) and (
+            _clean_text(str(item.get("text") or "")) or _clean_text(str(item.get("evidence") or ""))
+        ):
+            score += 1
+    for item in (enriched.get("differentiators") or []):
+        if _clean_text(str(item or "")):
+            score += 1
+    return score
+
+
+def _combine_retry_enrichments(payloads: List[Dict[str, Any]]) -> Dict[str, Any]:
+    valid = [p for p in payloads if isinstance(p, dict) and p]
+    if not valid:
+        return {}
+
+    perf_map: Dict[str, Dict[str, Any]] = {}
+    price_map: Dict[str, Dict[str, Any]] = {}
+    soft_map: Dict[str, Dict[str, Any]] = {}
+    claims_out: List[Dict[str, Any]] = []
+    diff_out: List[str] = []
+    diff_seen: set[str] = set()
+    claim_seen: set[str] = set()
+
+    for p in valid:
+        for item in (p.get("performance_parameters") or []):
+            if not isinstance(item, dict):
+                continue
+            name = _clean_text(str(item.get("name") or ""))
+            if not name:
+                continue
+            key = name.lower()
+            val = item.get("value")
+            if isinstance(val, str):
+                try:
+                    val = float(val.replace(",", "."))
+                except Exception:
+                    val = None
+            unit = _clean_text(str(item.get("unit") or ""))
+            if key not in perf_map:
+                perf_map[key] = {"name": name, "value": None, "unit": unit}
+            if perf_map[key].get("value") is None and isinstance(val, (int, float)):
+                perf_map[key]["value"] = val
+            if not perf_map[key].get("unit") and unit:
+                perf_map[key]["unit"] = unit
+
+        for item in (p.get("price_indicators") or []):
+            if not isinstance(item, dict):
+                continue
+            ctx = _clean_text(str(item.get("context") or "")) or "Preis"
+            key = ctx.lower()
+            val = item.get("value")
+            if isinstance(val, str):
+                try:
+                    val = float(val.replace(",", "."))
+                except Exception:
+                    val = None
+            raw = _clean_text(str(item.get("raw") or ""))
+            currency = _clean_text(str(item.get("currency") or ""))
+            period = _clean_text(str(item.get("period") or ""))
+            if key not in price_map:
+                price_map[key] = {"raw": "", "value": None, "currency": currency, "period": period, "context": ctx}
+            if price_map[key].get("value") is None and isinstance(val, (int, float)):
+                price_map[key]["value"] = val
+            if not price_map[key].get("raw") and raw:
+                price_map[key]["raw"] = raw
+            if not price_map[key].get("currency") and currency:
+                price_map[key]["currency"] = currency
+            if not price_map[key].get("period") and period:
+                price_map[key]["period"] = period
+
+        for item in (p.get("soft_features") or []):
+            if not isinstance(item, dict):
+                continue
+            name = _clean_text(str(item.get("name") or ""))
+            if not name:
+                continue
+            key = name.lower()
+            avail = bool(item.get("available"))
+            if key not in soft_map:
+                soft_map[key] = {"name": name, "available": avail}
+            else:
+                soft_map[key]["available"] = bool(soft_map[key].get("available")) or avail
+
+        for item in (p.get("claims") or []):
+            if not isinstance(item, dict):
+                continue
+            text = _clean_text(str(item.get("text") or ""))
+            ctype = _clean_text(str(item.get("claim_type") or "value")).lower()
+            if ctype not in _CLAIM_TYPES:
+                ctype = "value"
+            evidence = _clean_text(str(item.get("evidence") or ""))
+            if not text and not evidence:
+                continue
+            ckey = f"{text.lower()}|{ctype}|{evidence.lower()}"
+            if ckey in claim_seen:
+                continue
+            claim_seen.add(ckey)
+            claims_out.append({"text": text, "claim_type": ctype, "evidence": evidence})
+
+        for d in (p.get("differentiators") or []):
+            s = _clean_text(str(d or ""))
+            if not s:
+                continue
+            k = s.lower()
+            if k in diff_seen:
+                continue
+            diff_seen.add(k)
+            diff_out.append(s)
+
+    merged: Dict[str, Any] = {
+        "performance_parameters": list(perf_map.values()),
+        "price_indicators": list(price_map.values()),
+        "soft_features": list(soft_map.values()),
+        "claims": claims_out,
+        "differentiators": diff_out,
+    }
+
+    # Merge discovered source urls from all payloads (up to 3).
+    src_all: List[tuple[str, str]] = []
+    for p in valid:
+        src_all.extend(_collect_source_candidates(p))
+    src_seen: set[str] = set()
+    src_dedup: List[tuple[str, str]] = []
+    for u, t in src_all:
+        k = u.lower()
+        if k in src_seen:
+            continue
+        src_seen.add(k)
+        src_dedup.append((u, t))
+        if len(src_dedup) >= 3:
+            break
+    if len(src_dedup) >= 1:
+        merged["source_url"] = src_dedup[0][0]
+        merged["source_url_type"] = src_dedup[0][1]
+    if len(src_dedup) >= 2:
+        merged["source_url_2"] = src_dedup[1][0]
+        merged["source_url_type_2"] = src_dedup[1][1]
+    if len(src_dedup) >= 3:
+        merged["source_url_3"] = src_dedup[2][0]
+        merged["source_url_type_3"] = src_dedup[2][1]
+
+    return merged
 
 
 def _is_null_only_enrichment(enriched: Dict[str, Any]) -> bool:
@@ -611,6 +813,8 @@ def extract_competitor_profiles_v0_5(
     product_profile_path: Optional[str],
     provider: str = "brave",
     max_competitors: int = 200,
+    exclude_same_manufacturer: bool = False,
+    top_n_by_relevance: Optional[int] = None,
     include_page_fetch: bool = True,
     page_fetch_timeout_s: int = 8,
     page_fetch_max_chars: int = 8000,
@@ -639,6 +843,9 @@ def extract_competitor_profiles_v0_5(
 
     warnings: List[str] = [str(w).strip() for w in (csr.get("extraction_warnings") or []) if str(w).strip()]
     competitors_raw = csr.get("competitors") if isinstance(csr.get("competitors"), list) else []
+    target_manufacturer = _clean_text(str((profile.get("metadata") or {}).get("manufacturer") or ""))
+    target_product_name = _clean_text(str((profile.get("metadata") or {}).get("product_name") or ""))
+    target_brand_fallback = _clean_text(target_product_name.split()[0] if target_product_name else "")
 
     perf_template = _template_perf(profile)
     price_template = _template_price(profile)
@@ -649,13 +856,42 @@ def extract_competitor_profiles_v0_5(
     out: List[CompetitorEnrichedV05] = []
     limit = max(1, int(max_competitors))
 
-    _log(f"start provider={provider} competitors_in={len(competitors_raw)} max_competitors={limit}")
+    filtered_candidates: List[Dict[str, Any]] = [x for x in competitors_raw if isinstance(x, dict)]
+    if exclude_same_manufacturer and target_manufacturer:
+        before = len(filtered_candidates)
+        filtered_candidates = [
+            x for x in filtered_candidates
+            if _clean_text(str(x.get("manufacturer") or "")).lower() != target_manufacturer.lower()
+        ]
+        _log(f"exclude_same_manufacturer active target='{target_manufacturer}' removed={before - len(filtered_candidates)}")
+    elif exclude_same_manufacturer and target_brand_fallback:
+        # Fallback when metadata.manufacturer is missing: compare with likely brand token from reference product name.
+        before = len(filtered_candidates)
+        brand = target_brand_fallback.lower()
+        filtered_candidates = [
+            x
+            for x in filtered_candidates
+            if (
+                _clean_text(str(x.get("manufacturer") or "")).lower() != brand
+                and brand not in _clean_text(str(x.get("product_name") or "")).lower()
+            )
+        ]
+        _log(f"exclude_same_manufacturer fallback brand='{target_brand_fallback}' removed={before - len(filtered_candidates)}")
+    if top_n_by_relevance:
+        top_n = max(1, int(top_n_by_relevance))
+        filtered_candidates = sorted(
+            filtered_candidates,
+            key=lambda x: float(x.get("relevance_score") or 0.0),
+            reverse=True,
+        )[:top_n]
+        _log(f"top_n_by_relevance active n={top_n} candidates={len(filtered_candidates)}")
+    filtered_candidates = filtered_candidates[:limit]
+
+    _log(f"start provider={provider} competitors_in={len(competitors_raw)} selected={len(filtered_candidates)} max_competitors={limit}")
     if include_page_fetch:
         _log("include_page_fetch is ignored in v0.5 search-first mode")
 
-    for i, c in enumerate(competitors_raw[:limit], start=1):
-        if not isinstance(c, dict):
-            continue
+    for i, c in enumerate(filtered_candidates, start=1):
         product_name = _clean_text(str(c.get("product_name") or ""))
         manufacturer = _clean_text(str(c.get("manufacturer") or ""))
         input_url = _clean_text(str(c.get("url") or ""))
@@ -677,7 +913,7 @@ def extract_competitor_profiles_v0_5(
             claims_template=claims_template,
             differentiators_template=differentiators_template,
         )
-        _log(f"[{i}/{min(len(competitors_raw), limit)}] product={product_name}")
+        _log(f"[{i}/{len(filtered_candidates)}] product={product_name}")
         _log(f"search query={search_query}")
 
         enriched, llm_raw_text = _llm_enrich_with_brave(
@@ -701,38 +937,45 @@ def extract_competitor_profiles_v0_5(
             _log(f"search response={_clean_text(llm_raw_text)[:1200]}")
 
         if _is_null_only_enrichment(enriched):
-            retry_query = _build_retry_query(
+            retry_queries = _build_retry_query(
                 product_name=product_name,
                 manufacturer=manufacturer,
                 candidate=c,
                 perf_template=perf_template,
                 price_template=price_template,
                 soft_template=soft_template,
+                claims_template=claims_template,
+                differentiators_template=differentiators_template,
             )
             _log("retry start (reason=null-only)")
-            _log(f"retry query={retry_query}")
-            retry_enriched, retry_raw = _llm_enrich_with_brave(
-                product={
-                    "product_name": product_name,
-                    "manufacturer": manufacturer,
-                    "url": input_url,
-                    "url_type": input_url_type,
-                },
-                search_query=retry_query,
-                perf_template=[FeatureValue(name=x.name, value=x.value, unit=x.unit) for x in perf_template],
-                price_template=[
-                    PriceIndicatorValue(raw=x.raw, value=x.value, currency=x.currency, period=x.period, context=x.context)
-                    for x in price_template
-                ],
-                soft_template=[SoftFeatureValue(name=x.name, available=x.available) for x in soft_template],
-                claims_template=[ClaimValue(text=x.text, claim_type=x.claim_type, evidence=x.evidence) for x in claims_template],
-                differentiators_template=list(differentiators_template),
-            )
-            if verbose_terminal:
-                _log(f"retry response={_clean_text(retry_raw)[:1200] if retry_raw else '<empty>'}")
-            if not _is_null_only_enrichment(retry_enriched):
-                enriched = retry_enriched
-                _log("retry accepted")
+            retry_payloads: List[Dict[str, Any]] = []
+            for qidx, retry_query in enumerate(retry_queries, start=1):
+                _log(f"retry query {qidx}/{len(retry_queries)}={retry_query}")
+                retry_enriched, retry_raw = _llm_enrich_with_brave(
+                    product={
+                        "product_name": product_name,
+                        "manufacturer": manufacturer,
+                        "url": input_url,
+                        "url_type": input_url_type,
+                    },
+                    search_query=retry_query,
+                    perf_template=[FeatureValue(name=x.name, value=x.value, unit=x.unit) for x in perf_template],
+                    price_template=[
+                        PriceIndicatorValue(raw=x.raw, value=x.value, currency=x.currency, period=x.period, context=x.context)
+                        for x in price_template
+                    ],
+                    soft_template=[SoftFeatureValue(name=x.name, available=x.available) for x in soft_template],
+                    claims_template=[ClaimValue(text=x.text, claim_type=x.claim_type, evidence=x.evidence) for x in claims_template],
+                    differentiators_template=list(differentiators_template),
+                )
+                if verbose_terminal:
+                    _log(f"retry response {qidx}={_clean_text(retry_raw)[:1200] if retry_raw else '<empty>'}")
+                if isinstance(retry_enriched, dict) and retry_enriched:
+                    retry_payloads.append(retry_enriched)
+            combined_retry = _combine_retry_enrichments(retry_payloads)
+            if not _is_null_only_enrichment(combined_retry):
+                enriched = combined_retry
+                _log(f"retry merged accepted score={_enrichment_score(combined_retry)} parts={len(retry_payloads)}")
             else:
                 _log("retry still null-only")
 

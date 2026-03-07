@@ -58,6 +58,8 @@ class CompetitorProfileExtractionV05Request(BaseModel):
     product_profile_path: Optional[str] = None
     provider: str = "brave"
     max_competitors: int = Field(default=200, ge=1, le=1000)
+    exclude_same_manufacturer: bool = False
+    top_n_by_relevance: Optional[int] = Field(default=None, ge=1, le=1000)
     include_page_fetch: bool = True
     page_fetch_timeout_s: int = Field(default=8, ge=2, le=30)
     page_fetch_max_chars: int = Field(default=8000, ge=1000, le=40000)

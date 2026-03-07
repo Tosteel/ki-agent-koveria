@@ -26,6 +26,8 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
             product_profile_path=req.product_profile_path,
             provider=req.provider,
             max_competitors=req.max_competitors,
+            exclude_same_manufacturer=req.exclude_same_manufacturer,
+            top_n_by_relevance=req.top_n_by_relevance,
             include_page_fetch=req.include_page_fetch,
             page_fetch_timeout_s=req.page_fetch_timeout_s,
             page_fetch_max_chars=req.page_fetch_max_chars,
