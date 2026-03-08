@@ -1,5 +1,8 @@
+#https://api-dashboard.search.brave.com/documentation/services/answers
+
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Dict, List, Optional
 
@@ -38,6 +41,11 @@ class LlmBrave:
         max_tokens: Optional[int] = None,
         top_p: Optional[float] = None,
         response_format: Optional[Dict[str, Any]] = None,
+        language: Optional[str] = None,
+        country: Optional[str] = None,
+        enable_research: Optional[bool] = None,
+        enable_citations: Optional[bool] = None,
+        enable_entities: Optional[bool] = None,
         timeout_s: int = 60,
     ) -> Dict[str, Any]:
         if not self.api_key:
@@ -59,6 +67,58 @@ class LlmBrave:
             payload["top_p"] = float(top_p)
         if isinstance(response_format, dict) and response_format:
             payload["response_format"] = response_format
+        if language:
+            payload["language"] = str(language).strip()
+        if country:
+            payload["country"] = str(country).strip()
+        if enable_research is not None:
+            payload["enable_research"] = bool(enable_research)
+        if enable_citations is not None:
+            payload["enable_citations"] = bool(enable_citations)
+        if enable_entities is not None:
+            payload["enable_entities"] = bool(enable_entities)
+
+        if stream:
+            r = requests.post(
+                _chat_completions_url(BRAVE_URL),
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=timeout_s,
+                stream=True,
+            )
+            if r.status_code >= 400:
+                raise RuntimeError(f"Brave HTTP {r.status_code}: {r.text}")
+            parts: List[str] = []
+            usage: Dict[str, Any] = {}
+            for line in r.iter_lines(decode_unicode=True):
+                if not line:
+                    continue
+                s = str(line).strip()
+                if not s.startswith("data:"):
+                    continue
+                data = s[5:].strip()
+                if not data or data == "[DONE]":
+                    continue
+                try:
+                    chunk = json.loads(data)
+                except Exception:
+                    continue
+                if isinstance(chunk.get("usage"), dict):
+                    usage = chunk["usage"]
+                try:
+                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                    c = delta.get("content")
+                    if isinstance(c, str) and c:
+                        parts.append(c)
+                except Exception:
+                    continue
+            return {
+                "choices": [{"message": {"content": "".join(parts)}}],
+                "usage": usage or None,
+            }
 
         r = requests.post(
             _chat_completions_url(BRAVE_URL),

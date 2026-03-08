@@ -120,40 +120,98 @@ Output: `competitor_search_results_v0_5.json`
 }
 ```
 
-## Schritt 5: Wettbewerberprofile anreichern
-Input: `competitor_search_results_v0_5.json` + `product_profile.json`  
-Tool: `competitor_profile_extraction_v0_5`  
-Output: `competitor_profile_results_v0_5.json`
+## Schritt 4.1: Wettbewerbsprodukte verdichten (Top-N + Produktfilter)
+Input: `competitor_search_results_v0_5.json`  
+Tool: `competitor_product_results_v0_6`  
+Output: `competitor_product_results_v0_6.json`
 
-Optionale Steuerung:
-- `exclude_same_manufacturer`: schließt Produkte des gleichen Herstellers wie das Zielprodukt aus.
-- `top_n_by_relevance`: begrenzt Kandidaten auf die Top-N nach `relevance_score` (absteigend), bevor die Anreicherung startet.
-- Null-only-Retry nutzt mehrere Brave-Queries (Performance, Preis, Soft-Features, Claims/Differentiators) und führt die Antworten anschließend zusammen.
+Dieser Schritt sortiert nach `relevance_score` (absteigend), filtert per LLM generische/nicht deutsch- oder englischsprachige Treffer heraus und nimmt danach die ersten `top_n` verbleibenden Produkte.
 
 ```json
 {
   "steps": [
     {
-      "tool": "competitor_profile_extraction_v0_5",
+      "tool": "competitor_product_results_v0_6",
       "args": {
         "competitor_search_results": null,
         "competitor_search_results_path": "competitor_search_results_v0_5.json",
-        "product_profile": null,
-        "product_profile_path": "product_profile.json",
-        "provider": "brave",
-        "max_competitors": 200,
-        "exclude_same_manufacturer": true,
-        "top_n_by_relevance": 80,
-        "include_page_fetch": true,
-        "page_fetch_timeout_s": 8,
-        "page_fetch_max_chars": 8000,
+        "provider": "openai",
+        "top_n": 20,
         "verbose_terminal": true
       }
     },
     {
       "tool": "write_file",
       "args": {
-        "path": "competitor_profile_results_v0_5.json",
+        "path": "competitor_product_results_v0_6.json",
+        "content": "{{steps[0].payload}}",
+        "overwrite": true
+      }
+    }
+  ]
+}
+```
+
+## Schritt 5.1: Wettbewerber-Plaintext mit Brave sammeln
+Input: `competitor_product_results_v0_6.json` + `product_profile.json`  
+Tool: `competitor_profile_text_v0_6`  
+Output: `competitor_profile_text_v0_6.json`
+
+```json
+{
+  "steps": [
+    {
+      "tool": "competitor_profile_text_v0_6",
+      "args": {
+        "competitor_product_results": null,
+        "competitor_product_results_path": "competitor_product_results_v0_6.json",
+        "product_profile": null,
+        "product_profile_path": "product_profile.json",
+        "provider": "brave",
+        "max_competitors": 200,
+        "brave_enable_research": true,
+        "brave_stream": false,
+        "brave_language": "de",
+        "brave_country": "DE",
+        "verbose_terminal": true
+      }
+    },
+    {
+      "tool": "write_file",
+      "args": {
+        "path": "competitor_profile_text_v0_6_backup.json",
+        "content": "{{steps[0].payload}}",
+        "overwrite": true
+      }
+    }
+  ]
+}
+```
+
+## Schritt 5.2: Plaintext in strukturiertes Profil überführen
+Input: `competitor_profile_text_v0_6.json` + `product_profile.json`  
+Tool: `competitor_profile_extraction_v0_6`  
+Output: `competitor_profile_extraction_v0_6.json`
+
+```json
+{
+  "steps": [
+    {
+      "tool": "competitor_profile_extraction_v0_6",
+      "args": {
+        "competitor_profile_text": null,
+        "competitor_profile_text_path": "competitor_profile_text_v0_6_backup.json",
+        "product_profile": null,
+        "product_profile_path": "product_profile.json",
+        "provider": "openai",
+        "max_competitors": 200,
+        "verbose_terminal": true
+      }
+    },
+    {
+      "tool": "write_file",
+      "args": {
+        "path": "competitor_profile_extraction_v0_6.json",
         "content": "{{steps[0].payload}}",
         "overwrite": true
       }
@@ -163,9 +221,26 @@ Optionale Steuerung:
 ```
 
 ## Schritt 6: Feature Matrix + Gap/USP
-Input: `product_profile.json` + `competitor_profile_results_v0_5.json`  
+Input: `product_profile.json` + `competitor_profile_extraction_v0_6.json`  
 Tool: `feature_matrix_gap_analysis_v0_5`  
 Output: `feature_matrix_gap_v0_5.json`
+
+Restriktionen/Regeln in `feature_matrix_gap_analysis_v0_5`:
+
+1. Preis-Gap als `missing_data`
+- Für Preis/UVP wird bei fehlender Baseline-Erfassung `status="missing_data"` gesetzt (statt `absent`).
+
+2. USP-Top-N Priorisierung
+- USPs werden nach Seltenheit im Wettbewerb priorisiert.
+- USP-Liste wird auf Top-10 begrenzt.
+- `differentiators` werden auf diese priorisierten USPs reduziert.
+
+3. Cluster-Fallback ohne Preis
+- Wenn `avg_price` fehlt, aber `value_score` vorhanden ist:
+- `>= 0.7` -> `performance_focused`
+- `>= 0.4` -> `mainstream`
+- `> 0` -> `feature_limited`
+- `== 0` -> `data_gap`
 
 ```json
 {
@@ -176,7 +251,7 @@ Output: `feature_matrix_gap_v0_5.json`
         "product_profile": null,
         "product_profile_path": "product_profile.json",
         "competitor_profile_results": null,
-        "competitor_profile_results_path": "competitor_profile_results_v0_5.json",
+        "competitor_profile_results_path": "competitor_profile_extraction_v0_6.json",
         "provider": "openai"
       }
     },
@@ -226,7 +301,7 @@ Output: `strategic_analysis_v0_5.json`
 ## Schritt 8: Finalen Analysebericht erzeugen
 Input-Artefakte:  
 - `product_profile.json`  
-- `competitor_profile_results_v0_5.json`  
+- `competitor_profile_extraction_v0_6.json`  
 - `feature_matrix_gap_v0_5.json`  
 - `strategic_analysis_v0_5.json`  
 Tool: `final_report_generator_v0_5`  
@@ -241,7 +316,7 @@ Output: `final_analysis_report_v0_5.json`
         "artifacts": null,
         "artifact_paths": {
           "product_profile": "product_profile.json",
-          "competitor_profiles": "competitor_profile_results_v0_5.json",
+          "competitor_profiles": "competitor_profile_extraction_v0_6.json",
           "comparison_matrix": "feature_matrix_gap_v0_5.json",
           "gaps_and_usps": "feature_matrix_gap_v0_5.json",
           "strategic_analysis": "strategic_analysis_v0_5.json",

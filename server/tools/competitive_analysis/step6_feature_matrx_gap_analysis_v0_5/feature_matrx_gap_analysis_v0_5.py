@@ -119,6 +119,21 @@ def _norm(s: str) -> str:
     return " ".join(str(s or "").strip().lower().replace("_", " ").split())
 
 
+def _is_price_context_label(label: str) -> bool:
+    k = _norm(label)
+    if not k:
+        return False
+    tokens = ["preis", "price", "uvp", "msrp", "rrp", "list price", "retail price"]
+    return any(t in k for t in tokens)
+
+
+def _canonical_price_context(label: str) -> str:
+    k = _norm(label)
+    if any(t in k for t in ["uvp", "msrp", "rrp", "list price", "retail price"]):
+        return "UVP"
+    return "Preis"
+
+
 def _feature_name(item: Any, *, fallback: str = "") -> str:
     if isinstance(item, dict):
         return str(item.get("name") or item.get("feature") or item.get("context") or fallback or "").strip()
@@ -141,15 +156,18 @@ def _collect_performance_dims(product: Dict[str, Any], competitors: List[Dict[st
 
 def _collect_price_dims(product: Dict[str, Any], competitors: List[Dict[str, Any]]) -> List[str]:
     dims = set()
-    for x in (product.get("price_indicators") or []):
-        n = _feature_name(x, fallback="Preis")
-        if n:
-            dims.add(n)
+    items = list(product.get("price_indicators") or [])
     for c in competitors:
-        for x in (c.get("price_indicators") or []):
-            n = _feature_name(x, fallback="Preis")
-            if n:
-                dims.add(n)
+        items.extend(list(c.get("price_indicators") or []))
+    for x in items:
+        if not isinstance(x, dict):
+            continue
+        raw_ctx = _feature_name(x, fallback="")
+        has_value = _to_float(x.get("value")) is not None or bool(str(x.get("raw") or "").strip())
+        if raw_ctx and _is_price_context_label(raw_ctx):
+            dims.add(_canonical_price_context(raw_ctx))
+        elif has_value:
+            dims.add("Preis")
     if not dims:
         dims = {"Preis", "UVP"}
     return sorted(dims, key=lambda s: s.lower())
@@ -209,10 +227,15 @@ def _price_map(items: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     for x in items:
         if not isinstance(x, dict):
             continue
-        c = _feature_name(x, fallback="Preis")
-        if not c:
+        c = _feature_name(x, fallback="")
+        has_value = _to_float(x.get("value")) is not None or bool(str(x.get("raw") or "").strip())
+        if c and _is_price_context_label(c):
+            canonical = _canonical_price_context(c)
+        elif has_value:
+            canonical = "Preis"
+        else:
             continue
-        out[_norm(c)] = x
+        out[_norm(canonical)] = x
     return out
 
 
@@ -339,14 +362,43 @@ def _presence_ratio_soft(rows: List[CompetitorRowV05], dim: str) -> float:
     return present / len(rows)
 
 
+def _presence_ratio_price(rows: List[CompetitorRowV05], dim: str) -> float:
+    if not rows:
+        return 0.0
+    k = _norm(dim)
+    present = 0
+    for r in rows:
+        c = next((x for x in r.price_indicators if _norm(x.context) == k), None)
+        if c and c.present:
+            present += 1
+    return present / len(rows)
+
+
+def _presence_ratio_for_group(
+    group: str,
+    feature: str,
+    perf_dims: List[str],
+    soft_dims: List[str],
+    price_dims: List[str],
+    comp_rows: List[CompetitorRowV05],
+) -> float:
+    k = _norm(feature)
+    if group == "performance_parameters":
+        d = next((x for x in perf_dims if _norm(x) == k), feature)
+        return _presence_ratio_perf(comp_rows, d)
+    if group == "soft_features":
+        d = next((x for x in soft_dims if _norm(x) == k), feature)
+        return _presence_ratio_soft(comp_rows, d)
+    d = next((x for x in price_dims if _norm(x) == k), feature)
+    return _presence_ratio_price(comp_rows, d)
+
+
 def _llm_refine_gaps_v05(provider: str, payload: Dict[str, Any], warnings: List[str]) -> Dict[str, Any]:
     schema = {
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "market_standards": {"type": "array", "items": {"type": "string"}},
-            "differentiators": {"type": "array", "items": {"type": "string"}},
-            "gaps": {
+            "gaps_text": {
                 "type": "array",
                 "items": {
                     "type": "object",
@@ -354,14 +406,12 @@ def _llm_refine_gaps_v05(provider: str, payload: Dict[str, Any], warnings: List[
                     "properties": {
                         "feature_group": {"type": "string", "enum": ["performance_parameters", "price_indicators", "soft_features"]},
                         "feature": {"type": "string"},
-                        "status": {"type": "string"},
-                        "market_presence_ratio": {"type": "number"},
                         "recommendation": {"type": "string"},
                     },
-                    "required": ["feature_group", "feature", "status", "market_presence_ratio", "recommendation"],
+                    "required": ["feature_group", "feature", "recommendation"],
                 },
             },
-            "usps": {
+            "usps_text": {
                 "type": "array",
                 "items": {
                     "type": "object",
@@ -375,15 +425,16 @@ def _llm_refine_gaps_v05(provider: str, payload: Dict[str, Any], warnings: List[
                 },
             },
         },
-        "required": ["market_standards", "differentiators", "gaps", "usps"],
+        "required": ["gaps_text", "usps_text"],
     }
     p = str(provider or "openai").strip().lower()
     if p not in {"ionos", "openai", "perplexity"}:
         p = "openai"
 
     system = (
-        "You analyze a feature matrix and derive market standards, gaps, and USPs. "
-        "Respond strictly as JSON using the provided schema."
+        "You receive deterministic gap/usp candidates from a feature matrix. "
+        "Do not invent new features and do not change status/ratios. "
+        "Return only concise recommendation/rationale text for each provided candidate in JSON."
     )
     user = "Input:\n" + json.dumps(payload, ensure_ascii=False)
 
@@ -392,7 +443,7 @@ def _llm_refine_gaps_v05(provider: str, payload: Dict[str, Any], warnings: List[
         if not c.enabled():
             warnings.append(f"{p} not configured; heuristic gap analysis used.")
             return {}
-        fmt = {"type": "json_schema", "name": "gaps_usps_v05", "schema": schema, "strict": False}
+        fmt = {"type": "json_schema", "name": "gaps_usps_v05_text", "schema": schema, "strict": False}
         try:
             resp = c._call(
                 input_messages=[
@@ -423,9 +474,9 @@ def _llm_refine_gaps_v05(provider: str, payload: Dict[str, Any], warnings: List[
             ],
             response_format={
                 "type": "json_schema",
-                "json_schema": {"name": "gaps_usps_v05", "schema": schema, "strict": True},
-            },
-        )
+                    "json_schema": {"name": "gaps_usps_v05_text", "schema": schema, "strict": True},
+                },
+            )
         parsed = _parse_json_strictish(c2.extract_text(completion))
         if parsed:
             return parsed
@@ -511,32 +562,137 @@ def run_feature_matrx_gap_analysis_v0_5(
     market_standards: List[str] = []
     differentiators: List[str] = []
 
+    # Deterministic baseline presence maps.
+    base_perf_present = {_norm(x.name): bool(x.present) for x in baseline_row.performance_parameters}
+    base_soft_present = {_norm(x.name): bool(x.available) for x in baseline_row.soft_features}
+    base_price_present = {_norm(x.context): bool(x.present) for x in baseline_row.price_indicators}
+
+    # Deterministic market standards and candidate gaps/usps.
+    for d in perf_dims:
+        ratio = round(_presence_ratio_perf(comp_rows, d), 4)
+        if ratio >= 0.5:
+            market_standards.append(d)
+        k = _norm(d)
+        if not base_perf_present.get(k, False) and ratio >= 0.5:
+            gaps.append(
+                GapItemV05(
+                    feature_group="performance_parameters",
+                    feature=d,
+                    status="absent",
+                    market_presence_ratio=ratio,
+                    recommendation="Feature zur Wettbewerbsparität evaluieren.",
+                )
+            )
+        elif base_perf_present.get(k, False) and ratio < 0.4:
+            usps.append(
+                UspItemV05(
+                    feature_group="performance_parameters",
+                    feature=d,
+                    rationale="Beim Zielprodukt vorhanden, in Wettbewerbern selten.",
+                )
+            )
+            differentiators.append(d)
+
+    for d in price_dims:
+        ratio = round(_presence_ratio_price(comp_rows, d), 4)
+        if ratio >= 0.5:
+            market_standards.append(d)
+        k = _norm(d)
+        if not base_price_present.get(k, False) and ratio >= 0.5:
+            status = "missing_data" if _norm(d) in {"preis", "uvp"} else "absent"
+            gaps.append(
+                GapItemV05(
+                    feature_group="price_indicators",
+                    feature=d,
+                    status=status,
+                    market_presence_ratio=ratio,
+                    recommendation="Preisindikator konsistent erfassen.",
+                )
+            )
+
+    for d in soft_dims:
+        ratio = round(_presence_ratio_soft(comp_rows, d), 4)
+        if ratio >= 0.5:
+            market_standards.append(d)
+        k = _norm(d)
+        if not base_soft_present.get(k, False) and ratio >= 0.5:
+            gaps.append(
+                GapItemV05(
+                    feature_group="soft_features",
+                    feature=d,
+                    status="absent",
+                    market_presence_ratio=ratio,
+                    recommendation="Feature zur Wettbewerbsparität evaluieren.",
+                )
+            )
+        elif base_soft_present.get(k, False) and ratio < 0.4:
+            usps.append(
+                UspItemV05(
+                    feature_group="soft_features",
+                    feature=d,
+                    rationale="Beim Zielprodukt vorhanden, in Wettbewerbern selten.",
+                )
+            )
+            differentiators.append(d)
+
     llm_payload = {
-        "performance_dimensions": perf_dims,
-        "price_dimensions": price_dims,
-        "soft_feature_dimensions": soft_dims,
-        "baseline_present_performance": [x.name for x in baseline_row.performance_parameters if x.present],
-        "baseline_present_soft_features": [x.name for x in baseline_row.soft_features if x.available],
-        "competitor_presence_ratios": {
-            "performance_parameters": {d: round(_presence_ratio_perf(comp_rows, d), 4) for d in perf_dims},
-            "soft_features": {d: round(_presence_ratio_soft(comp_rows, d), 4) for d in soft_dims},
-        },
-        "price_value": [
-            {"competitor": r.competitor, "avg_price": r.avg_price, "value_score": r.value_score}
-            for r in comp_rows
-        ],
+        "gaps_candidates": [g.model_dump() for g in gaps],
+        "usps_candidates": [u.model_dump() for u in usps],
     }
     llm_data = _llm_refine_gaps_v05(provider=provider, payload=llm_payload, warnings=warnings)
     if llm_data:
         try:
-            market_standards = _safe_list_str(llm_data.get("market_standards"))
-            differentiators = _safe_list_str(llm_data.get("differentiators"))
-            if isinstance(llm_data.get("gaps"), list):
-                gaps = [GapItemV05(**g) for g in llm_data.get("gaps") if isinstance(g, dict)]
-            if isinstance(llm_data.get("usps"), list):
-                usps = [UspItemV05(**u) for u in llm_data.get("usps") if isinstance(u, dict)]
+            gap_text_map: Dict[tuple[str, str], str] = {}
+            for g in llm_data.get("gaps_text") or []:
+                if not isinstance(g, dict):
+                    continue
+                fg = str(g.get("feature_group") or "").strip()
+                ft = str(g.get("feature") or "").strip()
+                rc = str(g.get("recommendation") or "").strip()
+                if fg and ft and rc:
+                    gap_text_map[(fg, _norm(ft))] = rc
+            for i, g in enumerate(gaps):
+                repl = gap_text_map.get((g.feature_group, _norm(g.feature)))
+                if repl:
+                    gaps[i] = GapItemV05(
+                        feature_group=g.feature_group,
+                        feature=g.feature,
+                        status=g.status,
+                        market_presence_ratio=g.market_presence_ratio,
+                        recommendation=repl,
+                    )
+
+            usp_text_map: Dict[tuple[str, str], str] = {}
+            for u in llm_data.get("usps_text") or []:
+                if not isinstance(u, dict):
+                    continue
+                fg = str(u.get("feature_group") or "").strip()
+                ft = str(u.get("feature") or "").strip()
+                ra = str(u.get("rationale") or "").strip()
+                if fg and ft and ra:
+                    usp_text_map[(fg, _norm(ft))] = ra
+            for i, u in enumerate(usps):
+                repl = usp_text_map.get((u.feature_group, _norm(u.feature)))
+                if repl:
+                    usps[i] = UspItemV05(feature_group=u.feature_group, feature=u.feature, rationale=repl)
         except Exception as exc:
             warnings.append(f"LLM structured output invalid ({exc}).")
+
+    # Prioritize and cap USPs to avoid inflated long lists.
+    usp_ranked: List[tuple[float, UspItemV05]] = []
+    for u in usps:
+        ratio = _presence_ratio_for_group(u.feature_group, u.feature, perf_dims, soft_dims, price_dims, comp_rows)
+        rarity = 1.0 - ratio
+        group_weight = 1.0
+        if u.feature_group == "soft_features":
+            group_weight = 0.9
+        elif u.feature_group == "price_indicators":
+            group_weight = 0.8
+        usp_ranked.append((rarity * group_weight, u))
+    usp_ranked.sort(key=lambda x: x[0], reverse=True)
+    usps = [u for _, u in usp_ranked[:10]]
+    usp_keys = {(_norm(u.feature_group), _norm(u.feature)) for u in usps}
+    differentiators = [d for d in differentiators if (_norm("soft_features"), _norm(d)) in usp_keys or (_norm("performance_parameters"), _norm(d)) in usp_keys]
 
     cluster_assignment: List[ClusterAssignmentV05] = []
     priced = [r for r in comp_rows if isinstance(r.avg_price, (int, float))]
@@ -552,6 +708,16 @@ def run_feature_matrx_gap_analysis_v0_5(
                 label = "budget_basic"
             else:
                 label = "premium_basic"
+        elif isinstance(r.value_score, (int, float)):
+            # Value-only fallback when price is missing.
+            if r.value_score >= 0.7:
+                label = "performance_focused"
+            elif r.value_score >= 0.4:
+                label = "mainstream"
+            elif r.value_score > 0:
+                label = "feature_limited"
+            else:
+                label = "data_gap"
         cluster_assignment.append(
             ClusterAssignmentV05(
                 competitor=r.competitor,
@@ -560,6 +726,37 @@ def run_feature_matrx_gap_analysis_v0_5(
                 value_score=r.value_score,
             )
         )
+
+    # Post-validation: remove invalid contradictions and dedupe.
+    valid_gaps: List[GapItemV05] = []
+    for g in gaps:
+        k = _norm(g.feature)
+        if g.feature_group == "performance_parameters" and base_perf_present.get(k, False):
+            warnings.append(f"Removed contradictory gap '{g.feature}' (present in baseline performance).")
+            continue
+        if g.feature_group == "soft_features" and base_soft_present.get(k, False):
+            warnings.append(f"Removed contradictory gap '{g.feature}' (present in baseline soft features).")
+            continue
+        if g.feature_group == "price_indicators" and base_price_present.get(k, False):
+            warnings.append(f"Removed contradictory gap '{g.feature}' (present in baseline price indicators).")
+            continue
+        valid_gaps.append(g)
+    gaps = valid_gaps
+
+    valid_usps: List[UspItemV05] = []
+    for u in usps:
+        k = _norm(u.feature)
+        if u.feature_group == "performance_parameters" and not base_perf_present.get(k, False):
+            warnings.append(f"Removed invalid USP '{u.feature}' (missing in baseline performance).")
+            continue
+        if u.feature_group == "soft_features" and not base_soft_present.get(k, False):
+            warnings.append(f"Removed invalid USP '{u.feature}' (missing in baseline soft features).")
+            continue
+        if u.feature_group == "price_indicators" and not base_price_present.get(k, False):
+            warnings.append(f"Removed invalid USP '{u.feature}' (missing in baseline price indicators).")
+            continue
+        valid_usps.append(u)
+    usps = valid_usps
 
     def _dedupe(xs: List[str]) -> List[str]:
         out: List[str] = []
@@ -573,15 +770,11 @@ def run_feature_matrx_gap_analysis_v0_5(
         return out
 
     gaps_usps = GapsAndUspsV05(
-        gaps=gaps,
-        usps=usps,
+        gaps=[GapItemV05(**g.model_dump()) for g in {(_norm(x.feature_group), _norm(x.feature)): x for x in gaps}.values()],
+        usps=[UspItemV05(**u.model_dump()) for u in {(_norm(x.feature_group), _norm(x.feature)): x for x in usps}.values()],
         market_standards=_dedupe(market_standards),
         differentiators=_dedupe(differentiators),
     )
-
-    if warnings:
-        # keep linter happy + preserve current signature behavior
-        _ = warnings
 
     return FeatureMatrxGapAnalysisV05Result(
         comparison_matrix=matrix,
