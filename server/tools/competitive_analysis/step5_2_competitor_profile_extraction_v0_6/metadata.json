@@ -1,0 +1,8 @@
+{
+  "name": "Wettbewerberprofile strukturieren - Schritt 5.2",
+  "version": "0.6",
+  "description": "Überführt plain_text aus Schritt 5.1 in strukturierte Wettbewerberprofile gemäß Product-Profile-Templates.",
+  "input": "competitor_profile_text_v0_6 + product_profile, provider=openai/ionos/perplexity.",
+  "output": "competitor_profile_extraction_v0_6 mit strukturierten performance_parameters, price_indicators, soft_features, claims, differentiators."
+}
+

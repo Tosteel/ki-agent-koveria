@@ -1,0 +1,8 @@
+{
+  "name": "Wettbewerbsprodukte verdichten - Schritt 4.1",
+  "version": "0.6",
+  "description": "Filtert competitor_search_results per LLM auf konkrete Produkttreffer und erzeugt eine Top-N-Auswahl nach Relevance.",
+  "input": "competitor_search_results (inline oder path), provider, top_n.",
+  "output": "competitor_product_results_v0_6 mit identischer Struktur, jedoch nur gefilterten Top-N Produkten."
+}
+

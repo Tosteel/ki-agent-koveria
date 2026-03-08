@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from server.services.llm_ionos import IonosLLM
 from server.services.llm_openai import LlmOpenai
 from server.services.llm_perplexity import LlmPerplexity
-from server.tools.competitive_analysis.document_import.models import ParsedDocument
+from server.tools.competitive_analysis.step1_document_import.models import ParsedDocument
 
 from .models import ClaimItem, NormalizedFeature, PriceIndicator, ProductProfile
 

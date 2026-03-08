@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from server.services.llm_ionos import IonosLLM
 from server.services.llm_openai import LlmOpenai
 from server.services.llm_perplexity import LlmPerplexity
-from server.tools.competitive_analysis.final_report_generator_v0_5.final_report_generator_v0_5 import (
+from server.tools.competitive_analysis.step8_final_report_generator_v0_5.final_report_generator_v0_5 import (
     build_final_report_v0_5,
 )
 

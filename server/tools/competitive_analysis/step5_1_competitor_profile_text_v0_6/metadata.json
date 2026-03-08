@@ -1,0 +1,8 @@
+{
+  "name": "Wettbewerber-Plaintext aus Brave - Schritt 5.1",
+  "version": "0.6",
+  "description": "Erzeugt pro Wettbewerbsprodukt einen Brave-Rohtext und speichert ihn in plain_text.",
+  "input": "competitor_product_results_v0_6 + product_profile, optional max_competitors.",
+  "output": "competitor_profile_text_v0_6 mit unverändertem plain_text pro Produkt."
+}
+

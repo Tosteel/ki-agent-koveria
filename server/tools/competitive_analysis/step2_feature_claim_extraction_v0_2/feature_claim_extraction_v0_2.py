@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from server.services.llm_ionos import IonosLLM
 from server.services.llm_openai import LlmOpenai
 from server.services.llm_perplexity import LlmPerplexity
-from server.tools.competitive_analysis.document_import.models import ParsedDocument
+from server.tools.competitive_analysis.step1_document_import.models import ParsedDocument
 from server.tools.competitive_analysis.backup.feature_claim_extraction.feature_claim_extraction import (
     _dedupe_by_key,
     _load_parsed_doc,
@@ -201,6 +201,8 @@ def _llm_step(
             + " Extrahiere aus normalized_features und performance_parameters NUR soft_features (nicht-messbare Features wie spezielle Funktionen, App, Technologien)."
             + " Nimm NICHTS auf, was messbar ist oder bereits als performance_parameter enthalten ist."
             + " Merkmale mit Zahl/Einheit sind ausgeschlossen und gehoeren in performance_parameters."
+            + " Benenne soft_features GENERISCH und herstellerunabhaengig: keine Marken-, Produktlinien- oder proprietaeren Begriffe im Namen."
+            + " Beispiel: 'iSelect Full-Touch Display' -> 'Touch Display', 'HyperStream Detangling DuoBrush' -> 'Entwirrungs-Buerstensystem'."
             + " Keine Claims, keine Segmente, keine Use-Cases."
             + " Gib ein leeres Array nur zurück, wenn wirklich keine nicht-messbaren Merkmale vorkommen."
         )
@@ -521,6 +523,7 @@ def _to_soft_features(raw: Any) -> List[SoftFeature]:
         except Exception:
             continue
     return out
+
 
 
 def extract_feature_claim_profile_v0_2(

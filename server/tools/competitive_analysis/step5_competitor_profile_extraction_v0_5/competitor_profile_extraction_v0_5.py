@@ -833,6 +833,8 @@ def extract_competitor_profiles_v0_5(
         user_root=user_root,
         work_root=work_root,
     )
+    if "competitor_product_results" in csr and isinstance(csr.get("competitor_product_results"), dict):
+        csr = csr["competitor_product_results"]
     profile = _load_json_obj(
         inline_obj=product_profile,
         path=product_profile_path,
