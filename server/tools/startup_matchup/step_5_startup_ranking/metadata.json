@@ -1,0 +1,6 @@
+{
+  "name": "startup_matchup_step_5_startup_ranking",
+  "description": "Schritt 5: Strukturierung und Relevanzbewertung der Startup-Kandidaten.",
+  "input": "step4_1_startup_structured.json plus optional step2/step3",
+  "output": "startup_ranked_list mit Relevance-Score (0..1) und Ranking"
+}

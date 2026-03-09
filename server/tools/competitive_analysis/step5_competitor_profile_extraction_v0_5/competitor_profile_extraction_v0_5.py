@@ -19,6 +19,25 @@ from .models import (
 )
 
 _CLAIM_TYPES = {"value", "benefit", "differentiation"}
+_METRIC_NAME_HINTS = {
+    "width",
+    "height",
+    "depth",
+    "length",
+    "diameter",
+    "radius",
+    "thickness",
+    "size",
+    "dimension",
+    "weight",
+    "mass",
+    "volume",
+    "capacity",
+    "tank",
+    "reservoir",
+    "clearance",
+}
+_METRIC_UNIT_HINTS = {"mm", "cm", "m", "in", "inch", "kg", "g", "lb", "l", "ml", "cl", "oz"}
 
 
 def _parse_json_strictish(text: str) -> Dict[str, Any]:
@@ -70,6 +89,50 @@ def _template_perf(profile: Dict[str, Any]) -> List[FeatureValue]:
             continue
         out.append(FeatureValue(name=n, value=None, unit=_feature_unit(x)))
     return out
+
+
+def _is_metric_feature_name_unit(name: str, unit: str) -> bool:
+    n = _clean_text(str(name or "")).lower()
+    u = _clean_text(str(unit or "")).lower()
+    if not n:
+        return False
+    if any(h in n for h in _METRIC_NAME_HINTS):
+        return True
+    if u in _METRIC_UNIT_HINTS:
+        return True
+    if any(f" {h}" in f" {u}" for h in _METRIC_UNIT_HINTS):
+        return True
+    return False
+
+
+def _derive_metric_features_from_perf(perf: List[FeatureValue]) -> List[FeatureValue]:
+    out: List[FeatureValue] = []
+    seen: set[str] = set()
+    for x in perf or []:
+        if not isinstance(x, FeatureValue):
+            continue
+        if not _is_metric_feature_name_unit(x.name, x.unit):
+            continue
+        key = _clean_text(x.name).lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(FeatureValue(name=x.name, value=x.value, unit=x.unit))
+    return out
+
+
+def _template_metric(profile: Dict[str, Any], perf_template: List[FeatureValue]) -> List[FeatureValue]:
+    vals = profile.get("metric_features")
+    out: List[FeatureValue] = []
+    if isinstance(vals, list):
+        for x in vals:
+            n = _feature_name(x)
+            if not n:
+                continue
+            out.append(FeatureValue(name=n, value=None, unit=_feature_unit(x)))
+    if out:
+        return out
+    return _derive_metric_features_from_perf(perf_template)
 
 
 def _template_price(profile: Dict[str, Any]) -> List[PriceIndicatorValue]:
@@ -140,6 +203,7 @@ def _append_term(bucket: List[str], value: Any) -> None:
 def _collect_query_terms(
     candidate: Dict[str, Any],
     perf_template: List[FeatureValue],
+    metric_template: List[FeatureValue],
     price_template: List[PriceIndicatorValue],
     soft_template: List[SoftFeatureValue],
     claims_template: List[ClaimValue],
@@ -147,6 +211,7 @@ def _collect_query_terms(
 ) -> Dict[str, List[str]]:
     buckets: Dict[str, List[str]] = {
         "performance_parameters": [],
+        "metric_features": [],
         "price_indicators": [],
         "soft_features": [],
         "claims": [],
@@ -155,6 +220,8 @@ def _collect_query_terms(
 
     for x in perf_template:
         _append_term(buckets["performance_parameters"], x.name)
+    for x in metric_template:
+        _append_term(buckets["metric_features"], x.name)
     for x in price_template:
         _append_term(buckets["price_indicators"], x.context)
     for x in soft_template:
@@ -168,6 +235,7 @@ def _collect_query_terms(
 
     for key in (
         "performance_parameters",
+        "metric_features",
         "soft_parameters",
         "price_indicators",
         "soft_features",
@@ -181,6 +249,8 @@ def _collect_query_terms(
             if isinstance(v, dict):
                 if key in ("performance_parameters", "soft_parameters"):
                     _append_term(buckets["performance_parameters"], v.get("name"))
+                if key == "metric_features":
+                    _append_term(buckets["metric_features"], v.get("name"))
                 if key == "price_indicators":
                     _append_term(buckets["price_indicators"], v.get("context"))
                     _append_term(buckets["price_indicators"], v.get("raw"))
@@ -195,6 +265,8 @@ def _collect_query_terms(
             else:
                 if key in ("performance_parameters", "soft_parameters"):
                     _append_term(buckets["performance_parameters"], v)
+                elif key == "metric_features":
+                    _append_term(buckets["metric_features"], v)
                 elif key == "price_indicators":
                     _append_term(buckets["price_indicators"], v)
                 elif key == "soft_features":
@@ -218,6 +290,7 @@ def _build_brave_query(
     manufacturer: str,
     candidate: Dict[str, Any],
     perf_template: List[FeatureValue],
+    metric_template: List[FeatureValue],
     price_template: List[PriceIndicatorValue],
     soft_template: List[SoftFeatureValue],
     claims_template: List[ClaimValue],
@@ -238,6 +311,7 @@ def _build_brave_query(
     terms_by_category = _collect_query_terms(
         candidate,
         perf_template,
+        metric_template,
         price_template,
         soft_template,
         claims_template,
@@ -246,8 +320,8 @@ def _build_brave_query(
     seen: set[str] = set()
     compact_terms: List[str] = []
 
-    # Ensure each of the 5 categories contributes terms.
-    for cat in ("performance_parameters", "price_indicators", "soft_features", "claims", "differentiators"):
+    # Ensure each category contributes terms.
+    for cat in ("performance_parameters", "metric_features", "price_indicators", "soft_features", "claims", "differentiators"):
         for t in terms_by_category.get(cat, []):
             key = t.lower()
             if key in seen:
@@ -257,7 +331,7 @@ def _build_brave_query(
             break
 
     # Add more terms (deduped) until size limit.
-    for cat in ("performance_parameters", "price_indicators", "soft_features", "claims", "differentiators"):
+    for cat in ("performance_parameters", "metric_features", "price_indicators", "soft_features", "claims", "differentiators"):
         for t in terms_by_category.get(cat, []):
             key = t.lower()
             if key in seen:
@@ -279,6 +353,7 @@ def _build_retry_query(
     manufacturer: str,
     candidate: Dict[str, Any],
     perf_template: List[FeatureValue],
+    metric_template: List[FeatureValue],
     price_template: List[PriceIndicatorValue],
     soft_template: List[SoftFeatureValue],
     claims_template: List[ClaimValue],
@@ -297,6 +372,7 @@ def _build_retry_query(
     terms_by_category = _collect_query_terms(
         candidate,
         perf_template,
+        metric_template,
         price_template,
         soft_template,
         claims_template,
@@ -320,6 +396,7 @@ def _build_retry_query(
         return out
 
     perf_terms = _uniq(terms_by_category.get("performance_parameters", []))
+    metric_terms = _uniq(terms_by_category.get("metric_features", []))
     price_terms = _uniq(terms_by_category.get("price_indicators", []))
     soft_terms = _uniq(terms_by_category.get("soft_features", []))
     claims_diff_terms = _uniq(
@@ -330,6 +407,7 @@ def _build_retry_query(
     queries: List[str] = []
     query_groups = [
         perf_terms,
+        metric_terms,
         price_terms,
         soft_terms,
         claims_diff_terms,
@@ -346,6 +424,9 @@ def _enrichment_score(enriched: Dict[str, Any]) -> int:
         return 0
     score = 0
     for item in (enriched.get("performance_parameters") or []):
+        if isinstance(item, dict) and item.get("value") is not None:
+            score += 2
+    for item in (enriched.get("metric_features") or []):
         if isinstance(item, dict) and item.get("value") is not None:
             score += 2
     for item in (enriched.get("price_indicators") or []):
@@ -373,6 +454,7 @@ def _combine_retry_enrichments(payloads: List[Dict[str, Any]]) -> Dict[str, Any]
         return {}
 
     perf_map: Dict[str, Dict[str, Any]] = {}
+    metric_map: Dict[str, Dict[str, Any]] = {}
     price_map: Dict[str, Dict[str, Any]] = {}
     soft_map: Dict[str, Dict[str, Any]] = {}
     claims_out: List[Dict[str, Any]] = []
@@ -401,6 +483,27 @@ def _combine_retry_enrichments(payloads: List[Dict[str, Any]]) -> Dict[str, Any]
                 perf_map[key]["value"] = val
             if not perf_map[key].get("unit") and unit:
                 perf_map[key]["unit"] = unit
+
+        for item in (p.get("metric_features") or []):
+            if not isinstance(item, dict):
+                continue
+            name = _clean_text(str(item.get("name") or ""))
+            if not name:
+                continue
+            key = name.lower()
+            val = item.get("value")
+            if isinstance(val, str):
+                try:
+                    val = float(val.replace(",", "."))
+                except Exception:
+                    val = None
+            unit = _clean_text(str(item.get("unit") or ""))
+            if key not in metric_map:
+                metric_map[key] = {"name": name, "value": None, "unit": unit}
+            if metric_map[key].get("value") is None and isinstance(val, (int, float)):
+                metric_map[key]["value"] = val
+            if not metric_map[key].get("unit") and unit:
+                metric_map[key]["unit"] = unit
 
         for item in (p.get("price_indicators") or []):
             if not isinstance(item, dict):
@@ -468,6 +571,7 @@ def _combine_retry_enrichments(payloads: List[Dict[str, Any]]) -> Dict[str, Any]
 
     merged: Dict[str, Any] = {
         "performance_parameters": list(perf_map.values()),
+        "metric_features": list(metric_map.values()),
         "price_indicators": list(price_map.values()),
         "soft_features": list(soft_map.values()),
         "claims": claims_out,
@@ -506,6 +610,7 @@ def _is_null_only_enrichment(enriched: Dict[str, Any]) -> bool:
         return True
 
     perf = enriched.get("performance_parameters")
+    metric = enriched.get("metric_features")
     price = enriched.get("price_indicators")
     soft = enriched.get("soft_features")
     claims = enriched.get("claims")
@@ -514,6 +619,10 @@ def _is_null_only_enrichment(enriched: Dict[str, Any]) -> bool:
     has_perf = False
     if isinstance(perf, list) and perf:
         has_perf = any(isinstance(x, dict) and x.get("value") is not None for x in perf)
+
+    has_metric = False
+    if isinstance(metric, list) and metric:
+        has_metric = any(isinstance(x, dict) and x.get("value") is not None for x in metric)
 
     has_price = False
     if isinstance(price, list) and price:
@@ -539,7 +648,7 @@ def _is_null_only_enrichment(enriched: Dict[str, Any]) -> bool:
     if isinstance(diffs, list) and diffs:
         has_diffs = any(_clean_text(str(x or "")) for x in diffs)
 
-    return not (has_perf or has_price or has_soft or has_claims or has_diffs)
+    return not (has_perf or has_metric or has_price or has_soft or has_claims or has_diffs)
 
 
 def _llm_schema() -> Dict[str, Any]:
@@ -575,6 +684,19 @@ def _llm_schema() -> Dict[str, Any]:
                     "required": ["raw", "value", "currency", "period", "context"],
                 },
             },
+            "metric_features": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "name": {"type": "string"},
+                        "value": {"type": ["number", "null"]},
+                        "unit": {"type": "string"},
+                    },
+                    "required": ["name", "value", "unit"],
+                },
+            },
             "soft_features": {
                 "type": "array",
                 "items": {
@@ -606,6 +728,7 @@ def _llm_schema() -> Dict[str, Any]:
         },
         "required": [
             "performance_parameters",
+            "metric_features",
             "price_indicators",
             "soft_features",
             "claims",
@@ -619,6 +742,7 @@ def _llm_enrich_with_brave(
     product: Dict[str, Any],
     search_query: str,
     perf_template: List[FeatureValue],
+    metric_template: List[FeatureValue],
     price_template: List[PriceIndicatorValue],
     soft_template: List[SoftFeatureValue],
     claims_template: List[ClaimValue],
@@ -633,6 +757,7 @@ def _llm_enrich_with_brave(
         "search_query": _clean_text(search_query)[:600],
         "reference_templates": {
             "performance_parameters": [x.model_dump() for x in perf_template],
+            "metric_features": [x.model_dump() for x in metric_template],
             "price_indicators": [x.model_dump() for x in price_template],
             "soft_features": [x.model_dump() for x in soft_template],
             "claims": [x.model_dump() for x in claims_template],
@@ -650,7 +775,8 @@ def _llm_enrich_with_brave(
         "1) Keep template feature names.\n"
         "2) Fill values only if explicitly supported by evidence.\n"
         "3) You may add new features only if clearly explicit.\n"
-        "4) Measurable/numeric values (e.g. Pa, mm, ml, L, kg, °C, W) must go to performance_parameters (or price_indicators for prices), not soft_features.\n"
+        "3b) Put physical metrics (dimensions, weight, pressure, capacities) into metric_features.\n"
+        "4) Measurable/numeric values (e.g. Pa, mm, ml, L, kg, °C, W) must go to performance_parameters or metric_features (or price_indicators for prices), never into soft_features.\n"
         "5) soft_features are qualitative availability flags only (boolean), no numeric values.\n"
         "6) claims must use claim_type in value|benefit|differentiation.\n"
         "7) differentiators must be evidence-based only; never use fixed/default/template text.\n"
@@ -850,6 +976,7 @@ def extract_competitor_profiles_v0_5(
     target_brand_fallback = _clean_text(target_product_name.split()[0] if target_product_name else "")
 
     perf_template = _template_perf(profile)
+    metric_template = _template_metric(profile, perf_template)
     price_template = _template_price(profile)
     soft_template = _template_soft(profile)
     claims_template = _template_claims(profile)
@@ -910,6 +1037,7 @@ def extract_competitor_profiles_v0_5(
             manufacturer=manufacturer,
             candidate=c,
             perf_template=perf_template,
+            metric_template=metric_template,
             price_template=price_template,
             soft_template=soft_template,
             claims_template=claims_template,
@@ -927,6 +1055,7 @@ def extract_competitor_profiles_v0_5(
             },
             search_query=search_query,
             perf_template=[FeatureValue(name=x.name, value=x.value, unit=x.unit) for x in perf_template],
+            metric_template=[FeatureValue(name=x.name, value=x.value, unit=x.unit) for x in metric_template],
             price_template=[
                 PriceIndicatorValue(raw=x.raw, value=x.value, currency=x.currency, period=x.period, context=x.context)
                 for x in price_template
@@ -944,6 +1073,7 @@ def extract_competitor_profiles_v0_5(
                 manufacturer=manufacturer,
                 candidate=c,
                 perf_template=perf_template,
+                metric_template=metric_template,
                 price_template=price_template,
                 soft_template=soft_template,
                 claims_template=claims_template,
@@ -962,6 +1092,7 @@ def extract_competitor_profiles_v0_5(
                     },
                     search_query=retry_query,
                     perf_template=[FeatureValue(name=x.name, value=x.value, unit=x.unit) for x in perf_template],
+                    metric_template=[FeatureValue(name=x.name, value=x.value, unit=x.unit) for x in metric_template],
                     price_template=[
                         PriceIndicatorValue(raw=x.raw, value=x.value, currency=x.currency, period=x.period, context=x.context)
                         for x in price_template
@@ -1013,6 +1144,18 @@ def extract_competitor_profiles_v0_5(
             [FeatureValue(name=x.name, value=x.value, unit=x.unit) for x in perf_template],
             enriched.get("performance_parameters") if enriched else None,
         )
+        metric = _merge_perf(
+            [FeatureValue(name=x.name, value=x.value, unit=x.unit) for x in metric_template],
+            enriched.get("metric_features") if enriched else None,
+        )
+        derived_metric = _derive_metric_features_from_perf(perf)
+        if derived_metric:
+            metric = _merge_perf(
+                [FeatureValue(name=x.name, value=x.value, unit=x.unit) for x in metric],
+                [x.model_dump() for x in derived_metric],
+            )
+        if not metric and metric_template:
+            metric = [FeatureValue(name=x.name, value=None, unit=x.unit) for x in metric_template]
         price = _merge_price(
             [
                 PriceIndicatorValue(raw=x.raw, value=x.value, currency=x.currency, period=x.period, context=x.context)
@@ -1044,6 +1187,7 @@ def extract_competitor_profiles_v0_5(
                 url3=resolved_url3,
                 url3_type=resolved_url3_type,
                 performance_parameters=perf,
+                metric_features=metric,
                 price_indicators=price,
                 soft_features=soft,
                 claims=claims,

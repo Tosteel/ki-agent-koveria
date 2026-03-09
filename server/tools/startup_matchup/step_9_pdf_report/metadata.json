@@ -1,0 +1,6 @@
+{
+  "name": "startup_matchup_step_9_pdf_report",
+  "description": "Schritt 9: Export des finalen JSON-Berichts in ein PDF-Dokument.",
+  "input": "step8_final_report.json",
+  "output": "startup_matchup_report.pdf"
+}

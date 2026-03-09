@@ -10,6 +10,7 @@ from server.tools.competitive_analysis.step5_competitor_profile_extraction_v0_5.
     _build_brave_query,
     _template_claims,
     _template_differentiators,
+    _template_metric,
     _template_perf,
     _template_price,
     _template_soft,
@@ -26,10 +27,10 @@ def _brave_raw_text(
     brave_stream: bool,
     brave_language: Optional[str],
     brave_country: Optional[str],
-) -> str:
+) -> tuple[str, str]:
     llm = LlmBrave()
     if not llm.enabled():
-        return ""
+        return "", "brave_not_configured"
     # Intentionally send only the plain search query to Brave Answers (no additional instruction prompt).
     user = _clean_text(query)
     try:
@@ -41,9 +42,12 @@ def _brave_raw_text(
             country=brave_country,
             timeout_s=90,
         )
-        return llm.extract_text(resp) or ""
-    except Exception:
-        return ""
+        text = llm.extract_text(resp) or ""
+        if not text:
+            return "", "brave_empty_response"
+        return text, ""
+    except Exception as exc:
+        return "", f"brave_error: {exc}"
 
 
 def build_competitor_profile_text_v0_6(
@@ -89,6 +93,7 @@ def build_competitor_profile_text_v0_6(
     limit = max(1, int(max_competitors))
 
     perf_template = _template_perf(profile)
+    metric_template = _template_metric(profile, perf_template)
     price_template = _template_price(profile)
     soft_template = _template_soft(profile)
     claims_template = _template_claims(profile)
@@ -116,6 +121,7 @@ def build_competitor_profile_text_v0_6(
             manufacturer=manufacturer,
             candidate=c,
             perf_template=perf_template,
+            metric_template=metric_template,
             price_template=price_template,
             soft_template=soft_template,
             claims_template=claims_template,
@@ -123,7 +129,7 @@ def build_competitor_profile_text_v0_6(
         )
         _log(f"[{idx}/{min(len(competitors_raw), limit)}] product={product_name}")
         _log(f"search query={query}")
-        plain_text = _brave_raw_text(
+        plain_text, cause = _brave_raw_text(
             query=query,
             product={
                 "product_name": product_name,
@@ -139,7 +145,10 @@ def build_competitor_profile_text_v0_6(
         if verbose_terminal:
             _log(f"search response={_clean_text(plain_text)[:1200] if plain_text else '<empty>'}")
         if not plain_text:
-            warnings.append(f"v0.6 brave text empty for product: {product_name}")
+            cause_txt = cause or "unknown"
+            warnings.append(
+                f"v0.6 brave text empty for product: {product_name} ({cause_txt})"
+            )
 
         out.append(
             CompetitorProductTextV06(

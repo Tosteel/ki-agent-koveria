@@ -36,6 +36,7 @@ class CompetitorEnrichedV06(BaseModel):
     url: str
     url_type: str = "unknown"
     performance_parameters: List[FeatureValue] = Field(default_factory=list)
+    metric_features: List[FeatureValue] = Field(default_factory=list)
     price_indicators: List[PriceIndicatorValue] = Field(default_factory=list)
     soft_features: List[SoftFeatureValue] = Field(default_factory=list)
     claims: List[ClaimValue] = Field(default_factory=list)
@@ -83,4 +84,3 @@ __all__ = [
     "CompetitorProfileExtractionV06Request",
     "CompetitorProfileExtractionV06Response",
 ]
-

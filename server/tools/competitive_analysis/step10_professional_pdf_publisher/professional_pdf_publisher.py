@@ -186,17 +186,32 @@ def _draw_positioning(points: List[Dict[str, Any]], axis_x: str, axis_y: str) ->
     d.add(String(w / 2, 12, axis_x, fontSize=9))
     d.add(String(5, h / 2, axis_y, fontSize=9))
 
-    xs = [float(p.get("x") or 0.0) for p in points] or [0.0]
-    ys = [float(p.get("y") or 0.0) for p in points] or [0.0]
+    def _f(v: Any, d: float = 0.0) -> float:
+        try:
+            return float(v)
+        except Exception:
+            return d
+
+    priced_points = []
+    missing_price_points = []
+    for p in points:
+        typ = str(p.get("point_type") or "competitor").lower()
+        if typ.endswith("_missing_price"):
+            missing_price_points.append(p)
+        else:
+            priced_points.append(p)
+
+    xs = [_f(p.get("x"), 0.0) for p in priced_points] or [0.0, 1.0]
+    ys = [_f(p.get("y"), 0.0) for p in points] or [0.0]
     min_x, max_x = min(xs), max(xs)
     min_y, max_y = min(ys), max(ys)
     span_x = max(1e-6, max_x - min_x)
     span_y = max(1e-6, max_y - min_y)
 
-    for p in points[:40]:
+    for p in priced_points[:40]:
         name = str(p.get("name") or "")[:26]
-        x = float(p.get("x") or 0.0)
-        y = float(p.get("y") or 0.0)
+        x = _f(p.get("x"), 0.0)
+        y = _f(p.get("y"), 0.0)
         typ = str(p.get("point_type") or "competitor").lower()
 
         px = pad + ((x - min_x) / span_x) * (w - 2 * pad)
@@ -204,6 +219,19 @@ def _draw_positioning(points: List[Dict[str, Any]], axis_x: str, axis_y: str) ->
         col = colors.HexColor("#0f766e") if typ == "own" else colors.HexColor("#1d4ed8")
         d.add(Circle(px, py, 4.0, fillColor=col, strokeColor=col))
         d.add(String(px + 5, py + 3, name, fontSize=7, fillColor=colors.HexColor("#111827")))
+
+    if missing_price_points:
+        mx = pad + 6
+        d.add(String(mx + 10, h - pad + 10, "Preis n/a", fontSize=7, fillColor=colors.HexColor("#6b7280")))
+        for idx, p in enumerate(missing_price_points[:20]):
+            name = str(p.get("name") or "")[:22]
+            y = _f(p.get("y"), 0.0)
+            py = pad + ((y - min_y) / span_y) * (h - 2 * pad)
+            py += ((idx % 3) - 1) * 4
+            typ = str(p.get("point_type") or "competitor_missing_price").lower()
+            col = colors.HexColor("#0f766e") if typ.startswith("own_") else colors.HexColor("#6b7280")
+            d.add(Rect(mx - 2, py - 2, 4, 4, fillColor=col, strokeColor=col))
+            d.add(String(mx + 6, py + 2, name, fontSize=7, fillColor=colors.HexColor("#374151")))
 
     return d
 

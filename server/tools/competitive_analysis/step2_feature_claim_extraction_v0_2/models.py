@@ -37,6 +37,7 @@ class SoftFeature(BaseModel):
 class ExtractionQualityReport(BaseModel):
     normalized_features_count: int = 0
     performance_parameters_count: int = 0
+    metric_features_count: int = 0
     price_indicators_count: int = 0
     claims_count: int = 0
     soft_features_count: int = 0
@@ -51,6 +52,7 @@ class ProductProfileV2(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
     normalized_features: List[NormalizedFeature] = Field(default_factory=list)
     performance_parameters: List[NormalizedFeature] = Field(default_factory=list)
+    metric_features: List[NormalizedFeature] = Field(default_factory=list)
     price_indicators: List[PriceIndicator] = Field(default_factory=list)
     soft_features: List[SoftFeature] = Field(default_factory=list)
     claims: List[ClaimItem] = Field(default_factory=list)

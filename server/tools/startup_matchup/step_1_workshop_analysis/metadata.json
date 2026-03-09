@@ -1,0 +1,6 @@
+{
+  "name": "startup_matchup_step_1_workshop_analysis",
+  "description": "Schritt 1: Extraktion und Strukturierung von Workshop-Unterlagen fuer die Startup-Suche.",
+  "input": "workshop_document_path oder workshop_text",
+  "output": "workshop_analysis mit innovation_goals, strategic_fields, problem_statements, technology_interests, target_use_cases"
+}

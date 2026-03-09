@@ -1,0 +1,30 @@
+{
+  "workflow_name": "startup_matchup_v0_1",
+  "providers": {
+    "llm": "ionos",
+    "search": "brave"
+  },
+  "limits": {
+    "max_queries": 16,
+    "per_query_results": 8,
+    "top_ranked": 25,
+    "top_deep_research": 10,
+    "max_context_chars": 18000
+  },
+  "runtime": {
+    "stream": true,
+    "verbose_terminal": true
+  },
+  "artifacts": {
+    "step1": "step1_workshop_analysis.json",
+    "step2": "step2_company_profile.json",
+    "step3": "step3_gap_analysis.json",
+    "step4": "step4_startup_candidates_raw.json",
+    "step4_1": "step4_1_startup_structured.json",
+    "step5": "step5_startup_ranked_list.json",
+    "step6": "step6_startup_deep_profiles_raw.json",
+    "step7": "step7_startup_profiles.json",
+    "step8": "step8_final_report.json",
+    "step9": "startup_matchup_report.pdf"
+  }
+}

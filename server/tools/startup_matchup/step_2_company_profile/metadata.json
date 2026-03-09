@@ -1,0 +1,6 @@
+{
+  "name": "startup_matchup_step_2_company_profile",
+  "description": "Schritt 2: Unternehmensprofil aus Workshop-Erkenntnissen und Internetrecherche erstellen.",
+  "input": "step1_workshop_analysis.json oder company_name",
+  "output": "company_profile mit Branche, Kerngeschaeft, Technologiedomaenen und strategischen Zielen"
+}

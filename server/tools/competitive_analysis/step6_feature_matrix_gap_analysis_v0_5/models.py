@@ -30,6 +30,7 @@ class CompetitorRowV05(BaseModel):
     competitor: str
     cluster: str = "unknown"
     performance_parameters: List[PerformanceCellV05] = Field(default_factory=list)
+    metric_features: List[PerformanceCellV05] = Field(default_factory=list)
     price_indicators: List[PriceCellV05] = Field(default_factory=list)
     soft_features: List[SoftFeatureCellV05] = Field(default_factory=list)
     avg_price: float | None = None
@@ -41,6 +42,7 @@ class ComparisonMatrixV05(BaseModel):
     provider: str = "openai"
     baseline_product: str = ""
     performance_dimensions: List[str] = Field(default_factory=list)
+    metric_dimensions: List[str] = Field(default_factory=list)
     price_dimensions: List[str] = Field(default_factory=list)
     soft_feature_dimensions: List[str] = Field(default_factory=list)
     baseline_row: CompetitorRowV05
@@ -58,6 +60,8 @@ class GapItemV05(BaseModel):
 class UspItemV05(BaseModel):
     feature_group: str
     feature: str
+    market_presence_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    rarity_score: float = Field(default=1.0, ge=0.0, le=1.0)
     rationale: str = ""
 
 
@@ -75,13 +79,13 @@ class ClusterAssignmentV05(BaseModel):
     value_score: float | None = None
 
 
-class FeatureMatrxGapAnalysisV05Result(BaseModel):
+class FeatureMatrixGapAnalysisV05Result(BaseModel):
     comparison_matrix: ComparisonMatrixV05
     gaps_and_usps: GapsAndUspsV05
     cluster_assignment: List[ClusterAssignmentV05] = Field(default_factory=list)
 
 
-class FeatureMatrxGapAnalysisV05Request(BaseModel):
+class FeatureMatrixGapAnalysisV05Request(BaseModel):
     product_profile: Optional[Dict[str, Any]] = None
     product_profile_path: Optional[str] = None
     competitor_profile_results: Optional[Dict[str, Any]] = None
@@ -89,7 +93,7 @@ class FeatureMatrxGapAnalysisV05Request(BaseModel):
     provider: str = "openai"
 
     @model_validator(mode="after")
-    def _validate_input(self) -> "FeatureMatrxGapAnalysisV05Request":
+    def _validate_input(self) -> "FeatureMatrixGapAnalysisV05Request":
         if not self.product_profile and not (self.product_profile_path or "").strip():
             raise ValueError("Either product_profile or product_profile_path must be provided.")
         if not self.competitor_profile_results and not (self.competitor_profile_results_path or "").strip():
@@ -97,11 +101,20 @@ class FeatureMatrxGapAnalysisV05Request(BaseModel):
         return self
 
 
-class FeatureMatrxGapAnalysisV05Response(BaseModel):
+class FeatureMatrixGapAnalysisV05Response(BaseModel):
     feature_matrix_gap: Dict[str, Any]
 
 
+# Backward-compatible aliases for older imports.
+FeatureMatrxGapAnalysisV05Result = FeatureMatrixGapAnalysisV05Result
+FeatureMatrxGapAnalysisV05Request = FeatureMatrixGapAnalysisV05Request
+FeatureMatrxGapAnalysisV05Response = FeatureMatrixGapAnalysisV05Response
+
+
 __all__ = [
+    "FeatureMatrixGapAnalysisV05Request",
+    "FeatureMatrixGapAnalysisV05Response",
+    "FeatureMatrixGapAnalysisV05Result",
     "FeatureMatrxGapAnalysisV05Request",
     "FeatureMatrxGapAnalysisV05Response",
     "FeatureMatrxGapAnalysisV05Result",

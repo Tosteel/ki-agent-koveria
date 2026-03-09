@@ -4,17 +4,17 @@ from typing import Any, Dict
 
 from server.agent.tool_registry import ToolContext, ToolRegistry
 
-from .feature_matrx_gap_analysis_v0_5 import run_feature_matrx_gap_analysis_v0_5
-from .models import FeatureMatrxGapAnalysisV05Request, FeatureMatrxGapAnalysisV05Response
+from .feature_matrix_gap_analysis_v0_5 import run_feature_matrix_gap_analysis_v0_5
+from .models import FeatureMatrixGapAnalysisV05Request, FeatureMatrixGapAnalysisV05Response
 
 
 TOOL_NAME = "feature_matrix_gap_analysis_v0_5"
 
 
 def register(registry: ToolRegistry) -> None:
-    def tool_feature_matrx_gap_analysis_v0_5(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
-        req = FeatureMatrxGapAnalysisV05Request(**args)
-        result = run_feature_matrx_gap_analysis_v0_5(
+    def tool_feature_matrix_gap_analysis_v0_5(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+        req = FeatureMatrixGapAnalysisV05Request(**args)
+        result = run_feature_matrix_gap_analysis_v0_5(
             product_profile=req.product_profile,
             product_profile_path=req.product_profile_path,
             competitor_profile_results=req.competitor_profile_results,
@@ -23,7 +23,7 @@ def register(registry: ToolRegistry) -> None:
             user_root=ctx.settings.user_dir(ctx.user_id),
             work_root=ctx.settings.user_work_dir(ctx.user_id),
         )
-        return FeatureMatrxGapAnalysisV05Response(
+        return FeatureMatrixGapAnalysisV05Response(
             feature_matrix_gap={
                 "comparison_matrix": result.comparison_matrix.model_dump(),
                 "gaps_and_usps": result.gaps_and_usps.model_dump(),
@@ -31,4 +31,4 @@ def register(registry: ToolRegistry) -> None:
             }
         ).model_dump()
 
-    registry.register(TOOL_NAME, tool_feature_matrx_gap_analysis_v0_5, request_model=FeatureMatrxGapAnalysisV05Request)
+    registry.register(TOOL_NAME, tool_feature_matrix_gap_analysis_v0_5, request_model=FeatureMatrixGapAnalysisV05Request)

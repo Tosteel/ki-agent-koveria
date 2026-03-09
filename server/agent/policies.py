@@ -24,7 +24,7 @@ BASIC_TOOLS = {
 }
 
 COMPETITIVE_ANALYSIS_TOOLS = {
-"competitive_parse_document",
+    "competitive_parse_document",
     "competitive_quality_gate",
     "competitive_extract_product_profile",
     "competitive_extract_product_profile_v0_2",
@@ -60,7 +60,7 @@ COMPETITIVE_ANALYSIS_TOOLS = {
 }
 
 OFFER_FLOW = {
-"offerflow_step_1_intake",
+    "offerflow_step_1_intake",
     "offerflow_step_2_qualification",
     "offerflow_step_3_clarification",
     "offerflow_step_4_scope_mapping",

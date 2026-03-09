@@ -59,6 +59,44 @@ def _safe_list_str(values: Any) -> List[str]:
     return out
 
 
+def _extract_artifact_payload(payload: Any, key: str) -> Any:
+    """Extract a requested artifact from common wrapper shapes.
+
+    Supports:
+    - direct payload[key]
+    - one-level wrappers like {"feature_matrix_gap": {...}}
+    - one-level wrappers like {"strategic_analysis": {...}}
+    """
+    if not isinstance(payload, dict):
+        return payload
+
+    k = str(key or "").strip()
+    if k and isinstance(payload.get(k), dict):
+        return payload[k]
+
+    # Probe one-level nested dicts (generic wrapper handling).
+    for v in payload.values():
+        if not isinstance(v, dict):
+            continue
+        if k and isinstance(v.get(k), dict):
+            return v[k]
+
+    # If caller already asked for a wrapper artifact, keep it as-is.
+    return payload
+
+
+def _extract_cluster_assignment(payload: Any) -> Optional[List[Dict[str, Any]]]:
+    if not isinstance(payload, dict):
+        return None
+    ca = payload.get("cluster_assignment")
+    if isinstance(ca, list):
+        return [x for x in ca if isinstance(x, dict)]
+    for v in payload.values():
+        if isinstance(v, dict) and isinstance(v.get("cluster_assignment"), list):
+            return [x for x in v.get("cluster_assignment") if isinstance(x, dict)]
+    return None
+
+
 def _resolve_input_path(path: str, user_root: Path, work_root: Path) -> Path:
     raw = str(path or "").strip().lstrip("/")
     p = Path(raw)
@@ -102,12 +140,22 @@ def _load_artifacts(
             try:
                 fp = _resolve_input_path(str(rel or ""), user_root=user_root, work_root=work_root)
                 payload = json.loads(fp.read_text(encoding="utf-8"))
+                if "cluster_assignment" not in out:
+                    extracted_ca = _extract_cluster_assignment(payload)
+                    if extracted_ca:
+                        out["cluster_assignment"] = extracted_ca
                 k = str(key)
-                if isinstance(payload, dict) and k in payload and isinstance(payload.get(k), dict):
-                    payload = payload[k]
+                payload = _extract_artifact_payload(payload, k)
                 out[k] = payload
             except Exception as exc:
                 warnings.append(f"Could not load artifact '{key}' from '{rel}': {exc}")
+
+    # Lift cluster assignments from any wrapped artifact if not explicitly present.
+    if "cluster_assignment" not in out:
+        for v in out.values():
+            if isinstance(v, dict) and isinstance(v.get("cluster_assignment"), list):
+                out["cluster_assignment"] = v.get("cluster_assignment")
+                break
 
     # common wrappers
     if isinstance(out.get("gaps_and_usps"), dict):
@@ -169,6 +217,16 @@ def _build_competitor_overview(artifacts: Dict[str, Any]) -> Dict[str, Any]:
         cp = cp["competitor_profile_results"]
     cl = artifacts.get("competitor_list") if isinstance(artifacts.get("competitor_list"), dict) else {}
     rows: List[Dict[str, Any]] = []
+    cluster_map: Dict[str, str] = {}
+
+    ca = artifacts.get("cluster_assignment") if isinstance(artifacts.get("cluster_assignment"), list) else []
+    for item in ca:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("competitor") or "").strip().lower()
+        cluster = str(item.get("cluster") or "").strip()
+        if name and cluster:
+            cluster_map[name] = cluster
 
     # v0.5 shape
     cp_items = [x for x in (cp.get("competitors") or []) if isinstance(x, dict)]
@@ -182,11 +240,16 @@ def _build_competitor_overview(artifacts: Dict[str, Any]) -> Dict[str, Any]:
             mapped_features += sum(1 for x in (c.get("performance_parameters") or []) if isinstance(x, dict) and x.get("value") not in (None, ""))
             mapped_features += sum(1 for x in (c.get("price_indicators") or []) if isinstance(x, dict) and (x.get("value") not in (None, "") or str(x.get("raw") or "").strip()))
             mapped_features += sum(1 for x in (c.get("soft_features") or []) if isinstance(x, dict) and bool(x.get("available")))
+            name = str(c.get("product_name") or c.get("name") or "").strip()
+            cluster = str(c.get("cluster") or "unknown").strip()
+            mapped_cluster = cluster_map.get(name.lower())
+            if mapped_cluster:
+                cluster = mapped_cluster
             rows.append(
                 {
-                    "name": str(c.get("product_name") or c.get("name") or "").strip(),
+                    "name": name,
                     "url": str(c.get("url") or "").strip(),
-                    "cluster": str(c.get("cluster") or "unknown").strip(),
+                    "cluster": cluster,
                     "relevance_score": c.get("relevance_score"),
                     "similarity_score": c.get("similarity_score"),
                     "short_profile": short_profile,
@@ -203,11 +266,15 @@ def _build_competitor_overview(artifacts: Dict[str, Any]) -> Dict[str, Any]:
             name = str(c.get("name") or "").strip()
             p = by_name.get(name.lower())
             quality = (p.get("data_quality") if isinstance(p, dict) else {}) if isinstance(p, dict) else {}
+            cluster = str(c.get("cluster") or "unknown").strip()
+            mapped_cluster = cluster_map.get(name.lower())
+            if mapped_cluster:
+                cluster = mapped_cluster
             rows.append(
                 {
                     "name": name,
                     "url": str(c.get("url") or "").strip(),
-                    "cluster": str(c.get("cluster") or "unknown").strip(),
+                    "cluster": cluster,
                     "relevance_score": c.get("relevance_score"),
                     "similarity_score": c.get("similarity_score"),
                     "short_profile": str(c.get("snippet") or "").strip(),
@@ -229,6 +296,7 @@ def _build_feature_matrix_section(artifacts: Dict[str, Any]) -> Dict[str, Any]:
     if not dims:
         dims = []
         dims.extend([f"performance::{x}" for x in _safe_list_str(m.get("performance_dimensions"))])
+        dims.extend([f"metric::{x}" for x in _safe_list_str(m.get("metric_dimensions"))])
         dims.extend([f"price::{x}" for x in _safe_list_str(m.get("price_dimensions"))])
         dims.extend([f"soft::{x}" for x in _safe_list_str(m.get("soft_feature_dimensions"))])
     base = m.get("baseline_row") if isinstance(m.get("baseline_row"), dict) else {}
@@ -242,6 +310,8 @@ def _build_feature_matrix_section(artifacts: Dict[str, Any]) -> Dict[str, Any]:
         )
         perf = [x for x in (r.get("performance_parameters") or []) if isinstance(x, dict)]
         present.extend([str(x.get("name") or "") for x in perf if x.get("value") not in (None, "") and str(x.get("name") or "")])
+        metric = [x for x in (r.get("metric_features") or []) if isinstance(x, dict)]
+        present.extend([str(x.get("name") or "") for x in metric if x.get("value") not in (None, "") and str(x.get("name") or "")])
         price = [x for x in (r.get("price_indicators") or []) if isinstance(x, dict)]
         present.extend([str(x.get("context") or "") for x in price if (x.get("value") not in (None, "") or str(x.get("raw") or "").strip()) and str(x.get("context") or "")])
         soft = [x for x in (r.get("soft_features") or []) if isinstance(x, dict)]
@@ -293,6 +363,8 @@ def _build_gap_usp_analysis(artifacts: Dict[str, Any]) -> Dict[str, Any]:
         "prioritized_usps": [
             {
                 "feature": str(x.get("feature") or ""),
+                "market_presence_ratio": x.get("market_presence_ratio"),
+                "rarity_score": x.get("rarity_score"),
                 "rationale": str(x.get("rationale") or ""),
             }
             for x in usps[:12]
@@ -347,8 +419,12 @@ def _build_positioning(artifacts: Dict[str, Any]) -> PositioningDiagram:
     axes_y = str(pos.get("primary_axis_y") or "Leistung")
 
     points: List[PositioningPoint] = []
+    missing_price_points: List[PositioningPoint] = []
+    baseline_name = ""
+    if isinstance(artifacts.get("comparison_matrix"), dict):
+        baseline_name = str((artifacts.get("comparison_matrix") or {}).get("baseline_product") or "").strip().lower()
 
-    def _to_float(v: Any, default: float = 0.0) -> float:
+    def _to_float(v: Any, default: Optional[float] = None) -> Optional[float]:
         try:
             return float(v)
         except Exception:
@@ -366,12 +442,27 @@ def _build_positioning(artifacts: Dict[str, Any]) -> PositioningDiagram:
     for c in cc:
         if not _is_valid_cluster_point(c):
             continue
+        name = str(c.get("competitor") or c.get("name") or "")
+        x = _to_float(c.get("avg_price"))
+        y = _to_float(c.get("value_score"), 0.0)
+        cluster = str(c.get("cluster") or "").strip().lower()
+        is_own = cluster == "target" or (baseline_name and name.strip().lower() == baseline_name)
+        if x is None:
+            missing_price_points.append(
+                PositioningPoint(
+                    name=name,
+                    x=0.0,
+                    y=float(y or 0.0),
+                    point_type="own_missing_price" if is_own else "competitor_missing_price",
+                )
+            )
+            continue
         points.append(
             PositioningPoint(
-                name=str(c.get("competitor") or c.get("name") or ""),
-                x=_to_float(c.get("avg_price"), 0.0),
-                y=_to_float(c.get("value_score"), 0.0),
-                point_type="competitor",
+                name=name,
+                x=x,
+                y=float(y or 0.0),
+                point_type="own" if is_own else "competitor",
             )
         )
 
@@ -380,22 +471,47 @@ def _build_positioning(artifacts: Dict[str, Any]) -> PositioningDiagram:
         m = artifacts.get("comparison_matrix")
         br = m.get("baseline_row") if isinstance(m.get("baseline_row"), dict) else None
         if br:
-            points.append(
-                PositioningPoint(
-                    name=str(m.get("baseline_product") or "Own Product"),
-                    x=float(br.get("avg_price") or 0.0),
-                    y=float(br.get("value_score") or 0.0),
-                    point_type="own",
+            x = _to_float(br.get("avg_price"))
+            y = _to_float(br.get("value_score"), 0.0)
+            own_name = str(m.get("baseline_product") or "Own Product")
+            if x is None:
+                missing_price_points.append(
+                    PositioningPoint(
+                        name=own_name,
+                        x=0.0,
+                        y=float(y or 0.0),
+                        point_type="own_missing_price",
+                    )
                 )
-            )
+            else:
+                points.append(
+                    PositioningPoint(
+                        name=own_name,
+                        x=x,
+                        y=float(y or 0.0),
+                        point_type="own",
+                    )
+                )
         for r in (m.get("competitor_rows") or []):
             if not isinstance(r, dict):
+                continue
+            x = _to_float(r.get("avg_price"))
+            y = _to_float(r.get("value_score"), 0.0)
+            if x is None:
+                missing_price_points.append(
+                    PositioningPoint(
+                        name=str(r.get("competitor") or ""),
+                        x=0.0,
+                        y=float(y or 0.0),
+                        point_type="competitor_missing_price",
+                    )
+                )
                 continue
             points.append(
                 PositioningPoint(
                     name=str(r.get("competitor") or ""),
-                    x=float(r.get("avg_price") or 0.0),
-                    y=float(r.get("value_score") or 0.0),
+                    x=x,
+                    y=float(y or 0.0),
                     point_type="competitor",
                 )
             )
@@ -403,11 +519,13 @@ def _build_positioning(artifacts: Dict[str, Any]) -> PositioningDiagram:
     interp = _safe_list_str(pos.get("interpretation"))
     if not interp:
         interp = [str(pos.get("position_label") or "Position im Wettbewerbsraum aus Preis-/Leistungsdaten abgeleitet.")]
+    if missing_price_points:
+        interp.append(f"{len(missing_price_points)} Punkt(e) ohne Preis separat markiert.")
 
     return PositioningDiagram(
         axis_x=axes_x,
         axis_y=axes_y,
-        points=points[:40],
+        points=(points + missing_price_points)[:40],
         interpretation=interp[:8],
     )
 
@@ -529,6 +647,33 @@ def _generate_summary_and_recommendations(provider: str, context: Dict[str, Any]
         warnings=warnings,
     )
     return parsed
+
+
+def _sanitize_recommendation_evidence(
+    recs: List[RecommendationItem],
+    context: Dict[str, Any],
+    artifact_chunks: List[ArtifactChunk],
+) -> List[RecommendationItem]:
+    must_claims = [m for m in _safe_list_str(context.get("must_include_claims")) if m]
+    artifact_refs = [f"{c.artifact}:root" for c in artifact_chunks if c.artifact]
+    allowed_refs = set(must_claims + artifact_refs)
+    fallback_refs = artifact_refs[:2] or ["strategic_analysis:root"]
+
+    out: List[RecommendationItem] = []
+    for r in recs:
+        refs = [x for x in _safe_list_str(r.evidence_refs) if x in allowed_refs]
+        if not refs:
+            refs = fallback_refs
+        out.append(
+            RecommendationItem(
+                title=r.title,
+                action=r.action,
+                priority=r.priority,
+                horizon=r.horizon,
+                evidence_refs=refs[:4],
+            )
+        )
+    return out
 
 
 def _localize_report_german(provider: str, report: FinalReport, warnings: List[str]) -> FinalReport:
@@ -761,6 +906,7 @@ def build_final_report_v0_5(
                 recs.append(RecommendationItem(**r))
             except Exception:
                 continue
+    recs = _sanitize_recommendation_evidence(recs, context, artifact_chunks)
 
     report = FinalReport(
         product_profile_brief=product_brief,

@@ -1,0 +1,6 @@
+{
+  "name": "startup_matchup_step_7_startup_profiles",
+  "description": "Schritt 7: Standardisierte Startup-Profile aus Deep-Research-Rohtexten erzeugen.",
+  "input": "step6_startup_deep_profiles_raw.json und optional step3/step5",
+  "output": "startup_profiles mit Gruendungsjahr, Standort, Technologiefokus, Relevanz"
+}

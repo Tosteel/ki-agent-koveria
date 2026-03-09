@@ -1,0 +1,6 @@
+{
+  "name": "startup_matchup_step_6_startup_deep_research",
+  "description": "Schritt 6: Vertiefte Internetrecherche fuer Top-N Startups.",
+  "input": "step5_startup_ranked_list.json und top_n",
+  "output": "startup_deep_profiles_raw mit query-basierten Rohprofilen"
+}

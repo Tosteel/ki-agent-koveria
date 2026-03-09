@@ -30,7 +30,7 @@ class CompetitorProfileTextV06Request(BaseModel):
     product_profile_path: Optional[str] = None
     provider: str = "brave"
     max_competitors: int = Field(default=200, ge=1, le=1000)
-    brave_enable_research: bool = True
+    brave_enable_research: bool = False
     brave_stream: bool = True
     brave_language: Optional[str] = "de"
     brave_country: Optional[str] = "DE"

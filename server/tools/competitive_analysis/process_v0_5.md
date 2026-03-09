@@ -5,7 +5,7 @@ Diese Pipeline nutzt nur aktuelle Tools aus `server/tools/competitive_analysis` 
 ## Schritt 1: Dokument importieren
 Input: Quelldatei (PDF/DOCX/TXT etc.)  
 Tool: `competitive_parse_document`  
-Output: `parsed_doc.json`
+Output: `step1_parsed_doc.json`
 
 ```json
 {
@@ -20,7 +20,7 @@ Output: `parsed_doc.json`
     {
       "tool": "write_file",
       "args": {
-        "path": "parsed_doc.json",
+        "path": "step1_parsed_doc.json",
         "content": "{{steps[0].payload}}",
         "overwrite": true
       }
@@ -30,9 +30,13 @@ Output: `parsed_doc.json`
 ```
 
 ## Schritt 2: Product Profile extrahieren
-Input: `parsed_doc.json`  
+Input: `step1_parsed_doc.json`  
 Tool: `competitive_extract_product_profile_v0_2`  
-Output: `product_profile.json`
+Output: `step2_product_profile.json`
+
+Hinweis:
+- Ab v0.5 wird zusätzlich `metric_features` erzeugt (z. B. Maße, Gewicht, physikalische Kennwerte).
+- `performance_parameters` bleibt vollständig erhalten; `metric_features` ist eine dedizierte Teilmenge für spätere, wertbasierte Metrik-Analysen.
 
 ```json
 {
@@ -41,7 +45,7 @@ Output: `product_profile.json`
       "tool": "competitive_extract_product_profile_v0_2",
       "args": {
         "parsed_doc": null,
-        "parsed_doc_path": "parsed_doc.json",
+        "parsed_doc_path": "step1_parsed_doc.json",
         "provider": "openai",
         "max_context_chars": 18000
       }
@@ -49,7 +53,7 @@ Output: `product_profile.json`
     {
       "tool": "write_file",
       "args": {
-        "path": "product_profile.json",
+        "path": "step2_product_profile.json",
         "content": "{{steps[0].payload}}",
         "overwrite": true
       }
@@ -59,9 +63,9 @@ Output: `product_profile.json`
 ```
 
 ## Schritt 3: Analyseplan erzeugen
-Input: `product_profile.json`  
+Input: `step2_product_profile.json`  
 Tool: `competitive_generate_analysis_plan_v0_2`  
-Output: `analysis_plan_v0_2.json`
+Output: `step3_analysis_plan_v0_2.json`
 
 ```json
 {
@@ -70,7 +74,7 @@ Output: `analysis_plan_v0_2.json`
       "tool": "competitive_generate_analysis_plan_v0_2",
       "args": {
         "product_profile": null,
-        "product_profile_path": "product_profile.json",
+        "product_profile_path": "step2_product_profile.json",
         "provider": "openai",
         "max_context_chars": 14000
       }
@@ -78,7 +82,7 @@ Output: `analysis_plan_v0_2.json`
     {
       "tool": "write_file",
       "args": {
-        "path": "analysis_plan_v0_2.json",
+        "path": "step3_analysis_plan_v0_2.json",
         "content": "{{steps[0].payload}}",
         "overwrite": true
       }
@@ -88,9 +92,9 @@ Output: `analysis_plan_v0_2.json`
 ```
 
 ## Schritt 4: Wettbewerbsprodukte suchen
-Input: `analysis_plan_v0_2.json`  
+Input: `step3_analysis_plan_v0_2.json`  
 Tool: `competitor_search_v0_5`  
-Output: `competitor_search_results_v0_5.json`
+Output: `step4_competitor_search_results_v0_5.json`
 
 ```json
 {
@@ -99,7 +103,7 @@ Output: `competitor_search_results_v0_5.json`
       "tool": "competitor_search_v0_5",
       "args": {
         "analysis_plan": null,
-        "analysis_plan_path": "analysis_plan_v0_2.json",
+        "analysis_plan_path": "step3_analysis_plan_v0_2.json",
         "provider": "openai",
         "max_queries": 16,
         "per_query_results": 8,
@@ -111,7 +115,7 @@ Output: `competitor_search_results_v0_5.json`
     {
       "tool": "write_file",
       "args": {
-        "path": "competitor_search_results_v0_5.json",
+        "path": "step4_competitor_search_results_v0_5.json",
         "content": "{{steps[0].payload}}",
         "overwrite": true
       }
@@ -121,9 +125,9 @@ Output: `competitor_search_results_v0_5.json`
 ```
 
 ## Schritt 4.1: Wettbewerbsprodukte verdichten (Top-N + Produktfilter)
-Input: `competitor_search_results_v0_5.json`  
+Input: `step4_competitor_search_results_v0_5.json`  
 Tool: `competitor_product_results_v0_6`  
-Output: `competitor_product_results_v0_6.json`
+Output: `step4_1_competitor_product_results_v0_6.json`
 
 Dieser Schritt sortiert nach `relevance_score` (absteigend), filtert per LLM generische/nicht deutsch- oder englischsprachige Treffer heraus und nimmt danach die ersten `top_n` verbleibenden Produkte.
 
@@ -134,7 +138,7 @@ Dieser Schritt sortiert nach `relevance_score` (absteigend), filtert per LLM gen
       "tool": "competitor_product_results_v0_6",
       "args": {
         "competitor_search_results": null,
-        "competitor_search_results_path": "competitor_search_results_v0_5.json",
+        "competitor_search_results_path": "step4_competitor_search_results_v0_5.json",
         "provider": "openai",
         "top_n": 20,
         "verbose_terminal": true
@@ -143,7 +147,7 @@ Dieser Schritt sortiert nach `relevance_score` (absteigend), filtert per LLM gen
     {
       "tool": "write_file",
       "args": {
-        "path": "competitor_product_results_v0_6.json",
+        "path": "step4_1_competitor_product_results_v0_6.json",
         "content": "{{steps[0].payload}}",
         "overwrite": true
       }
@@ -153,9 +157,9 @@ Dieser Schritt sortiert nach `relevance_score` (absteigend), filtert per LLM gen
 ```
 
 ## Schritt 5.1: Wettbewerber-Plaintext mit Brave sammeln
-Input: `competitor_product_results_v0_6.json` + `product_profile.json`  
+Input: `step4_1_competitor_product_results_v0_6.json` + `step2_product_profile.json`  
 Tool: `competitor_profile_text_v0_6`  
-Output: `competitor_profile_text_v0_6.json`
+Output: `step5_1_competitor_profile_text_v0_6.json`
 
 ```json
 {
@@ -164,13 +168,13 @@ Output: `competitor_profile_text_v0_6.json`
       "tool": "competitor_profile_text_v0_6",
       "args": {
         "competitor_product_results": null,
-        "competitor_product_results_path": "competitor_product_results_v0_6.json",
+        "competitor_product_results_path": "step4_1_competitor_product_results_v0_6.json",
         "product_profile": null,
-        "product_profile_path": "product_profile.json",
+        "product_profile_path": "step2_product_profile.json",
         "provider": "brave",
         "max_competitors": 200,
-        "brave_enable_research": true,
-        "brave_stream": false,
+        "brave_enable_research": false,
+        "brave_stream": true,
         "brave_language": "de",
         "brave_country": "DE",
         "verbose_terminal": true
@@ -179,7 +183,7 @@ Output: `competitor_profile_text_v0_6.json`
     {
       "tool": "write_file",
       "args": {
-        "path": "competitor_profile_text_v0_6_backup.json",
+        "path": "step5_1_competitor_profile_text_v0_6.json",
         "content": "{{steps[0].payload}}",
         "overwrite": true
       }
@@ -189,9 +193,12 @@ Output: `competitor_profile_text_v0_6.json`
 ```
 
 ## Schritt 5.2: Plaintext in strukturiertes Profil überführen
-Input: `competitor_profile_text_v0_6.json` + `product_profile.json`  
+Input: `step5_1_competitor_profile_text_v0_6.json` + `step2_product_profile.json`  
 Tool: `competitor_profile_extraction_v0_6`  
-Output: `competitor_profile_extraction_v0_6.json`
+Output: `step5_2_competitor_profile_extraction_v0_6.json`
+
+Hinweis:
+- Die Ausgabe enthält ebenfalls `metric_features`, damit Baseline und Wettbewerber dieselbe Feature-Kategorisierung nutzen.
 
 ```json
 {
@@ -200,9 +207,9 @@ Output: `competitor_profile_extraction_v0_6.json`
       "tool": "competitor_profile_extraction_v0_6",
       "args": {
         "competitor_profile_text": null,
-        "competitor_profile_text_path": "competitor_profile_text_v0_6_backup.json",
+        "competitor_profile_text_path": "step5_1_competitor_profile_text_v0_6.json",
         "product_profile": null,
-        "product_profile_path": "product_profile.json",
+        "product_profile_path": "step2_product_profile.json",
         "provider": "openai",
         "max_competitors": 200,
         "verbose_terminal": true
@@ -211,7 +218,7 @@ Output: `competitor_profile_extraction_v0_6.json`
     {
       "tool": "write_file",
       "args": {
-        "path": "competitor_profile_extraction_v0_6.json",
+        "path": "step5_2_competitor_profile_extraction_v0_6.json",
         "content": "{{steps[0].payload}}",
         "overwrite": true
       }
@@ -221,9 +228,9 @@ Output: `competitor_profile_extraction_v0_6.json`
 ```
 
 ## Schritt 6: Feature Matrix + Gap/USP
-Input: `product_profile.json` + `competitor_profile_extraction_v0_6.json`  
+Input: `step2_product_profile.json` + `step5_2_competitor_profile_extraction_v0_6.json`  
 Tool: `feature_matrix_gap_analysis_v0_5`  
-Output: `feature_matrix_gap_v0_5.json`
+Output: `step6_feature_matrix_gap_v0_5.json`
 
 Restriktionen/Regeln in `feature_matrix_gap_analysis_v0_5`:
 
@@ -242,6 +249,14 @@ Restriktionen/Regeln in `feature_matrix_gap_analysis_v0_5`:
 - `> 0` -> `feature_limited`
 - `== 0` -> `data_gap`
 
+4. Metric-Features als eigene Kategorie (kein binäres Gap/USP)
+- `metric_features` wird separat in der Matrix geführt (`metric_dimensions`, `metric_features` je Row).
+- Für `metric_features` werden keine Gaps/USPs nur aufgrund fehlender Nennung erzeugt.
+- Metrik-Gap/USP wird nur wertbasiert berechnet, wenn:
+- eine klare Zielrichtung vorliegt (aktuell: `lower-is-better`, z. B. Breite/Höhe/Tiefe/Länge/Gewicht),
+- Baseline- und Wettbewerbswerte numerisch vergleichbar sind (inkl. generischer Einheiten-Normalisierung),
+- und genügend Wettbewerbswerte vorhanden sind.
+
 ```json
 {
   "steps": [
@@ -249,16 +264,16 @@ Restriktionen/Regeln in `feature_matrix_gap_analysis_v0_5`:
       "tool": "feature_matrix_gap_analysis_v0_5",
       "args": {
         "product_profile": null,
-        "product_profile_path": "product_profile.json",
+        "product_profile_path": "step2_product_profile.json",
         "competitor_profile_results": null,
-        "competitor_profile_results_path": "competitor_profile_extraction_v0_6.json",
+        "competitor_profile_results_path": "step5_2_competitor_profile_extraction_v0_6.json",
         "provider": "openai"
       }
     },
     {
       "tool": "write_file",
       "args": {
-        "path": "feature_matrix_gap_v0_5.json",
+        "path": "step6_feature_matrix_gap_v0_5.json",
         "content": "{{steps[0].payload}}",
         "overwrite": true
       }
@@ -268,9 +283,9 @@ Restriktionen/Regeln in `feature_matrix_gap_analysis_v0_5`:
 ```
 
 ## Schritt 7: SWOT + Positionierung
-Input: `feature_matrix_gap_v0_5.json`  
+Input: `step6_feature_matrix_gap_v0_5.json`  
 Tool: `stratetic_analysis_swot_positioning_v0_5`  
-Output: `strategic_analysis_v0_5.json`
+Output: `step7_strategic_analysis_v0_5.json`
 
 ```json
 {
@@ -279,7 +294,7 @@ Output: `strategic_analysis_v0_5.json`
       "tool": "stratetic_analysis_swot_positioning_v0_5",
       "args": {
         "feature_matrix_gap": null,
-        "feature_matrix_gap_path": "feature_matrix_gap_v0_5.json",
+        "feature_matrix_gap_path": "step6_feature_matrix_gap_v0_5.json",
         "comparison_matrix": null,
         "gaps_and_usps": null,
         "evidences": null,
@@ -289,7 +304,7 @@ Output: `strategic_analysis_v0_5.json`
     {
       "tool": "write_file",
       "args": {
-        "path": "strategic_analysis_v0_5.json",
+        "path": "step7_strategic_analysis_v0_5.json",
         "content": "{{steps[0].payload}}",
         "overwrite": true
       }
@@ -300,12 +315,16 @@ Output: `strategic_analysis_v0_5.json`
 
 ## Schritt 8: Finalen Analysebericht erzeugen
 Input-Artefakte:  
-- `product_profile.json`  
-- `competitor_profile_extraction_v0_6.json`  
-- `feature_matrix_gap_v0_5.json`  
-- `strategic_analysis_v0_5.json`  
+- `step2_product_profile.json`  
+- `step5_2_competitor_profile_extraction_v0_6.json`  
+- `step6_feature_matrix_gap_v0_5.json`  
+- `step7_strategic_analysis_v0_5.json`  
 Tool: `final_report_generator_v0_5`  
-Output: `final_analysis_report_v0_5.json`
+Output: `step8_final_analysis_report_v0_5.json`
+
+Hinweis:
+- Die Feature-Matrix-Sektion übernimmt `metric_dimensions` als `metric::...`-Dimensionen.
+- `present_features` enthält zusätzlich erkannte `metric_features`.
 
 ```json
 {
@@ -315,13 +334,13 @@ Output: `final_analysis_report_v0_5.json`
       "args": {
         "artifacts": null,
         "artifact_paths": {
-          "product_profile": "product_profile.json",
-          "competitor_profiles": "competitor_profile_extraction_v0_6.json",
-          "comparison_matrix": "feature_matrix_gap_v0_5.json",
-          "gaps_and_usps": "feature_matrix_gap_v0_5.json",
-          "strategic_analysis": "strategic_analysis_v0_5.json",
-          "swot": "strategic_analysis_v0_5.json",
-          "positioning_data": "strategic_analysis_v0_5.json"
+          "product_profile": "step2_product_profile.json",
+          "competitor_profiles": "step5_2_competitor_profile_extraction_v0_6.json",
+          "comparison_matrix": "step6_feature_matrix_gap_v0_5.json",
+          "gaps_and_usps": "step6_feature_matrix_gap_v0_5.json",
+          "strategic_analysis": "step7_strategic_analysis_v0_5.json",
+          "swot": "step7_strategic_analysis_v0_5.json",
+          "positioning_data": "step7_strategic_analysis_v0_5.json"
         },
         "provider": "openai",
         "max_chars_per_artifact": 10000
@@ -330,7 +349,7 @@ Output: `final_analysis_report_v0_5.json`
     {
       "tool": "write_file",
       "args": {
-        "path": "final_analysis_report_v0_5.json",
+        "path": "step8_final_analysis_report_v0_5.json",
         "content": "{{steps[0].payload}}",
         "overwrite": true
       }
@@ -340,9 +359,9 @@ Output: `final_analysis_report_v0_5.json`
 ```
 
 ## Schritt 9: PDF publizieren
-Input: `final_analysis_report_v0_5.json`  
+Input: `step8_final_analysis_report_v0_5.json`  
 Tool: `competitive_publish_pdf_report`  
-Output: `competition_analysis_report_v0_5.pdf`
+Output: `step9_competition_analysis_report_v0_5.pdf`
 
 ```json
 {
@@ -351,13 +370,13 @@ Output: `competition_analysis_report_v0_5.pdf`
       "tool": "competitive_publish_pdf_report",
       "args": {
         "final_report": null,
-        "final_report_path": "final_analysis_report_v0_5.json",
-        "output_path": "competition_analysis_report_v0_5.pdf",
+        "final_report_path": "step8_final_analysis_report_v0_5.json",
+        "output_path": "step9_competition_analysis_report_v0_5.pdf",
         "logo_path": "",
         "report_config_path": "",
         "chart_paths": [],
         "include_render_log": true,
-        "render_log_path": "render_log_v0_5.json"
+        "render_log_path": "step9_render_log_v0_5.json"
       }
     }
   ]

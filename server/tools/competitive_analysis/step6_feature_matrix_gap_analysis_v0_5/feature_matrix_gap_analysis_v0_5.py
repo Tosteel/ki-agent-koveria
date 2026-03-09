@@ -15,7 +15,7 @@ from .models import (
     ClusterAssignmentV05,
     ComparisonMatrixV05,
     CompetitorRowV05,
-    FeatureMatrxGapAnalysisV05Result,
+    FeatureMatrixGapAnalysisV05Result,
     GapItemV05,
     GapsAndUspsV05,
     PerformanceCellV05,
@@ -142,15 +142,93 @@ def _feature_name(item: Any, *, fallback: str = "") -> str:
 
 def _collect_performance_dims(product: Dict[str, Any], competitors: List[Dict[str, Any]]) -> List[str]:
     dims = set()
+    metric_dims_norm = set(_norm(x) for x in _collect_metric_dims(product, competitors))
     for x in (product.get("performance_parameters") or []):
         n = _feature_name(x)
-        if n:
+        if n and _norm(n) not in metric_dims_norm:
             dims.add(n)
     for c in competitors:
         for x in (c.get("performance_parameters") or []):
             n = _feature_name(x)
-            if n:
+            if n and _norm(n) not in metric_dims_norm:
                 dims.add(n)
+    return sorted(dims, key=lambda s: s.lower())
+
+
+_LOWER_BETTER_NAME_HINTS = (
+    "width",
+    "height",
+    "depth",
+    "length",
+    "thickness",
+    "diameter",
+    "size",
+    "footprint",
+    "weight",
+    "mass",
+)
+
+_METRIC_UNIT_HINTS = {
+    "mm",
+    "cm",
+    "m",
+    "km",
+    "in",
+    "inch",
+    "ft",
+    "g",
+    "kg",
+    "lb",
+    "oz",
+    "ml",
+    "l",
+    "bar",
+    "psi",
+    "pa",
+    "kpa",
+    "mpa",
+    "w",
+    "kw",
+    "hz",
+    "khz",
+    "mhz",
+}
+
+
+def _is_metric_feature_name_unit(name: str, unit: str) -> bool:
+    n = _norm(name)
+    u = _norm(unit)
+    if not n:
+        return False
+    if any(tok in n for tok in _LOWER_BETTER_NAME_HINTS):
+        return True
+    return u in _METRIC_UNIT_HINTS
+
+
+def _collect_metric_dims(product: Dict[str, Any], competitors: List[Dict[str, Any]]) -> List[str]:
+    dims = set()
+
+    def _from_item_list(items: List[Dict[str, Any]]) -> None:
+        for x in items:
+            if not isinstance(x, dict):
+                continue
+            n = _feature_name(x)
+            if not n:
+                continue
+            if _is_metric_feature_name_unit(n, str(x.get("unit") or "")):
+                dims.add(n)
+
+    # Primary source: explicit metric_features from step 2+/5+.
+    _from_item_list(product.get("metric_features") or [])
+    for c in competitors:
+        _from_item_list(c.get("metric_features") or [])
+
+    # Backward compatible fallback: derive from performance_parameters if needed.
+    if not dims:
+        _from_item_list(product.get("performance_parameters") or [])
+        for c in competitors:
+            _from_item_list(c.get("performance_parameters") or [])
+
     return sorted(dims, key=lambda s: s.lower())
 
 
@@ -222,6 +300,18 @@ def _perf_map(items: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+def _metric_map(items: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    for x in items:
+        if not isinstance(x, dict):
+            continue
+        n = _feature_name(x)
+        if not n:
+            continue
+        out[_norm(n)] = x
+    return out
+
+
 def _price_map(items: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     out: Dict[str, Dict[str, Any]] = {}
     for x in items:
@@ -251,18 +341,79 @@ def _soft_map(items: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+_UNIT_FACTOR: Dict[str, tuple[str, float]] = {
+    # length -> m
+    "mm": ("length_m", 0.001),
+    "cm": ("length_m", 0.01),
+    "m": ("length_m", 1.0),
+    "km": ("length_m", 1000.0),
+    "in": ("length_m", 0.0254),
+    "inch": ("length_m", 0.0254),
+    "ft": ("length_m", 0.3048),
+    # mass -> kg
+    "mg": ("mass_kg", 0.000001),
+    "g": ("mass_kg", 0.001),
+    "kg": ("mass_kg", 1.0),
+    "lb": ("mass_kg", 0.45359237),
+    "oz": ("mass_kg", 0.028349523125),
+    # volume -> l
+    "ml": ("volume_l", 0.001),
+    "cl": ("volume_l", 0.01),
+    "dl": ("volume_l", 0.1),
+    "l": ("volume_l", 1.0),
+    "lt": ("volume_l", 1.0),
+    # pressure -> bar
+    "bar": ("pressure_bar", 1.0),
+    "kpa": ("pressure_bar", 0.01),
+    "mpa": ("pressure_bar", 10.0),
+    "pa": ("pressure_bar", 0.00001),
+    "psi": ("pressure_bar", 0.0689475729),
+    # power -> w
+    "w": ("power_w", 1.0),
+    "kw": ("power_w", 1000.0),
+    # frequency -> hz
+    "hz": ("frequency_hz", 1.0),
+    "khz": ("frequency_hz", 1000.0),
+    "mhz": ("frequency_hz", 1000000.0),
+}
+
+
+def _to_metric_value(v: Any, unit: str) -> tuple[Optional[float], Optional[str]]:
+    fv = _to_float(v)
+    if fv is None:
+        return None, None
+    u = _norm(unit)
+    if not u:
+        return fv, None
+    mapped = _UNIT_FACTOR.get(u)
+    if not mapped:
+        return fv, u
+    family, factor = mapped
+    return fv * factor, family
+
+
+def _preferred_direction_for_metric(feature_name: str) -> Optional[str]:
+    n = _norm(feature_name)
+    if any(tok in n for tok in _LOWER_BETTER_NAME_HINTS):
+        return "lower"
+    return None
+
+
 def _build_row(
     *,
     competitor: str,
     cluster: str,
     perf_items: List[Dict[str, Any]],
+    metric_items: List[Dict[str, Any]],
     price_items: List[Dict[str, Any]],
     soft_items: List[Dict[str, Any]],
     perf_dims: List[str],
+    metric_dims: List[str],
     price_dims: List[str],
     soft_dims: List[str],
 ) -> CompetitorRowV05:
     pmap = _perf_map(perf_items)
+    mmap = _metric_map(metric_items)
     prmap = _price_map(price_items)
     smap = _soft_map(soft_items)
 
@@ -278,6 +429,26 @@ def _build_row(
         if present:
             perf_present += 1
         perf_cells.append(
+            PerformanceCellV05(
+                name=d,
+                value=v,
+                unit=str(m.get("unit") or "").strip(),
+                present=present,
+            )
+        )
+
+    metric_cells: List[PerformanceCellV05] = []
+    metric_present = 0
+    for d in metric_dims:
+        m = mmap.get(_norm(d)) or pmap.get(_norm(d))
+        if not m:
+            metric_cells.append(PerformanceCellV05(name=d, value=None, unit="", present=False))
+            continue
+        v = m.get("value")
+        present = v not in (None, "")
+        if present:
+            metric_present += 1
+        metric_cells.append(
             PerformanceCellV05(
                 name=d,
                 value=v,
@@ -318,9 +489,13 @@ def _build_row(
         soft_cells.append(SoftFeatureCellV05(name=d, available=available))
 
     cov_perf = (perf_present / max(1, len(perf_dims))) if perf_dims else 0.0
+    cov_metric = (metric_present / max(1, len(metric_dims))) if metric_dims else 0.0
     cov_price = (price_present / max(1, len(price_dims))) if price_dims else 0.0
     cov_soft = (soft_present / max(1, len(soft_dims))) if soft_dims else 0.0
-    coverage = (cov_perf + cov_price + cov_soft) / 3.0
+    coverage_components = [cov_perf, cov_price, cov_soft]
+    if metric_dims:
+        coverage_components.append(cov_metric)
+    coverage = sum(coverage_components) / max(1, len(coverage_components))
 
     avg_price = _avg_price_from_indicators(price_items)
     value_score = coverage
@@ -331,6 +506,7 @@ def _build_row(
         competitor=competitor,
         cluster=cluster,
         performance_parameters=perf_cells,
+        metric_features=metric_cells,
         price_indicators=price_cells,
         soft_features=soft_cells,
         avg_price=avg_price,
@@ -362,6 +538,18 @@ def _presence_ratio_soft(rows: List[CompetitorRowV05], dim: str) -> float:
     return present / len(rows)
 
 
+def _presence_ratio_metric(rows: List[CompetitorRowV05], dim: str) -> float:
+    if not rows:
+        return 0.0
+    k = _norm(dim)
+    present = 0
+    for r in rows:
+        c = next((x for x in r.metric_features if _norm(x.name) == k), None)
+        if c and c.present:
+            present += 1
+    return present / len(rows)
+
+
 def _presence_ratio_price(rows: List[CompetitorRowV05], dim: str) -> float:
     if not rows:
         return 0.0
@@ -378,6 +566,7 @@ def _presence_ratio_for_group(
     group: str,
     feature: str,
     perf_dims: List[str],
+    metric_dims: List[str],
     soft_dims: List[str],
     price_dims: List[str],
     comp_rows: List[CompetitorRowV05],
@@ -386,11 +575,30 @@ def _presence_ratio_for_group(
     if group == "performance_parameters":
         d = next((x for x in perf_dims if _norm(x) == k), feature)
         return _presence_ratio_perf(comp_rows, d)
+    if group == "metric_features":
+        d = next((x for x in metric_dims if _norm(x) == k), feature)
+        return _presence_ratio_metric(comp_rows, d)
     if group == "soft_features":
         d = next((x for x in soft_dims if _norm(x) == k), feature)
         return _presence_ratio_soft(comp_rows, d)
     d = next((x for x in price_dims if _norm(x) == k), feature)
     return _presence_ratio_price(comp_rows, d)
+
+
+def _find_metric_cell(row: CompetitorRowV05, dim: str) -> Optional[PerformanceCellV05]:
+    k = _norm(dim)
+    return next((x for x in row.metric_features if _norm(x.name) == k), None)
+
+
+def _median(values: List[float]) -> Optional[float]:
+    if not values:
+        return None
+    xs = sorted(values)
+    n = len(xs)
+    mid = n // 2
+    if n % 2 == 1:
+        return xs[mid]
+    return (xs[mid - 1] + xs[mid]) / 2.0
 
 
 def _llm_refine_gaps_v05(provider: str, payload: Dict[str, Any], warnings: List[str]) -> Dict[str, Any]:
@@ -404,7 +612,7 @@ def _llm_refine_gaps_v05(provider: str, payload: Dict[str, Any], warnings: List[
                     "type": "object",
                     "additionalProperties": False,
                     "properties": {
-                        "feature_group": {"type": "string", "enum": ["performance_parameters", "price_indicators", "soft_features"]},
+                        "feature_group": {"type": "string", "enum": ["performance_parameters", "metric_features", "price_indicators", "soft_features"]},
                         "feature": {"type": "string"},
                         "recommendation": {"type": "string"},
                     },
@@ -417,7 +625,7 @@ def _llm_refine_gaps_v05(provider: str, payload: Dict[str, Any], warnings: List[
                     "type": "object",
                     "additionalProperties": False,
                     "properties": {
-                        "feature_group": {"type": "string", "enum": ["performance_parameters", "price_indicators", "soft_features"]},
+                        "feature_group": {"type": "string", "enum": ["performance_parameters", "metric_features", "price_indicators", "soft_features"]},
                         "feature": {"type": "string"},
                         "rationale": {"type": "string"},
                     },
@@ -485,7 +693,7 @@ def _llm_refine_gaps_v05(provider: str, payload: Dict[str, Any], warnings: List[
     return {}
 
 
-def run_feature_matrx_gap_analysis_v0_5(
+def run_feature_matrix_gap_analysis_v0_5(
     *,
     product_profile: Optional[Dict[str, Any]],
     product_profile_path: Optional[str],
@@ -494,7 +702,7 @@ def run_feature_matrx_gap_analysis_v0_5(
     provider: str = "openai",
     user_root: Path,
     work_root: Path,
-) -> FeatureMatrxGapAnalysisV05Result:
+) -> FeatureMatrixGapAnalysisV05Result:
     product = _load_json_obj(
         inline_obj=product_profile,
         path=product_profile_path,
@@ -515,6 +723,7 @@ def run_feature_matrx_gap_analysis_v0_5(
     competitors = comp_payload.get("competitors") if isinstance(comp_payload.get("competitors"), list) else []
     competitors = [c for c in competitors if isinstance(c, dict)]
 
+    metric_dims = _collect_metric_dims(product, competitors)
     perf_dims = _collect_performance_dims(product, competitors)
     price_dims = _collect_price_dims(product, competitors)
     soft_dims = _collect_soft_dims(product, competitors)
@@ -524,9 +733,11 @@ def run_feature_matrx_gap_analysis_v0_5(
         competitor=baseline_name,
         cluster="target",
         perf_items=product.get("performance_parameters") if isinstance(product.get("performance_parameters"), list) else [],
+        metric_items=product.get("metric_features") if isinstance(product.get("metric_features"), list) else [],
         price_items=product.get("price_indicators") if isinstance(product.get("price_indicators"), list) else [],
         soft_items=product.get("soft_features") if isinstance(product.get("soft_features"), list) else [],
         perf_dims=perf_dims,
+        metric_dims=metric_dims,
         price_dims=price_dims,
         soft_dims=soft_dims,
     )
@@ -539,9 +750,11 @@ def run_feature_matrx_gap_analysis_v0_5(
             competitor=name,
             cluster=cluster,
             perf_items=c.get("performance_parameters") if isinstance(c.get("performance_parameters"), list) else [],
+            metric_items=c.get("metric_features") if isinstance(c.get("metric_features"), list) else [],
             price_items=c.get("price_indicators") if isinstance(c.get("price_indicators"), list) else [],
             soft_items=c.get("soft_features") if isinstance(c.get("soft_features"), list) else [],
             perf_dims=perf_dims,
+            metric_dims=metric_dims,
             price_dims=price_dims,
             soft_dims=soft_dims,
         )
@@ -551,6 +764,7 @@ def run_feature_matrx_gap_analysis_v0_5(
         provider=str(provider or "openai").strip().lower(),
         baseline_product=baseline_name,
         performance_dimensions=perf_dims,
+        metric_dimensions=metric_dims,
         price_dimensions=price_dims,
         soft_feature_dimensions=soft_dims,
         baseline_row=baseline_row,
@@ -564,6 +778,7 @@ def run_feature_matrx_gap_analysis_v0_5(
 
     # Deterministic baseline presence maps.
     base_perf_present = {_norm(x.name): bool(x.present) for x in baseline_row.performance_parameters}
+    base_metric_present = {_norm(x.name): bool(x.present) for x in baseline_row.metric_features}
     base_soft_present = {_norm(x.name): bool(x.available) for x in baseline_row.soft_features}
     base_price_present = {_norm(x.context): bool(x.present) for x in baseline_row.price_indicators}
 
@@ -588,10 +803,75 @@ def run_feature_matrx_gap_analysis_v0_5(
                 UspItemV05(
                     feature_group="performance_parameters",
                     feature=d,
+                    market_presence_ratio=ratio,
+                    rarity_score=round(1.0 - ratio, 4),
                     rationale="Beim Zielprodukt vorhanden, in Wettbewerbern selten.",
                 )
             )
             differentiators.append(d)
+
+    # Metric features: no binary gap/USP from mention alone.
+    # Only evaluate where a clear optimization direction exists and numeric values are comparable.
+    metric_margin = 0.05  # 5% difference required to avoid noise-driven classifications.
+    for d in metric_dims:
+        ratio = round(_presence_ratio_metric(comp_rows, d), 4)
+        if ratio >= 0.5:
+            market_standards.append(d)
+
+        direction = _preferred_direction_for_metric(d)
+        if direction is None:
+            continue
+
+        base_cell = _find_metric_cell(baseline_row, d)
+        if not base_cell or not base_cell.present:
+            continue
+
+        base_value, base_family = _to_metric_value(base_cell.value, base_cell.unit)
+        if base_value is None:
+            continue
+
+        comp_values: List[float] = []
+        for r in comp_rows:
+            c = _find_metric_cell(r, d)
+            if not c or not c.present:
+                continue
+            v, fam = _to_metric_value(c.value, c.unit)
+            if v is None:
+                continue
+            # If both sides have known physical families, require same family.
+            if base_family and fam and base_family != fam:
+                continue
+            comp_values.append(v)
+
+        if len(comp_values) < 2:
+            continue
+
+        comp_median = _median(comp_values)
+        if comp_median is None or comp_median <= 0:
+            continue
+
+        if direction == "lower":
+            if base_value <= comp_median * (1.0 - metric_margin):
+                usps.append(
+                    UspItemV05(
+                        feature_group="metric_features",
+                        feature=d,
+                        market_presence_ratio=ratio,
+                        rarity_score=round(1.0 - ratio, 4),
+                        rationale="Beim Zielprodukt messbar vorteilhafter als der Wettbewerbsmedian.",
+                    )
+                )
+                differentiators.append(d)
+            elif base_value >= comp_median * (1.0 + metric_margin):
+                gaps.append(
+                    GapItemV05(
+                        feature_group="metric_features",
+                        feature=d,
+                        status="value_gap",
+                        market_presence_ratio=ratio,
+                        recommendation="Metrikwert im Vergleich zum Wettbewerbsniveau verbessern.",
+                    )
+                )
 
     for d in price_dims:
         ratio = round(_presence_ratio_price(comp_rows, d), 4)
@@ -630,6 +910,8 @@ def run_feature_matrx_gap_analysis_v0_5(
                 UspItemV05(
                     feature_group="soft_features",
                     feature=d,
+                    market_presence_ratio=ratio,
+                    rarity_score=round(1.0 - ratio, 4),
                     rationale="Beim Zielprodukt vorhanden, in Wettbewerbern selten.",
                 )
             )
@@ -674,25 +956,41 @@ def run_feature_matrx_gap_analysis_v0_5(
             for i, u in enumerate(usps):
                 repl = usp_text_map.get((u.feature_group, _norm(u.feature)))
                 if repl:
-                    usps[i] = UspItemV05(feature_group=u.feature_group, feature=u.feature, rationale=repl)
+                    usps[i] = UspItemV05(
+                        feature_group=u.feature_group,
+                        feature=u.feature,
+                        market_presence_ratio=u.market_presence_ratio,
+                        rarity_score=u.rarity_score,
+                        rationale=repl,
+                    )
         except Exception as exc:
             warnings.append(f"LLM structured output invalid ({exc}).")
 
     # Prioritize and cap USPs to avoid inflated long lists.
     usp_ranked: List[tuple[float, UspItemV05]] = []
     for u in usps:
-        ratio = _presence_ratio_for_group(u.feature_group, u.feature, perf_dims, soft_dims, price_dims, comp_rows)
+        ratio = u.market_presence_ratio
+        if ratio is None:
+            ratio = _presence_ratio_for_group(u.feature_group, u.feature, perf_dims, metric_dims, soft_dims, price_dims, comp_rows)
         rarity = 1.0 - ratio
         group_weight = 1.0
         if u.feature_group == "soft_features":
             group_weight = 0.9
+        elif u.feature_group == "metric_features":
+            group_weight = 0.95
         elif u.feature_group == "price_indicators":
             group_weight = 0.8
         usp_ranked.append((rarity * group_weight, u))
     usp_ranked.sort(key=lambda x: x[0], reverse=True)
     usps = [u for _, u in usp_ranked[:10]]
     usp_keys = {(_norm(u.feature_group), _norm(u.feature)) for u in usps}
-    differentiators = [d for d in differentiators if (_norm("soft_features"), _norm(d)) in usp_keys or (_norm("performance_parameters"), _norm(d)) in usp_keys]
+    differentiators = [
+        d
+        for d in differentiators
+        if (_norm("soft_features"), _norm(d)) in usp_keys
+        or (_norm("performance_parameters"), _norm(d)) in usp_keys
+        or (_norm("metric_features"), _norm(d)) in usp_keys
+    ]
 
     cluster_assignment: List[ClusterAssignmentV05] = []
     priced = [r for r in comp_rows if isinstance(r.avg_price, (int, float))]
@@ -734,6 +1032,9 @@ def run_feature_matrx_gap_analysis_v0_5(
         if g.feature_group == "performance_parameters" and base_perf_present.get(k, False):
             warnings.append(f"Removed contradictory gap '{g.feature}' (present in baseline performance).")
             continue
+        if g.feature_group == "metric_features" and not base_metric_present.get(k, False):
+            warnings.append(f"Removed invalid metric gap '{g.feature}' (missing in baseline metrics).")
+            continue
         if g.feature_group == "soft_features" and base_soft_present.get(k, False):
             warnings.append(f"Removed contradictory gap '{g.feature}' (present in baseline soft features).")
             continue
@@ -748,6 +1049,9 @@ def run_feature_matrx_gap_analysis_v0_5(
         k = _norm(u.feature)
         if u.feature_group == "performance_parameters" and not base_perf_present.get(k, False):
             warnings.append(f"Removed invalid USP '{u.feature}' (missing in baseline performance).")
+            continue
+        if u.feature_group == "metric_features" and not base_metric_present.get(k, False):
+            warnings.append(f"Removed invalid USP '{u.feature}' (missing in baseline metrics).")
             continue
         if u.feature_group == "soft_features" and not base_soft_present.get(k, False):
             warnings.append(f"Removed invalid USP '{u.feature}' (missing in baseline soft features).")
@@ -776,8 +1080,30 @@ def run_feature_matrx_gap_analysis_v0_5(
         differentiators=_dedupe(differentiators),
     )
 
-    return FeatureMatrxGapAnalysisV05Result(
+    return FeatureMatrixGapAnalysisV05Result(
         comparison_matrix=matrix,
         gaps_and_usps=gaps_usps,
         cluster_assignment=cluster_assignment,
+    )
+
+
+# Backward-compatible alias for older imports.
+def run_feature_matrx_gap_analysis_v0_5(
+    *,
+    product_profile: Optional[Dict[str, Any]],
+    product_profile_path: Optional[str],
+    competitor_profile_results: Optional[Dict[str, Any]],
+    competitor_profile_results_path: Optional[str],
+    provider: str = "openai",
+    user_root: Path,
+    work_root: Path,
+) -> FeatureMatrixGapAnalysisV05Result:
+    return run_feature_matrix_gap_analysis_v0_5(
+        product_profile=product_profile,
+        product_profile_path=product_profile_path,
+        competitor_profile_results=competitor_profile_results,
+        competitor_profile_results_path=competitor_profile_results_path,
+        provider=provider,
+        user_root=user_root,
+        work_root=work_root,
     )

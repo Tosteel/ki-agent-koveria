@@ -1,0 +1,6 @@
+{
+  "name": "startup_matchup_step_3_gap_analysis",
+  "description": "Schritt 3: Gap-Analyse zwischen Innovationszielen und Unternehmensprofil, inklusive Startup-Suchfelder und Queries.",
+  "input": "step1_workshop_analysis.json und step2_company_profile.json",
+  "output": "gap_analysis mit identified_gaps, innovation_opportunities, startup_search_fields, startup_search_queries"
+}

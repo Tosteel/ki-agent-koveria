@@ -525,6 +525,57 @@ def _to_soft_features(raw: Any) -> List[SoftFeature]:
     return out
 
 
+_METRIC_NAME_HINTS = {
+    "width",
+    "height",
+    "depth",
+    "length",
+    "diameter",
+    "radius",
+    "thickness",
+    "size",
+    "dimension",
+    "weight",
+    "mass",
+    "volume",
+    "capacity",
+    "tank",
+    "reservoir",
+    "clearance",
+}
+_METRIC_UNIT_HINTS = {"mm", "cm", "m", "in", "inch", "kg", "g", "lb", "l", "ml", "cl", "oz"}
+
+
+def _is_metric_feature(name: str, unit: str) -> bool:
+    n = " ".join(str(name or "").strip().lower().replace("_", " ").split())
+    u = " ".join(str(unit or "").strip().lower().replace("_", " ").split())
+    if not n:
+        return False
+    if any(h in n for h in _METRIC_NAME_HINTS):
+        return True
+    if u in _METRIC_UNIT_HINTS:
+        return True
+    if any(f" {h}" in f" {u}" for h in _METRIC_UNIT_HINTS):
+        return True
+    return False
+
+
+def _derive_metric_features(normalized: List[NormalizedFeature]) -> List[NormalizedFeature]:
+    out: List[NormalizedFeature] = []
+    seen: set[str] = set()
+    for f in normalized or []:
+        if not isinstance(f, NormalizedFeature):
+            continue
+        if not _is_metric_feature(f.name, f.unit):
+            continue
+        key = f"{f.name.lower()}|{f.normalized_value}|{f.normalized_unit.lower()}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(f)
+    return out
+
+
 
 def extract_feature_claim_profile_v0_2(
     *,
@@ -625,6 +676,8 @@ def extract_feature_claim_profile_v0_2(
         normalized_features=normalized_features,
         performance_parameters=performance_parameters,
     )
+    # metric_features are derived directly from normalized_features (same source principle as performance/soft extraction).
+    metric_features = _derive_metric_features(normalized_features)
 
     # Step 3: price_indicators
     price_context = json.dumps(
@@ -768,6 +821,7 @@ def extract_feature_claim_profile_v0_2(
     quality_report = ExtractionQualityReport(
         normalized_features_count=len(normalized_features),
         performance_parameters_count=len(performance_parameters),
+        metric_features_count=len(metric_features),
         price_indicators_count=len(price_indicators),
         claims_count=len(claims),
         soft_features_count=len(soft_features),
@@ -781,6 +835,7 @@ def extract_feature_claim_profile_v0_2(
         metadata=metadata,
         normalized_features=normalized_features,
         performance_parameters=performance_parameters,
+        metric_features=metric_features,
         price_indicators=price_indicators,
         claims=claims,
         soft_features=soft_features,

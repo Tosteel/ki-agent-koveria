@@ -11,6 +11,7 @@ from server.tools.competitive_analysis.backup.competitor_identification import (
     _load_json_obj,
 )
 from server.tools.competitive_analysis.step5_competitor_profile_extraction_v0_5.competitor_profile_extraction_v0_5 import (
+    _derive_metric_features_from_perf,
     _llm_schema,
     _merge_claims,
     _merge_differentiators,
@@ -19,6 +20,7 @@ from server.tools.competitive_analysis.step5_competitor_profile_extraction_v0_5.
     _merge_soft,
     _template_claims,
     _template_differentiators,
+    _template_metric,
     _template_perf,
     _template_price,
     _template_soft,
@@ -66,6 +68,7 @@ def _llm_extract_structured(
     product: Dict[str, Any],
     plain_text: str,
     perf_template: List[FeatureValue],
+    metric_template: List[FeatureValue],
     price_template: List[PriceIndicatorValue],
     soft_template: List[SoftFeatureValue],
     claims_template: List[ClaimValue],
@@ -75,6 +78,7 @@ def _llm_extract_structured(
         "Extract structured competitor profile data from plain text. "
         "Return strict JSON according to schema. "
         "Use reference template names where possible. "
+        "Map physical measurable specs to metric_features when applicable. "
         "Only use explicitly present evidence from plain_text."
     )
     user_payload = {
@@ -82,6 +86,7 @@ def _llm_extract_structured(
         "plain_text": str(plain_text or "")[:40000],
         "reference_templates": {
             "performance_parameters": [x.model_dump() for x in perf_template],
+            "metric_features": [x.model_dump() for x in metric_template],
             "price_indicators": [x.model_dump() for x in price_template],
             "soft_features": [x.model_dump() for x in soft_template],
             "claims": [x.model_dump() for x in claims_template],
@@ -169,7 +174,15 @@ def extract_competitor_profiles_v0_6(
     competitors_raw = [c for c in competitors_raw if isinstance(c, dict)]
     limit = max(1, int(max_competitors))
 
+    non_empty_plain = sum(1 for c in competitors_raw if _clean_text(str(c.get("plain_text") or "")))
+    if competitors_raw and non_empty_plain == 0:
+        warnings.append(
+            "v0.6 input check: 0 nicht-leere plain_text-Einträge in competitor_profile_text. "
+            "Prüfe competitor_profile_text_path (erwartet: Output aus Schritt 5.1)."
+        )
+
     perf_template = _template_perf(profile)
+    metric_template = _template_metric(profile, perf_template)
     price_template = _template_price(profile)
     soft_template = _template_soft(profile)
     claims_template = _template_claims(profile)
@@ -201,6 +214,7 @@ def extract_competitor_profiles_v0_6(
             },
             plain_text=plain_text,
             perf_template=[FeatureValue(name=x.name, value=x.value, unit=x.unit) for x in perf_template],
+            metric_template=[FeatureValue(name=x.name, value=x.value, unit=x.unit) for x in metric_template],
             price_template=[
                 PriceIndicatorValue(raw=x.raw, value=x.value, currency=x.currency, period=x.period, context=x.context)
                 for x in price_template
@@ -238,6 +252,20 @@ def extract_competitor_profiles_v0_6(
         # _merge_* helpers are imported from v0.5 and return v0.5 model instances.
         # Convert explicitly into v0.6 model instances to avoid cross-model validation errors.
         perf_v06 = [FeatureValue(**(x.model_dump() if hasattr(x, "model_dump") else dict(x))) for x in perf]
+        metric_merged = _merge_perf(
+            [FeatureValue(name=x.name, value=x.value, unit=x.unit) for x in metric_template],
+            enriched.get("metric_features") if enriched else None,
+        )
+        derived_metric = _derive_metric_features_from_perf(perf)
+        if derived_metric:
+            metric_merged = _merge_perf(
+                [FeatureValue(name=x.name, value=x.value, unit=x.unit) for x in metric_merged],
+                [x.model_dump() if hasattr(x, "model_dump") else dict(x) for x in derived_metric],
+            )
+        metric_v06 = [
+            FeatureValue(**(x.model_dump() if hasattr(x, "model_dump") else dict(x)))
+            for x in (metric_merged or metric_template)
+        ]
         price_v06 = [PriceIndicatorValue(**(x.model_dump() if hasattr(x, "model_dump") else dict(x))) for x in price]
         soft_v06 = [SoftFeatureValue(**(x.model_dump() if hasattr(x, "model_dump") else dict(x))) for x in soft]
         claims_v06 = [ClaimValue(**(x.model_dump() if hasattr(x, "model_dump") else dict(x))) for x in claims]
@@ -249,6 +277,7 @@ def extract_competitor_profiles_v0_6(
                 url=url,
                 url_type=url_type,
                 performance_parameters=perf_v06,
+                metric_features=metric_v06,
                 price_indicators=price_v06,
                 soft_features=soft_v06,
                 claims=claims_v06,

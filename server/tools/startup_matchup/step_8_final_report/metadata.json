@@ -1,0 +1,6 @@
+{
+  "name": "startup_matchup_step_8_final_report",
+  "description": "Schritt 8: Zusammenfuehrung der Artefakte zu einem strukturierten Abschlussbericht (JSON).",
+  "input": "step1, step2, step3, step5, step7",
+  "output": "final_report mit empfohlenen Startups inkl. Ranking"
+}

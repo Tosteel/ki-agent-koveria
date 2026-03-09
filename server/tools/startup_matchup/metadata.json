@@ -1,0 +1,7 @@
+{
+  "name": "startup_matchup_workflow",
+  "version": "0.1",
+  "description": "Workflow zur systematischen Identifikation, Bewertung und Priorisierung von Startup-Kooperationspartnern.",
+  "input": "Workshop-Unterlagen und Unternehmenskontext",
+  "output": "Strukturierter Abschlussbericht (JSON) und PDF mit empfohlenen Startups"
+}
