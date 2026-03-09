@@ -37,29 +37,30 @@ class ToolDef:
 @lru_cache(maxsize=1)
 def _load_tool_metadata_map() -> Dict[str, Dict[str, Any]]:
     out: Dict[str, Dict[str, Any]] = {}
-    base_dir = Path(__file__).resolve().parents[1] / "tools"
-    if not base_dir.exists():
-        return out
 
-    for path in base_dir.rglob("metadata.json"):
-        if not path.is_file():
+    project_server_dir = Path(__file__).resolve().parents[1]
+    for base_dir in (project_server_dir / "tools", project_server_dir / "workflows"):
+        if not base_dir.exists():
             continue
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        if not isinstance(raw, dict):
-            continue
-        tool_name = str(path.parent.name or "").strip()
-        if not tool_name:
-            continue
-        display_name = str(raw.get("name") or tool_name).strip() or tool_name
-        out[tool_name] = {
-            "name": display_name,
-            "description": str(raw.get("description") or "").strip(),
-            "input": str(raw.get("input") or "").strip(),
-            "output": str(raw.get("output") or "").strip(),
-        }
+        for path in base_dir.rglob("metadata.json"):
+            if not path.is_file():
+                continue
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(raw, dict):
+                continue
+            tool_name = str(path.parent.name or "").strip()
+            if not tool_name:
+                continue
+            display_name = str(raw.get("name") or tool_name).strip() or tool_name
+            out[tool_name] = {
+                "name": display_name,
+                "description": str(raw.get("description") or "").strip(),
+                "input": str(raw.get("input") or "").strip(),
+                "output": str(raw.get("output") or "").strip(),
+            }
     return out
 
 
