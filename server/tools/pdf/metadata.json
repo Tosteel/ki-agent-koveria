@@ -1,0 +1,25 @@
+{
+  "name": "PDF",
+  "version": "1.0",
+  "description": "PDF-Dateien exportieren und lesen.",
+  "tools": {
+    "pdf_export": {
+      "name": "PDF Export",
+      "input": "output_path, title, text",
+      "output": "output_path (.pdf), bytes_written",
+      "capabilities": ["artifact_export"],
+      "side_effect_level": "low",
+      "result_contract": {
+        "success_if_any": ["output_path", "bytes_written"]
+      },
+      "allows_goal_injection": false
+    },
+    "read_pdf": {
+      "name": "PDF Lesen",
+      "input": "path, optional max_chars",
+      "output": "text, pages, chars",
+      "capabilities": ["artifact_read"],
+      "side_effect_level": "none"
+    }
+  }
+}

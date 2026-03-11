@@ -1,8 +1,13 @@
 {
   "name": "PowerPoint",
-  "version": "0.1",
-  "description": "Durchsucht die RAG-Wissensbasis mit semantischer Query und liefert Treffer.",
-  "input": "query (string, required), top_k (int, optional), classification (string, optional)",
-  "output": "Trefferliste mit Quellen/Scores/Textausschnitten; zusätzlich textuelle Zusammenfassung im Feld text."
+  "version": "1.0",
+  "description": "Exportiert Inhalte als PowerPoint-Datei.",
+  "input": "output_path, title, text",
+  "output": "output_path (.pptx), created",
+  "capabilities": ["artifact_export"],
+  "side_effect_level": "low",
+  "quality_signals": {
+    "min_text_length": 40
+  },
+  "allows_goal_injection": false
 }
-

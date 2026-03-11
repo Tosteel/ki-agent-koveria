@@ -1,0 +1,41 @@
+{
+  "name": "Browser",
+  "version": "1.0",
+  "description": "Durchsucht Webseiten (einzeln oder über Navigation).",
+  "tools": {
+    "view_website": {
+      "name": "Website nur unter dem angegebenen Link ansehen",
+      "input": "url, query, optional selector/max_matches",
+      "output": "Treffer inkl. Textstellen/Links",
+      "capabilities": ["web_search"],
+      "side_effect_level": "none",
+      "retry_policy": {
+        "max_retries": 1,
+        "backoff_ms": 250,
+        "retry_on": ["timeout", "connection_error", "rate_limit"]
+      },
+      "quality_signals": {
+        "min_hits": 1,
+        "require_sources": true,
+        "min_text_length": 80
+      }
+    },
+    "browse_website": {
+      "name": "Website umfangreich browsen",
+      "input": "url, query, optional click/select settings",
+      "output": "Treffer über mehrere Seiten",
+      "capabilities": ["web_search"],
+      "side_effect_level": "none",
+      "retry_policy": {
+        "max_retries": 1,
+        "backoff_ms": 250,
+        "retry_on": ["timeout", "connection_error", "rate_limit"]
+      },
+      "quality_signals": {
+        "min_hits": 1,
+        "require_sources": true,
+        "min_text_length": 120
+      }
+    }
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "ask_ionos_url": "localhost:8012/agent/ask",
-  "api_key": "3015214b-9604-4f59-b7dd-0e349788e2ac",
+  "ask_ionos_url": "http://localhost:8012/agent/ask",
+  "api_key": "46deb572-0c06-4515-b6f0-4e7dc2aeff82",
   "provider": "ionos"
 }

@@ -1,0 +1,39 @@
+{
+  "name": "Webrecherche",
+  "version": "1.0",
+  "description": "Strukturierte Websuche in Tabellen-/JSON-Form.",
+  "tools": {
+    "websearch_table": {
+      "name": "Websearch Table",
+      "input": "user_prompt",
+      "output": "rows/results/text",
+      "capabilities": ["web_search"],
+      "retry_policy": {
+        "max_retries": 1,
+        "backoff_ms": 250,
+        "retry_on": ["timeout", "connection_error", "rate_limit"]
+      },
+      "quality_signals": {
+        "min_hits": 1,
+        "require_sources": true,
+        "min_text_length": 120
+      }
+    },
+    "search_multitable": {
+      "name": "Search Multitable",
+      "input": "user_prompt",
+      "output": "rows/results/text",
+      "capabilities": ["web_search"],
+      "retry_policy": {
+        "max_retries": 1,
+        "backoff_ms": 250,
+        "retry_on": ["timeout", "connection_error", "rate_limit"]
+      },
+      "quality_signals": {
+        "min_hits": 1,
+        "require_sources": true,
+        "min_text_length": 120
+      }
+    }
+  }
+}

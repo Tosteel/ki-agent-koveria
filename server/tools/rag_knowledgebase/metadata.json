@@ -1,8 +1,29 @@
 {
   "name": "Wissensdatenbank",
-  "version": "0.2",
+  "version": "1.0",
   "description": "Durchsucht die RAG-Wissensbasis mit semantischer Query und liefert Treffer.",
   "input": "query (string, required), top_k (int, optional), classification (string, optional)",
-  "output": "Trefferliste mit Quellen/Scores/Textausschnitten; zusätzlich textuelle Zusammenfassung im Feld text."
+  "output": "Trefferliste mit Quellen/Scores/Textausschnitten; zusätzlich textuelle Zusammenfassung im Feld text.",
+  "capabilities": ["knowledge_search"],
+  "side_effect_level": "none",
+  "result_contract": {
+    "success_if_any": ["hits", "text"],
+    "empty_if": ["hits_empty", "text_blank", "no_sources"]
+  },
+  "retry_policy": {
+    "max_retries": 2,
+    "backoff_ms": 350,
+    "retry_on": ["timeout", "connection_refused", "connection_error", "rate_limit"]
+  },
+  "fallback": {
+    "on_empty_capabilities": ["web_search"],
+    "on_transient_error_capabilities": ["web_search"],
+    "fallback_candidates": ["websearch_table", "search_multitable", "langsearch", "view_website"]
+  },
+  "quality_signals": {
+    "min_hits": 1,
+    "require_sources": true,
+    "min_text_length": 120
+  },
+  "allows_goal_injection": true
 }
-

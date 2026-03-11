@@ -153,8 +153,14 @@ def _run_clarification_gate(llm: Any, goal: str) -> Dict[str, Any]:
     return agent_service.run_clarification_gate(llm, goal)
 
 
-def _run_planner_guard(llm: Any, provider: str, goal: str, steps: List[Dict[str, Any]]) -> Dict[str, Any]:
-    return agent_service.run_planner_guard(llm, provider, goal, steps)
+def _run_planner_guard(
+    llm: Any,
+    provider: str,
+    goal: str,
+    steps: List[Dict[str, Any]],
+    registry: ToolRegistry | None = None,
+) -> Dict[str, Any]:
+    return agent_service.run_planner_guard(llm, provider, goal, steps, registry=registry)
 
 
 def _clarification_response(req_goal: str, gate: Dict[str, Any]) -> AgentAskResponse:

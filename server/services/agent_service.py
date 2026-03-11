@@ -229,6 +229,7 @@ def compact_tool_outputs(tool_outputs: List[Dict[str, Any]]) -> List[Dict[str, A
             "step": o.get("step"),
             "tool": o.get("tool"),
             "ok": o.get("ok"),
+            "status": o.get("status"),
         }
         payload = o.get("payload")
         if isinstance(payload, dict):
@@ -316,6 +317,7 @@ def outputs_for_final_answer(tool_outputs: List[Dict[str, Any]]) -> List[Dict[st
             "step": o.get("step"),
             "tool": o.get("tool"),
             "ok": o.get("ok"),
+            "status": o.get("status"),
         }
         payload = o.get("payload")
         if not isinstance(payload, dict):
@@ -389,9 +391,16 @@ def run_clarification_gate(llm: Any, goal: str) -> Dict[str, Any]:
     status = out.get("status")
     if status not in {"ready", "needs_info"}:
         status = "ready"
+    normalized_goal = str(out.get("normalized_goal") or goal)
+    goal_has_context = "goal_context:" in str(goal or "").lower() or "dialogverlauf" in str(goal or "").lower()
+    normalized_has_context = (
+        "goal_context:" in normalized_goal.lower() or "dialogverlauf" in normalized_goal.lower()
+    )
+    if goal_has_context and not normalized_has_context:
+        normalized_goal = str(goal)
     return {
         "status": status,
-        "normalized_goal": str(out.get("normalized_goal") or goal),
+        "normalized_goal": normalized_goal,
         "missing_fields": list(out.get("missing_fields") or []),
         "questions": list(out.get("questions") or []),
     }
@@ -434,7 +443,42 @@ def _extract_openai_output_text(resp: Dict[str, Any]) -> str:
     return out.strip()
 
 
-def _llm_planner_guard(llm: Any, provider: str, goal: str, steps: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _split_goal_and_context_for_guard(goal: str) -> tuple[str, str]:
+    text = str(goal or "").strip()
+    if not text:
+        return "", ""
+
+    lower = text.lower()
+    if lower.startswith("goal:"):
+        body = text[len("goal:") :].lstrip()
+        parts = re.split(r"\n\s*goal_context\s*:\s*", body, maxsplit=1, flags=re.IGNORECASE)
+        current_goal = (parts[0] if parts else body).strip()
+        context = (parts[1] if len(parts) > 1 else "").strip()
+        return current_goal, context
+
+    if lower.startswith("aktuelle anfrage:"):
+        body = text[len("aktuelle anfrage:") :].lstrip()
+        parts = re.split(
+            r"\n\s*dialogverlauf\s*\(.*?\)\s*:\s*",
+            body,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )
+        current_goal = (parts[0] if parts else body).strip()
+        context = (parts[1] if len(parts) > 1 else "").strip()
+        return current_goal, context
+
+    return text, ""
+
+
+def _llm_planner_guard(
+    llm: Any,
+    provider: str,
+    goal: str,
+    steps: List[Dict[str, Any]],
+    *,
+    goal_context: str = "",
+) -> Dict[str, Any]:
     if not hasattr(llm, "enabled") or not llm.enabled():
         return {}
 
@@ -463,9 +507,11 @@ def _llm_planner_guard(llm: Any, provider: str, goal: str, steps: List[Dict[str,
 
     system = get_planner_guard_system_prompt(provider)
     user = (
-        f"Ziel:\n{goal}\n\n"
-        f"Geplante Schritte:\n{json.dumps(compact_steps, ensure_ascii=False)}\n\n"
+        f"Aktuelles Ziel (primaer):\n{goal}\n\n"
+        + (f"Zusatzkontext (nur Hintergrund):\n{goal_context}\n\n" if str(goal_context).strip() else "")
+        + f"Geplante Schritte:\n{json.dumps(compact_steps, ensure_ascii=False)}\n\n"
         "Prüfkriterien:\n"
+        "- Beurteile Zielerfüllung PRIMÄR anhand des aktuellen Ziels; nutze Zusatzkontext nur zur Referenzauflösung.\n"
         "- Wenn Ziel E-Mail-Versand verlangt, muss send_mail oder answer_mail enthalten sein.\n"
         "- Wenn Ziel eine PDF lesen/analysieren/zusammenfassen will, muss read_pdf enthalten sein (nicht read_file).\n"
         "- Wenn Ziel eine neue PDF erstellen/exportieren will, muss pdf_export enthalten sein.\n"
@@ -517,8 +563,147 @@ def _llm_planner_guard(llm: Any, provider: str, goal: str, steps: List[Dict[str,
     return {"status": status, "missing": missing, "reasons": reasons}
 
 
-def run_planner_guard(llm: Any, provider: str, goal: str, steps: List[Dict[str, Any]]) -> Dict[str, Any]:
-    llm_gate = _llm_planner_guard(llm, provider, goal, steps)
+def _required_value_missing(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str) and not value.strip():
+        return True
+    if isinstance(value, (list, dict)) and len(value) == 0:
+        return True
+    return False
+
+
+def _split_tool_arg_token(token: str, *, prefix: str) -> tuple[str, str] | None:
+    if not str(token).startswith(prefix):
+        return None
+    rest = str(token)[len(prefix) :].strip()
+    if "." not in rest:
+        return None
+    tool, arg = rest.split(".", 1)
+    tool = tool.strip()
+    arg = arg.strip()
+    if not tool or not arg:
+        return None
+    return tool, arg
+
+
+def _registry_fields_for_tool(registry: ToolRegistry, tool_name: str) -> set[str]:
+    expected = registry.expected_input(tool_name)
+    fields = expected.get("fields") if isinstance(expected.get("fields"), dict) else {}
+    return {str(k).strip() for k in fields.keys() if str(k).strip()}
+
+
+def _filter_llm_guard_with_registry(
+    *,
+    registry: ToolRegistry,
+    missing: List[str],
+    reasons: List[str],
+) -> tuple[List[str], List[str]]:
+    kept_missing: List[str] = []
+    dropped_refs: List[str] = []
+    dropped_args: List[str] = []
+
+    for token in missing:
+        tok = str(token).strip()
+        if not tok:
+            continue
+        parsed_missing_arg = _split_tool_arg_token(tok, prefix="missing_arg:")
+        if parsed_missing_arg:
+            tool, arg = parsed_missing_arg
+            fields = _registry_fields_for_tool(registry, tool)
+            if fields and arg in fields:
+                kept_missing.append(tok)
+            else:
+                dropped_refs.append(f"{tool}.{arg}")
+                dropped_args.append(arg)
+            continue
+
+        parsed_unknown_arg = _split_tool_arg_token(tok, prefix="unknown_arg:")
+        if parsed_unknown_arg:
+            tool, arg = parsed_unknown_arg
+            if registry.get_tool(tool) is not None and arg not in _registry_fields_for_tool(registry, tool):
+                kept_missing.append(tok)
+            else:
+                dropped_refs.append(f"{tool}.{arg}")
+                dropped_args.append(arg)
+            continue
+
+        if tok.startswith("missing_tool:"):
+            tool = tok.split(":", 1)[1].strip()
+            if tool and registry.get_tool(tool) is None:
+                kept_missing.append(tok)
+            else:
+                dropped_refs.append(tool)
+            continue
+
+        kept_missing.append(tok)
+
+    kept_reasons: List[str] = []
+    for reason in reasons:
+        txt = str(reason).strip()
+        if not txt:
+            continue
+        if any(ref and ref in txt for ref in dropped_refs):
+            continue
+        if any(arg and re.search(rf"\b{re.escape(arg)}\b", txt) for arg in dropped_args):
+            continue
+        kept_reasons.append(txt)
+    return kept_missing, kept_reasons
+
+
+def _registry_guard_checks(registry: ToolRegistry, steps: List[Dict[str, Any]]) -> tuple[List[str], List[str]]:
+    missing: List[str] = []
+    reasons: List[str] = []
+
+    for i, step in enumerate(steps, 1):
+        if not isinstance(step, dict):
+            missing.append("missing_step:invalid_schema")
+            reasons.append(f"Step {i}: Ungültiges Step-Schema (erwartet Objekt mit tool/args).")
+            continue
+
+        tool = str(step.get("tool") or "").strip()
+        args = step.get("args") if isinstance(step.get("args"), dict) else {}
+        if not tool:
+            missing.append("missing_step:tool")
+            reasons.append(f"Step {i}: tool fehlt.")
+            continue
+
+        tool_def = registry.get_tool(tool)
+        if tool_def is None:
+            missing.append(f"missing_tool:{tool}")
+            reasons.append(f"Step {i}: Tool '{tool}' ist nicht im Registry-Schema vorhanden.")
+            continue
+
+        expected = registry.expected_input(tool)
+        required = [str(x).strip() for x in (expected.get("required") or []) if str(x).strip()]
+        field_names = _registry_fields_for_tool(registry, tool)
+
+        for req in required:
+            if _required_value_missing(args.get(req)):
+                missing.append(f"missing_arg:{tool}.{req}")
+                reasons.append(f"Step {i} ({tool}): Pflichtfeld '{req}' fehlt laut Registry-Schema.")
+
+        for arg_name in list(args.keys()):
+            a = str(arg_name).strip()
+            if not a or a in {"goal"} or a.startswith("_"):
+                continue
+            if field_names and a not in field_names:
+                missing.append(f"unknown_arg:{tool}.{a}")
+                reasons.append(f"Step {i} ({tool}): Feld '{a}' ist nicht im Registry-Schema definiert.")
+
+    return missing, reasons
+
+
+def run_planner_guard(
+    llm: Any,
+    provider: str,
+    goal: str,
+    steps: List[Dict[str, Any]],
+    registry: ToolRegistry | None = None,
+) -> Dict[str, Any]:
+    goal_primary, goal_context = _split_goal_and_context_for_guard(goal)
+    goal_for_eval = goal_primary or str(goal or "").strip()
+    llm_gate = _llm_planner_guard(llm, provider, goal_for_eval, steps, goal_context=goal_context)
     if not llm_gate:
         return {
             "status": "replan",
@@ -566,9 +751,11 @@ def run_planner_guard(llm: Any, provider: str, goal: str, steps: List[Dict[str, 
             compact_steps.append({"step": i, "tool": str(step.get("tool") or "").strip(), "args": args})
         system_refine = get_planner_guard_refine_system_prompt(provider)
         user_refine = (
-            f"Ziel:\n{goal}\n\n"
-            f"Schritte:\n{json.dumps(compact_steps, ensure_ascii=False)}\n\n"
+            f"Aktuelles Ziel (primaer):\n{goal_for_eval}\n\n"
+            + (f"Zusatzkontext (nur Hintergrund):\n{goal_context}\n\n" if str(goal_context).strip() else "")
+            + f"Schritte:\n{json.dumps(compact_steps, ensure_ascii=False)}\n\n"
             "Liefere KONKRETE missing/reasons.\n"
+            "Beurteile Zielerfüllung PRIMÄR anhand des aktuellen Ziels; nutze Zusatzkontext nur zur Referenzauflösung.\n"
             "missing MUSS nur diese Formen nutzen:\n"
             "- missing_tool:<tool>\n"
             "- missing_arg:<tool>.<arg>\n"
@@ -604,8 +791,19 @@ def run_planner_guard(llm: Any, provider: str, goal: str, steps: List[Dict[str, 
         except Exception:
             pass
 
+    if registry is not None:
+        missing, reasons = _filter_llm_guard_with_registry(registry=registry, missing=missing, reasons=reasons)
+        reg_missing, reg_reasons = _registry_guard_checks(registry, steps)
+        if reg_missing:
+            status = "replan"
+        missing.extend(reg_missing)
+        reasons.extend(reg_reasons)
+        if status == "replan" and not missing:
+            # LLM guard requested replan, but registry validation found no concrete issue.
+            status = "ready"
+
     # Deterministic guard checks for common PDF-read planning failures.
-    goal_l = (goal or "").lower()
+    goal_l = goal_for_eval.lower()
     wants_pdf_read = (".pdf" in goal_l) and any(
         kw in goal_l for kw in ("lies", "lese", "read", "analys", "analyse", "zusammen", "fasse")
     )
@@ -983,7 +1181,20 @@ def run_steps_internal(
 
     tool_outputs_full = orch.run_steps(ctx, sanitized_steps)
     tool_outputs_compact = compact_tool_outputs(tool_outputs_full)
-    ok = all(o.get("ok") for o in tool_outputs_full) if tool_outputs_full else True
+    ok = True
+    for out in tool_outputs_full:
+        if not isinstance(out, dict):
+            continue
+        if out.get("ok"):
+            continue
+        status = str(out.get("status") or "").strip().lower()
+        if status == "replan_required":
+            ok = False
+            break
+        if out.get("handled"):
+            continue
+        ok = False
+        break
     fallback_answer = extract_execution_answer(tool_outputs_full)
     return ok, tool_outputs_full, tool_outputs_compact, fallback_answer
 
@@ -992,11 +1203,8 @@ def _execution_facts(tool_outputs_full: List[Dict[str, Any]]) -> Dict[str, Any]:
     facts: Dict[str, Any] = {
         "pdf_created": False,
         "pdf_output_paths": [],
-        "mail_sent": False,
-        "mail_recipients": [],
     }
     pdf_paths: List[str] = []
-    recipients: List[str] = []
 
     for out in tool_outputs_full:
         if not isinstance(out, dict) or not out.get("ok"):
@@ -1010,21 +1218,7 @@ def _execution_facts(tool_outputs_full: List[Dict[str, Any]]) -> Dict[str, Any]:
                 pdf_paths.append(path)
             facts["pdf_created"] = True
 
-        if tool in {"send_mail", "answer_mail"}:
-            sent_flag = payload.get("sent")
-            if sent_flag is True or tool == "answer_mail":
-                facts["mail_sent"] = True
-                rcpts = payload.get("to")
-                if not isinstance(rcpts, list):
-                    rcpts = payload.get("recipients")
-                if isinstance(rcpts, list):
-                    for r in rcpts:
-                        rs = str(r).strip()
-                        if rs:
-                            recipients.append(rs)
-
     facts["pdf_output_paths"] = pdf_paths
-    facts["mail_recipients"] = recipients
     return facts
 
 
@@ -1035,9 +1229,7 @@ def _enforce_fact_consistency(answer: str, facts: Dict[str, Any]) -> str:
     lower = text.lower()
 
     pdf_created = bool(facts.get("pdf_created"))
-    mail_sent = bool(facts.get("mail_sent"))
     pdf_paths = [str(p).strip() for p in (facts.get("pdf_output_paths") or []) if str(p).strip()]
-    recipients = [str(r).strip() for r in (facts.get("mail_recipients") or []) if str(r).strip()]
 
     pdf_negative_tokens = (
         "keine pdf",
@@ -1049,18 +1241,6 @@ def _enforce_fact_consistency(answer: str, facts: Dict[str, Any]) -> str:
     if pdf_created and any(tok in lower for tok in pdf_negative_tokens):
         suffix = f" ({pdf_paths[-1]})" if pdf_paths else ""
         return f"Das PDF wurde erfolgreich erstellt{suffix}."
-
-    mail_negative_tokens = (
-        "mail konnte nicht",
-        "e-mail konnte nicht",
-        "nicht gesendet",
-        "wurde nicht gesendet",
-        "konnte nicht an",
-    )
-    if mail_sent and any(tok in lower for tok in mail_negative_tokens):
-        if recipients:
-            return f"Die E-Mail wurde erfolgreich gesendet an: {', '.join(recipients)}."
-        return "Die E-Mail wurde erfolgreich gesendet."
 
     return text
 

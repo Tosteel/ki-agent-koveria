@@ -1,0 +1,17 @@
+{
+  "name": "LLM Compose",
+  "version": "1.0",
+  "description": "Formuliert textuelle Inhalte kohärent und ausführlich aus.",
+  "tools": {
+    "llm_compose": {
+      "name": "LLM Compose",
+      "input": "text, optional goal/instruction",
+      "output": "text/composed_text",
+      "capabilities": ["text_compose"],
+      "side_effect_level": "none",
+      "quality_signals": {
+        "min_text_length": 40
+      }
+    }
+  }
+}

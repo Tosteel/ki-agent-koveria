@@ -1,0 +1,23 @@
+{
+  "name": "LangSearch",
+  "version": "1.0",
+  "description": "Websuche über LangSearch API.",
+  "tools": {
+    "langsearch": {
+      "name": "LangSearch",
+      "input": "query",
+      "output": "Trefferliste + text",
+      "capabilities": ["web_search"],
+      "retry_policy": {
+        "max_retries": 1,
+        "backoff_ms": 250,
+        "retry_on": ["timeout", "connection_error", "rate_limit"]
+      },
+      "quality_signals": {
+        "min_hits": 1,
+        "require_sources": true,
+        "min_text_length": 120
+      }
+    }
+  }
+}

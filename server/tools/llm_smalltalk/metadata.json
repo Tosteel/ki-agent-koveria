@@ -1,0 +1,10 @@
+{
+  "name": "LLM Smalltalk",
+  "version": "1.0",
+  "description": "Kurze Smalltalk-Antworten und Witze.",
+  "input": "message, optional tone/max_chars",
+  "output": "reply/text",
+  "capabilities": ["text_compose"],
+  "side_effect_level": "none",
+  "allows_goal_injection": false
+}

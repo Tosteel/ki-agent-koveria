@@ -21,6 +21,7 @@ from server.core.models import (
 from server.deps import get_current_user, settings as dep_settings
 from server.core.settings import Settings
 from server.agent.planner import Planner
+from server.agent.tool_registry import ToolRegistry
 
 security = HTTPBearer(auto_error=False)
 
@@ -32,7 +33,7 @@ def create_agent_router(
     append_agent_tools_hint: Callable[[str, Settings, str], str],
     llm_for_provider: Callable[[str], Any],
     run_clarification_gate: Callable[[Any, str], Dict[str, Any]],
-    run_planner_guard: Callable[[Any, str, str, List[Dict[str, Any]]], Dict[str, Any]],
+    run_planner_guard: Callable[[Any, str, str, List[Dict[str, Any]], ToolRegistry | None], Dict[str, Any]],
     clarification_response: Callable[[str, Dict[str, Any]], AgentAskResponse],
     goal_with_context: Callable[[Any, str, str, Any], str],
     inject_llm_summary_before_pdf: Callable[[List[Dict[str, Any]], str], List[Dict[str, Any]]],
@@ -81,7 +82,7 @@ def create_agent_router(
         s: Settings,
         user_id: str,
     ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
-        gate = run_planner_guard(llm, provider, goal, steps)
+        gate = run_planner_guard(llm, provider, goal, steps, planner.registry)
         print('\n===== PLANNER GUARD =====')
         print(f"status={gate.get('status')}")
         print(f"missing={gate.get('missing')}")
@@ -97,13 +98,23 @@ def create_agent_router(
         guarded_goal = _build_effective_goal(goal, replan_additional_props, s, user_id)
         replanned = planner.create_steps(goal=guarded_goal)
         replanned = inject_llm_summary_before_pdf(replanned, guarded_goal)
-        gate2 = run_planner_guard(llm, provider, goal, replanned)
+        gate2 = run_planner_guard(llm, provider, goal, replanned, planner.registry)
         print('\n===== PLANNER GUARD (REPLAN) =====')
         print(f"status={gate2.get('status')}")
         print(f"missing={gate2.get('missing')}")
         print(f"reasons={gate2.get('reasons')}")
         print('==================================\n')
         return replanned, gate2
+
+    def _extract_execution_replan_reason(tool_outputs: List[Dict[str, Any]]) -> str:
+        for out in reversed(tool_outputs):
+            if not isinstance(out, dict):
+                continue
+            status = str(out.get("status") or "").strip().lower()
+            tool = str(out.get("tool") or "").strip()
+            if status == "replan_required" or tool == "__replan__":
+                return str(out.get("error") or "execution_replan_required").strip() or "execution_replan_required"
+        return ""
 
     @router.post('/agent/run', response_model=AgentRunResponse)
     def agent_run(
@@ -283,6 +294,46 @@ def create_agent_router(
             steps=steps,
             log_label='PLANNED STEPS',
         )
+        exec_replan_reason = _extract_execution_replan_reason(tool_outputs_full)
+        if exec_replan_reason:
+            replan_additional_props = {
+                "missing": ["execution_replan"],
+                "reasons": [exec_replan_reason],
+            }
+            repl_goal = _build_effective_goal(effective_goal, replan_additional_props, s, user_id)
+            replanner = Planner(llm, build_registry(user_id, s))
+            replanned_steps = replanner.create_steps(goal=repl_goal)
+            replanned_steps = inject_llm_summary_before_pdf(replanned_steps, repl_goal)
+            replanned_steps, repl_gate = _apply_planner_guard(
+                llm, provider, replanner, effective_goal, replanned_steps, s, user_id
+            )
+            if repl_gate.get("status") == "ready":
+                ok, tool_outputs_full, tool_outputs_compact, fallback_answer = run_steps_internal(
+                    user_id=user_id,
+                    settings=s,
+                    api_key=credentials.credentials,
+                    goal=repl_goal,
+                    steps=replanned_steps,
+                    log_label='REPLANNED STEPS',
+                )
+                steps = replanned_steps
+                effective_goal = repl_goal
+            else:
+                missing = [str(x) for x in (repl_gate.get("missing") or [])]
+                questions = [f"Bitte ergänze die Planung: {r}" for r in (repl_gate.get("reasons") or [])]
+                if not questions:
+                    questions = ["Bitte präzisiere das Ziel, damit ein vollständiger Replan erstellt werden kann."]
+                return AgentAskResponse(
+                    ok=False,
+                    goal=req.goal,
+                    steps=replanned_steps,
+                    tool_outputs=tool_outputs_compact,
+                    answer="Die Ausführung konnte nicht robust abgeschlossen werden. Ich brauche eine kurze Präzisierung für den Replan.",
+                    requires_user_input=True,
+                    missing_fields=missing,
+                    questions=questions,
+                )
+
         answer = finalize_internal(provider=provider, goal=effective_goal, tool_outputs_full=tool_outputs_full)
         if not str(answer).strip():
             answer = fallback_answer

@@ -1,0 +1,43 @@
+{
+  "name": "Mail",
+  "version": "1.0",
+  "description": "Mail senden, beantworten und lesen.",
+  "tools": {
+    "send_mail": {
+      "name": "E-Mail senden",
+      "input": "to, subject, body, optional attachments/cc/bcc",
+      "output": "sent-Status, message_id",
+      "capabilities": ["communication:email_send"],
+      "side_effect_level": "high",
+      "quality_signals": {
+        "min_text_length": 40
+      },
+      "allows_goal_injection": false
+    },
+    "answer_mail": {
+      "name": "E-Mail beantworten",
+      "input": "mail_id, body",
+      "output": "sent-Status",
+      "capabilities": ["communication:email_send"],
+      "side_effect_level": "high",
+      "quality_signals": {
+        "min_text_length": 20
+      },
+      "allows_goal_injection": false
+    },
+    "fetch_inbox_mails": {
+      "name": "Inbox lesen",
+      "input": "optional mailbox, limit",
+      "output": "mail-Objekte",
+      "capabilities": ["inbox_read"],
+      "side_effect_level": "none"
+    },
+    "fetch_unanswered_mails": {
+      "name": "Unbeantwortete Mails lesen",
+      "input": "optional mailbox, limit",
+      "output": "mail-Objekte",
+      "capabilities": ["inbox_read"],
+      "side_effect_level": "none"
+    }
+  }
+}

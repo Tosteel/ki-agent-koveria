@@ -107,6 +107,5 @@ class PlanPostprocessTests(unittest.TestCase):
         self.assertNotIn("usage", lean[0]["payload"])
         self.assertNotIn("model", lean[0]["payload"])
 
-
 if __name__ == "__main__":
     unittest.main()

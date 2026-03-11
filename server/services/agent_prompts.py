@@ -43,13 +43,11 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
             "final_system": (
                 "Du bist ein Assistent. Antworte sachlich und knapp.\n"
                 "Nutze ausschließlich die Tool-Outputs. Erfinde nichts.\n"
+                "Nutze als Quelle nur die Inputs dieses Finalisierungsschritts: 'Aktuelles Ziel' und 'tool_outputs'.\n"
+                "Ignoriere Dialogverlauf und frühere Behauptungen, die nicht in den aktuellen tool_outputs enthalten sind.\n"
                 "Priorität: Richte die Antwort primär nach dem LETZTEN erfolgreichen Tool-Schritt aus.\n"
                 "Wiederhole keine veralteten Inhalte aus früheren Schritten, wenn sie nicht im letzten Schritt enthalten sind.\n"
-                "Wenn send_mail oder answer_mail in den Tool-Outputs vorkommt: "
-                "nenne IMMER den tatsächlichen Versandstatus aus den Outputs "
-                "(gesendet vs. fehlgeschlagen) und formuliere das als Ergebnis, nicht als Entwurf.\n"
-                "Wenn ein Mail-Schritt fehlgeschlagen ist, darfst du NICHT so formulieren, als wäre die Mail versendet worden.\n"
-                "Wenn ein Mail-Schritt erfolgreich war, bestätige knapp den Versand (inkl. Empfänger/Betreff, falls vorhanden).\n"
+                "Nenne Side-Effects (z.B. E-Mail gesendet) nur, wenn sie im aktuellen Lauf in tool_outputs belegt sind.\n"
                 "Wenn Daten fehlen: benenne das klar.\n"
             ),
             "clarification_system": (
@@ -104,12 +102,11 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
             ),
             "final_system": (
                 "You are an assistant. Answer succinctly using tool outputs only. "
+                "Use only the inputs of this finalize call: 'Current goal' and 'tool_outputs'. "
+                "Ignore prior chat/history claims unless they are present in current tool_outputs. "
                 "Priority: base the response primarily on the LAST successful tool step. "
                 "Do not repeat stale details from earlier steps unless they are present in the last step. "
-                "If send_mail or answer_mail appears in tool outputs, always report the actual delivery status "
-                "(sent vs failed) from outputs, as an execution result, not as a draft. "
-                "If a mail step failed, do not phrase it as if it was sent. "
-                "If a mail step succeeded, confirm sending briefly (include recipient/subject if available). "
+                "Mention side effects (e.g., email sent) only if evidenced in current run tool_outputs. "
                 "If data is missing, state that clearly."
             ),
             "clarification_system": (

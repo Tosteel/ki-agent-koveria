@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 
 from .policies import tools_allowed
+from .tool_policies import build_tool_policy
 
 
 @dataclass
@@ -38,6 +39,30 @@ class ToolDef:
 def _load_tool_metadata_map() -> Dict[str, Dict[str, Any]]:
     out: Dict[str, Dict[str, Any]] = {}
 
+    def _pick_meta(raw_meta: Dict[str, Any], default_name: str) -> Dict[str, Any]:
+        display_name = str(raw_meta.get("name") or default_name).strip() or default_name
+        picked: Dict[str, Any] = {
+            "name": display_name,
+            "description": str(raw_meta.get("description") or "").strip(),
+            "input": str(raw_meta.get("input") or "").strip(),
+            "output": str(raw_meta.get("output") or "").strip(),
+            "version": str(raw_meta.get("version") or "").strip(),
+            "owner": str(raw_meta.get("owner") or "").strip(),
+        }
+        for key in (
+            "capabilities",
+            "side_effect_level",
+            "requires",
+            "result_contract",
+            "retry_policy",
+            "fallback",
+            "quality_signals",
+            "allows_goal_injection",
+        ):
+            if key in raw_meta:
+                picked[key] = raw_meta.get(key)
+        return picked
+
     project_server_dir = Path(__file__).resolve().parents[1]
     for base_dir in (project_server_dir / "tools", project_server_dir / "workflows"):
         if not base_dir.exists():
@@ -51,16 +76,25 @@ def _load_tool_metadata_map() -> Dict[str, Dict[str, Any]]:
                 continue
             if not isinstance(raw, dict):
                 continue
-            tool_name = str(path.parent.name or "").strip()
-            if not tool_name:
+            tool_name_by_folder = str(path.parent.name or "").strip()
+            if not tool_name_by_folder:
                 continue
-            display_name = str(raw.get("name") or tool_name).strip() or tool_name
-            out[tool_name] = {
-                "name": display_name,
-                "description": str(raw.get("description") or "").strip(),
-                "input": str(raw.get("input") or "").strip(),
-                "output": str(raw.get("output") or "").strip(),
-            }
+
+            # Preferred format for multi-tool modules: {"tools": {"tool_name": {...}}}
+            raw_tools = raw.get("tools")
+            if isinstance(raw_tools, dict):
+                base_meta = _pick_meta(raw, tool_name_by_folder)
+                base_meta.pop("name", None)
+                for tool_name_raw, tool_meta_raw in raw_tools.items():
+                    tool_name = str(tool_name_raw).strip()
+                    if not tool_name or not isinstance(tool_meta_raw, dict):
+                        continue
+                    tool_meta = dict(base_meta)
+                    tool_meta.update(_pick_meta(tool_meta_raw, tool_name))
+                    out[tool_name] = tool_meta
+                continue
+
+            out[tool_name_by_folder] = _pick_meta(raw, tool_name_by_folder)
     return out
 
 
@@ -152,7 +186,8 @@ class ToolRegistry:
         request_model: Type[BaseModel],
         response_model: Optional[Type[BaseModel]] = None,
     ) -> None:
-        meta = _load_tool_metadata_map().get(name, {})
+        meta = dict(_load_tool_metadata_map().get(name, {}))
+        meta["policy"] = build_tool_policy(name, meta)
         self._tools[name] = ToolDef(
             name=name,
             handler=handler,
@@ -163,6 +198,24 @@ class ToolRegistry:
 
     def get_tool(self, name: str) -> ToolDef | None:
         return self._tools.get(name)
+
+    def tool_names(self) -> list[str]:
+        return list(self._tools.keys())
+
+    def tool_metadata(self, name: str) -> Dict[str, Any]:
+        tool = self.get_tool(name)
+        if tool is None:
+            return {}
+        return dict(tool.metadata or {})
+
+    def tool_policy(self, name: str) -> Dict[str, Any]:
+        tool = self.get_tool(name)
+        if tool is None:
+            return build_tool_policy(name, {})
+        policy = tool.metadata.get("policy") if isinstance(tool.metadata, dict) else {}
+        if isinstance(policy, dict):
+            return dict(policy)
+        return build_tool_policy(name, tool.metadata if isinstance(tool.metadata, dict) else {})
 
     def dispatch(self, name: str, ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         tool = self.get_tool(name)

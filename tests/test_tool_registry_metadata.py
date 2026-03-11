@@ -75,6 +75,22 @@ class ToolRegistryMetadataTests(unittest.TestCase):
         self.assertNotIn("$defs", args_schema)
         self.assertEqual(payload_schema.get("type"), "object")
 
+    def test_tool_map_metadata_is_applied_per_tool(self):
+        class MailArgs(BaseModel):
+            to: list[str]
+            subject: str
+            body: str
+
+        reg = ToolRegistry()
+        reg.register("send_mail", lambda _ctx, _args: {"sent": True}, request_model=MailArgs)
+        meta = reg.tool_metadata("send_mail")
+        policy = reg.tool_policy("send_mail")
+
+        self.assertEqual(str(meta.get("name") or ""), "E-Mail senden")
+        self.assertEqual(str(meta.get("side_effect_level") or ""), "high")
+        self.assertIn("communication:email_send", list(policy.get("capabilities") or []))
+        self.assertEqual(str(policy.get("side_effect_level") or ""), "high")
+
 
 if __name__ == "__main__":
     unittest.main()
