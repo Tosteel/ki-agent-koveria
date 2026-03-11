@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -8,7 +9,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from server.workflows.startup_matchup.common import clean_text, load_json_obj, safe_list_str
 
@@ -28,46 +29,76 @@ def _resolve_output_path(output_path: str, work_root: Path) -> Path:
     return resolved
 
 
-def _join_bullets(values: List[str]) -> str:
-    if not values:
-        return "n/a"
-    return "\n".join([f"- {v}" for v in values])
+def _resolve_optional_asset_path(asset_path: str | None, user_root: Path, work_root: Path) -> Path | None:
+    raw = str(asset_path or "").strip().lstrip("/")
+    if not raw:
+        return None
+    p = Path(raw)
+    if p.is_absolute() or ".." in p.parts:
+        return None
+
+    roots = [work_root.resolve(), user_root.resolve()]
+    for root in roots:
+        candidate = (root / p).resolve()
+        if (candidate == root or root in candidate.parents) and candidate.is_file():
+            return candidate
+    return None
 
 
-def _recommended_table_data(recommended: List[Dict[str, Any]]) -> List[List[str]]:
-    rows: List[List[str]] = [["Rank", "Startup", "Score", "Kurzprofil"]]
-    if not recommended:
-        rows.append(["-", "Keine empfohlenen Startups verfuegbar.", "-", "-"])
-        return rows
-
-    for item in recommended:
-        if not isinstance(item, dict):
-            continue
-        rows.append(
-            [
-                str(int(item.get("rank") or 0)),
-                clean_text(item.get("startup_name") or item.get("name") or ""),
-                f"{float(item.get('relevance_score') or 0.0):.4f}",
-                clean_text(item.get("short_description") or ""),
-            ]
-        )
-    return rows
-
-
-def _narrative_or_fallback(narrative: str, fallback: str) -> str:
+def _narrative_or_fallback(narrative: Any, fallback: str) -> str:
     n = clean_text(narrative)
     if len(n) < 80:
         return clean_text(fallback)
     return n
 
 
-def _render_report_pdf(*, report: Dict[str, Any], output_file: Path, title: str) -> int:
+def _score_bar(score: float) -> str:
+    s = max(0.0, min(1.0, float(score or 0.0)))
+    total = 12
+    filled = int(round(s * total))
+    return ("#" * filled + "-" * (total - filled)) + f" {s:.2f}"
+
+
+def _gap_significance(gap: str) -> str:
+    g = clean_text(gap).lower()
+    if "innovationszykl" in g:
+        return "Verzögerung bei der Markteinführung neuer Technologien"
+    if "transparenz" in g and "startup" in g:
+        return "Erschwerte Identifikation geeigneter Innovationspartner"
+    if "prioris" in g and "partner" in g:
+        return "Unsichere Entscheidungsprozesse bei Kooperationsvorhaben"
+    return "Reduzierte Umsetzungsgeschwindigkeit in der Innovationsarbeit"
+
+
+def _draw_page_number(canvas, doc) -> None:  # reportlab callback signature
+    canvas.saveState()
+    canvas.setFont("Helvetica", 9)
+    canvas.setFillColor(colors.HexColor("#526177"))
+    canvas.drawRightString(A4[0] - 18 * mm, 10 * mm, f"Seite {doc.page}")
+    canvas.restoreState()
+
+
+def _render_report_pdf(
+    *,
+    report: Dict[str, Any],
+    output_file: Path,
+    title: str,
+    subtitle: str,
+    company_name_override: str | None,
+    report_year: int | None,
+    created_by: str,
+    company_logo: Path | None,
+    tool_logo: Path | None,
+) -> int:
     company_profile = report.get("company_profile") if isinstance(report.get("company_profile"), dict) else {}
     innovation_goals = safe_list_str(report.get("innovation_goals"))
     identified_gaps = safe_list_str(report.get("identified_gaps"))
     startup_search_fields = safe_list_str(report.get("startup_search_fields"))
     recommended = report.get("recommended_startups") if isinstance(report.get("recommended_startups"), list) else []
     report_text = report.get("report") if isinstance(report.get("report"), dict) else {}
+
+    company_name = clean_text(company_name_override) or clean_text(company_profile.get("company_name")) or "n/a"
+    year_txt = str(report_year or datetime.now().year)
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
     doc = SimpleDocTemplate(
@@ -77,27 +108,62 @@ def _render_report_pdf(*, report: Dict[str, Any], output_file: Path, title: str)
         leftMargin=18 * mm,
         topMargin=16 * mm,
         bottomMargin=16 * mm,
+        title=clean_text(title) or "Startup Matchup Report",
+        author=clean_text(created_by) or "Startup Matchup Tool",
+        subject="Startup-Scouting Report",
     )
 
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        "Title",
+    cover_title = ParagraphStyle(
+        "CoverTitle",
         parent=styles["Heading1"],
         fontName="Helvetica-Bold",
-        fontSize=18,
-        leading=22,
+        fontSize=28,
+        leading=32,
+        alignment=1,
+        textColor=colors.HexColor("#1d2d44"),
         spaceAfter=10,
     )
-    section_style = ParagraphStyle(
-        "Section",
+    cover_subtitle = ParagraphStyle(
+        "CoverSubtitle",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=13,
+        leading=18,
+        alignment=1,
+        textColor=colors.HexColor("#3e5c76"),
+        spaceAfter=12,
+    )
+    cover_meta = ParagraphStyle(
+        "CoverMeta",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=11,
+        leading=15,
+        alignment=1,
+        textColor=colors.HexColor("#2f3e46"),
+    )
+    h1 = ParagraphStyle(
+        "H1",
         parent=styles["Heading2"],
         fontName="Helvetica-Bold",
-        fontSize=13,
-        leading=16,
+        fontSize=15,
+        leading=19,
+        textColor=colors.HexColor("#0b2545"),
         spaceBefore=8,
-        spaceAfter=6,
+        spaceAfter=8,
     )
-    body_style = ParagraphStyle(
+    h2 = ParagraphStyle(
+        "H2",
+        parent=styles["Heading3"],
+        fontName="Helvetica-Bold",
+        fontSize=11.5,
+        leading=14,
+        textColor=colors.HexColor("#13315c"),
+        spaceBefore=6,
+        spaceAfter=4,
+    )
+    body = ParagraphStyle(
         "Body",
         parent=styles["Normal"],
         fontName="Helvetica",
@@ -105,166 +171,117 @@ def _render_report_pdf(*, report: Dict[str, Any], output_file: Path, title: str)
         leading=14,
         spaceAfter=6,
     )
-    bullet_style = ParagraphStyle(
-        "Bullets",
-        parent=styles["Code"],
+    body_small = ParagraphStyle(
+        "BodySmall",
+        parent=styles["Normal"],
         fontName="Helvetica",
-        fontSize=10,
-        leading=13,
-        spaceAfter=5,
-    )
-    startup_title_style = ParagraphStyle(
-        "StartupTitle",
-        parent=styles["Heading3"],
-        fontName="Helvetica-Bold",
-        fontSize=11.5,
-        leading=14,
-        spaceBefore=4,
+        fontSize=9.5,
+        leading=12,
         spaceAfter=4,
     )
-    table_header_style = ParagraphStyle(
+    table_header = ParagraphStyle(
         "TableHeader",
         parent=styles["Normal"],
         fontName="Helvetica-Bold",
         fontSize=9,
         leading=11,
-        alignment=1,
+        textColor=colors.white,
     )
-    table_cell_style = ParagraphStyle(
+    table_cell = ParagraphStyle(
         "TableCell",
         parent=styles["Normal"],
         fontName="Helvetica",
         fontSize=9,
         leading=11,
     )
-    meta_label_style = ParagraphStyle(
-        "MetaLabel",
-        parent=styles["Normal"],
-        fontName="Helvetica-Bold",
-        fontSize=9.5,
-        leading=12,
-    )
-    meta_value_style = ParagraphStyle(
-        "MetaValue",
-        parent=styles["Normal"],
-        fontName="Helvetica",
-        fontSize=9.5,
-        leading=12,
-    )
 
-    story = []
-    story.append(Paragraph(clean_text(title) or "Startup Matchup Report", title_style))
-    story.append(Spacer(1, 4))
+    story: List[Any] = []
 
-    story.append(Paragraph("I. Executive Summary", section_style))
-    story.append(
-        Paragraph(
-            _narrative_or_fallback(
-                clean_text(report_text.get("executive_summary")),
-                "Dieser Bericht dokumentiert die systematische Suche nach Startup-Kooperationspartnern.",
-            ),
-            body_style,
-        )
-    )
-
-    story.append(Paragraph("II. Unternehmensprofil", section_style))
-    company_lines = [
-        f"Unternehmen: {clean_text(company_profile.get('company_name')) or 'n/a'}",
-        f"Branche: {clean_text(company_profile.get('industry')) or 'n/a'}",
-        f"Kerngeschaeft: {clean_text(company_profile.get('core_business')) or 'n/a'}",
-    ]
-    story.append(Paragraph("<br/>".join(company_lines), body_style))
-    story.append(
-        Paragraph(
-            _narrative_or_fallback(
-                clean_text(report_text.get("company_profile")),
-                clean_text(company_profile.get("core_business") or ""),
-            ),
-            body_style,
-        )
-    )
-
-    story.append(Paragraph("III. Innovationsziele", section_style))
-    story.append(
-        Paragraph(
-            _narrative_or_fallback(
-                clean_text(report_text.get("innovation_goals")),
-                "; ".join(innovation_goals),
-            ),
-            body_style,
-        )
-    )
-    story.append(Paragraph(_join_bullets(innovation_goals).replace("\n", "<br/>"), bullet_style))
-
-    story.append(Paragraph("IV. Gap-Analyse", section_style))
-    story.append(
-        Paragraph(
-            _narrative_or_fallback(
-                clean_text(report_text.get("gap_analysis")),
-                "; ".join(identified_gaps),
-            ),
-            body_style,
-        )
-    )
-    story.append(Paragraph(_join_bullets(identified_gaps).replace("\n", "<br/>"), bullet_style))
-
-    story.append(Paragraph("V. Startup-Suchfelder", section_style))
-    story.append(
-        Paragraph(
-            _narrative_or_fallback(
-                clean_text(report_text.get("startup_search_fields")),
-                "; ".join(startup_search_fields),
-            ),
-            body_style,
-        )
-    )
-    story.append(Paragraph(_join_bullets(startup_search_fields).replace("\n", "<br/>"), bullet_style))
-
-    story.append(Paragraph("VI. Empfohlene Startups", section_style))
-    story.append(
-        Paragraph(
-            _narrative_or_fallback(
-                clean_text(report_text.get("recommended_startups")),
-                "Die folgende Tabelle zeigt die priorisierten Startup-Kandidaten.",
-            ),
-            body_style,
-        )
-    )
-
-    raw_table_data = _recommended_table_data(recommended)
-    table_data: List[List[Any]] = []
-    for r_idx, row in enumerate(raw_table_data):
-        if r_idx == 0:
-            table_data.append(
+    # I. Titelblatt
+    logos: List[Any] = []
+    for asset in (company_logo, tool_logo):
+        if asset is None:
+            logos.append(Spacer(1, 1))
+            continue
+        logos.append(Image(str(asset), width=34 * mm, height=18 * mm, kind="proportional"))
+    if any(isinstance(x, Image) for x in logos):
+        logo_table = Table([logos], colWidths=[80 * mm, 80 * mm])
+        logo_table.setStyle(
+            TableStyle(
                 [
-                    Paragraph(clean_text(row[0]), table_header_style),
-                    Paragraph(clean_text(row[1]), table_header_style),
-                    Paragraph(clean_text(row[2]), table_header_style),
-                    Paragraph(clean_text(row[3]), table_header_style),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ]
             )
-            continue
-        table_data.append(
-            [
-                Paragraph(clean_text(row[0]), table_cell_style),
-                Paragraph(clean_text(row[1]), table_cell_style),
-                Paragraph(clean_text(row[2]), table_cell_style),
-                Paragraph(clean_text(row[3]), table_cell_style),
-            ]
         )
+        story.append(Spacer(1, 12 * mm))
+        story.append(logo_table)
 
-    table = Table(table_data, colWidths=[14 * mm, 34 * mm, 18 * mm, 108 * mm], repeatRows=1)
-    table.setStyle(
+    story.append(Spacer(1, 25 * mm))
+    story.append(Paragraph(clean_text(title) or "Startup Matchup Report", cover_title))
+    story.append(
+        Paragraph(
+            clean_text(subtitle) or "Startup-Scouting für strategische Innovationspartnerschaften",
+            cover_subtitle,
+        )
+    )
+    story.append(Spacer(1, 16 * mm))
+    story.append(Paragraph(f"<b>Unternehmen:</b> {company_name}", cover_meta))
+    story.append(Paragraph(f"<b>Datum:</b> {year_txt}", cover_meta))
+    story.append(Paragraph(f"<b>Erstellt durch:</b> {clean_text(created_by) or 'Startup Matchup Tool'}", cover_meta))
+    story.append(PageBreak())
+
+    top_startups = [
+        clean_text(item.get("startup_name") or item.get("name") or "")
+        for item in recommended
+        if isinstance(item, dict)
+    ]
+    top_startups = [x for x in top_startups if x][:5]
+
+    # II. Executive Summary
+    story.append(Paragraph("I. Executive Summary", h1))
+    story.append(
+        Paragraph(
+            _narrative_or_fallback(
+                report_text.get("executive_summary"),
+                "Die Analyse identifiziert priorisierte Startup-Kooperationspartner für strategische Innovationsfelder.",
+            ),
+            body,
+        )
+    )
+
+    executive_rows = [
+        ["Unternehmen", f"{company_name}"],
+        [
+            "Ziel der Analyse",
+            "Identifikation relevanter Startups zur Beschleunigung strategischer Innovationspartnerschaften.",
+        ],
+        [
+            "Wesentliche Innovationsfelder",
+            "<br/>".join([f"• {clean_text(x)}" for x in startup_search_fields[:4]]) or "n/a",
+        ],
+        [
+            "Ergebnis",
+            "Die Analyse identifizierte mehrere potenzielle Startup-Kooperationspartner. "
+            + (
+                "Die relevantesten Kandidaten sind: " + ", ".join(top_startups[:2]) + "."
+                if top_startups
+                else "Es liegen noch keine priorisierten Kandidaten vor."
+            ),
+        ],
+    ]
+    executive_table = Table(
+        [[Paragraph("Kategorie", table_header), Paragraph("Inhalt", table_header)]]
+        + [[Paragraph(clean_text(k), table_cell), Paragraph(clean_text(v), table_cell)] for k, v in executive_rows],
+        colWidths=[42 * mm, 128 * mm],
+    )
+    executive_table.setStyle(
         TableStyle(
             [
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8edf3")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#1b2a41")),
-                ("ALIGN", (0, 0), (0, -1), "CENTER"),
-                ("ALIGN", (2, 1), (2, -1), "RIGHT"),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1d3557")),
+                ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#b7c5d3")),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#7a8aa0")),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f7f9fc")]),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f4f7fb")]),
                 ("LEFTPADDING", (0, 0), (-1, -1), 5),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 5),
                 ("TOPPADDING", (0, 0), (-1, -1), 4),
@@ -272,58 +289,257 @@ def _render_report_pdf(*, report: Dict[str, Any], output_file: Path, title: str)
             ]
         )
     )
-    story.append(table)
-    story.append(Spacer(1, 10))
+    story.append(executive_table)
 
-    story.append(Paragraph("VII. Detailprofile der Top-Startups", section_style))
+    # III. Unternehmensprofil
+    story.append(Paragraph("II. Unternehmensprofil", h1))
+    profile_rows = [
+        ["Unternehmen", company_name],
+        ["Branche", clean_text(company_profile.get("industry")) or "n/a"],
+        ["Kerngeschäft", clean_text(company_profile.get("core_business")) or "n/a"],
+        ["Innovationsfokus", ", ".join(safe_list_str(company_profile.get("innovation_focus"))) or "n/a"],
+        [
+            "Strategische Initiativen",
+            ", ".join(safe_list_str(company_profile.get("strategic_objectives"))) or "n/a",
+        ],
+    ]
+    profile_table = Table(
+        [[Paragraph("Kategorie", table_header), Paragraph("Inhalt", table_header)]]
+        + [[Paragraph(k, table_cell), Paragraph(v, table_cell)] for k, v in profile_rows],
+        colWidths=[42 * mm, 128 * mm],
+    )
+    profile_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1d3557")),
+                ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#b7c5d3")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f4f7fb")]),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
+    story.append(profile_table)
+    story.append(
+        Paragraph(
+            _narrative_or_fallback(
+                report_text.get("company_profile"),
+                "Das Unternehmensprofil zeigt ein stark technologiegetriebenes Umfeld mit Fokus auf skalierbare Innovationspartnerschaften.",
+            ),
+            body,
+        )
+    )
+
+    # IV. Innovationsziele
+    story.append(Paragraph("III. Strategische Innovationsziele", h1))
+    story.append(
+        Paragraph(
+            _narrative_or_fallback(
+                report_text.get("innovation_goals"),
+                "Die strategischen Innovationsziele bilden die Grundlage für die Startup-Selektion.",
+            ),
+            body,
+        )
+    )
+    goal_rows = [[Paragraph(f"• {clean_text(g)}", body_small)] for g in (innovation_goals or ["n/a"])]
+    goals_box = Table(goal_rows, colWidths=[170 * mm])
+    goals_box.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#eef6ff")),
+                ("BOX", (0, 0), (-1, -1), 0.45, colors.HexColor("#7a9cc6")),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    story.append(goals_box)
+
+    # V. Gap-Analyse
+    story.append(Paragraph("IV. Gap-Analyse", h1))
+    story.append(
+        Paragraph(
+            _narrative_or_fallback(
+                report_text.get("gap_analysis"),
+                "Die Gap-Analyse zeigt priorisierte Handlungsbedarfe für eine wirksame Startup-Kooperation.",
+            ),
+            body,
+        )
+    )
+    gap_table_rows = [["Identifizierte Herausforderung", "Bedeutung"]]
+    for gap in (identified_gaps or ["Keine belastbaren Gaps identifiziert"]):
+        gap_table_rows.append([clean_text(gap), _gap_significance(gap)])
+    gap_table = Table(
+        [[Paragraph(clean_text(r[0]), table_header), Paragraph(clean_text(r[1]), table_header)] for r in gap_table_rows[:1]]
+        + [[Paragraph(clean_text(r[0]), table_cell), Paragraph(clean_text(r[1]), table_cell)] for r in gap_table_rows[1:]],
+        colWidths=[85 * mm, 85 * mm],
+    )
+    gap_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1d3557")),
+                ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#b7c5d3")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f4f7fb")]),
+            ]
+        )
+    )
+    story.append(gap_table)
+
+    # VI. Strategische Startup-Suchfelder
+    story.append(Paragraph("V. Strategische Startup-Suchfelder", h1))
+    story.append(
+        Paragraph(
+            _narrative_or_fallback(
+                report_text.get("startup_search_fields"),
+                "Die Suchfelder priorisieren die Bereiche mit dem höchsten strategischen Hebel.",
+            ),
+            body,
+        )
+    )
+    search_box_rows = [[Paragraph(f"• {clean_text(field)}", body_small)] for field in (startup_search_fields or ["n/a"])]
+    search_box = Table(search_box_rows, colWidths=[170 * mm])
+    search_box.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#edf8f2")),
+                ("BOX", (0, 0), (-1, -1), 0.45, colors.HexColor("#7aa874")),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    story.append(search_box)
+
+    # VII. Startup-Ranking
+    story.append(Paragraph("VI. Startup-Ranking", h1))
+    story.append(
+        Paragraph(
+            _narrative_or_fallback(
+                report_text.get("recommended_startups"),
+                "Die folgende Tabelle zeigt die priorisierten Startup-Kandidaten inklusive Relevanzbewertung.",
+            ),
+            body,
+        )
+    )
+
+    ranking_rows = [["Rank", "Startup", "Relevanz", "Kurzbeschreibung"]]
+    if not recommended:
+        ranking_rows.append(["-", "Keine empfohlenen Startups verfügbar", "-", "-"])
     for item in recommended:
         if not isinstance(item, dict):
             continue
+        score = float(item.get("relevance_score") or 0.0)
+        ranking_rows.append(
+            [
+                str(int(item.get("rank") or 0)),
+                clean_text(item.get("startup_name") or item.get("name") or "n/a"),
+                _score_bar(score),
+                clean_text(item.get("short_description") or "n/a"),
+            ]
+        )
+
+    ranking_table = Table(
+        [[Paragraph(clean_text(x), table_header) for x in ranking_rows[0]]]
+        + [[Paragraph(clean_text(x), table_cell) for x in row] for row in ranking_rows[1:]],
+        colWidths=[14 * mm, 28 * mm, 34 * mm, 80 * mm],
+        repeatRows=1,
+    )
+    ranking_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1d3557")),
+                ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#b7c5d3")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ALIGN", (0, 0), (0, -1), "CENTER"),
+                ("ALIGN", (2, 1), (2, -1), "LEFT"),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f4f7fb")]),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
+    story.append(ranking_table)
+    story.append(Spacer(1, 6))
+
+    # VIII. Detailprofile der Startups
+    story.append(Paragraph("VII. Detailprofile der Startups", h1))
+    for item in recommended:
+        if not isinstance(item, dict):
+            continue
+
         profile = item.get("profile") if isinstance(item.get("profile"), dict) else {}
-        name = clean_text(item.get("startup_name") or profile.get("name") or "")
-        story.append(Paragraph(name or "Startup", startup_title_style))
+        name = clean_text(item.get("startup_name") or profile.get("name") or "Startup")
 
-        detail_rows: List[List[Any]] = []
+        card_header = Table([[Paragraph(name, ParagraphStyle("CardTitle", parent=h2, fontSize=12.5, textColor=colors.white))]], colWidths=[170 * mm])
+        card_header.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#2a4d69")), ("LEFTPADDING", (0, 0), (-1, -1), 6), ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]))
+        story.append(card_header)
 
-        def _add_detail(label: str, value: Any) -> None:
-            if isinstance(value, list):
-                value_txt = ", ".join(safe_list_str(value))
-            else:
-                value_txt = clean_text(value)
-            if not value_txt:
-                return
-            detail_rows.append(
+        website = clean_text(profile.get("website") or profile.get("url") or "")
+        website_render = f"<link href='{website}' color='blue'>{website}</link>" if website else "n/a"
+
+        details = [
+            ["Gründungsjahr", clean_text(profile.get("founding_year")) or "n/a"],
+            ["Standort", clean_text(profile.get("location")) or "n/a"],
+            ["Technologiefokus", ", ".join(safe_list_str(profile.get("technology_focus"))) or "n/a"],
+            ["Beschreibung", clean_text(profile.get("description") or item.get("short_description")) or "n/a"],
+            ["Begründung der Relevanz", clean_text(profile.get("why_relevant")) or "n/a"],
+            ["Webseite", website_render],
+            ["Relevance Score", f"{float(item.get('relevance_score') or profile.get('relevance_score') or 0.0):.2f}"],
+        ]
+
+        detail_table = Table(
+            [[Paragraph("Kategorie", table_header), Paragraph("Inhalt", table_header)]]
+            + [[Paragraph(clean_text(k), table_cell), Paragraph(v if k == "Webseite" else clean_text(v), table_cell)] for k, v in details],
+            colWidths=[45 * mm, 125 * mm],
+        )
+        detail_table.setStyle(
+            TableStyle(
                 [
-                    Paragraph(label, meta_label_style),
-                    Paragraph(value_txt, meta_value_style),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1d3557")),
+                    ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#b7c5d3")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f4f7fb")]),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
                 ]
             )
-
-        _add_detail("Gruendungsjahr", profile.get("founding_year"))
-        _add_detail("Standort", profile.get("location"))
-        _add_detail("Technologiefokus", profile.get("technology_focus"))
-        _add_detail("Relevanzbegruendung", profile.get("why_relevant"))
-        _add_detail("Webseite", profile.get("website") or profile.get("url"))
-        _add_detail("Relevanzscore", f"{float(item.get('relevance_score') or profile.get('relevance_score') or 0.0):.4f}")
-
-        if detail_rows:
-            detail_table = Table(detail_rows, colWidths=[34 * mm, 140 * mm])
-            detail_table.setStyle(
-                TableStyle(
-                    [
-                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                        ("LINEBELOW", (0, 0), (-1, -2), 0.25, colors.HexColor("#d4dbe5")),
-                        ("LEFTPADDING", (0, 0), (-1, -1), 3),
-                        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-                        ("TOPPADDING", (0, 0), (-1, -1), 2),
-                        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-                    ]
-                )
-            )
-            story.append(detail_table)
+        )
+        story.append(detail_table)
         story.append(Spacer(1, 6))
 
-    doc.build(story)
+    # IX. Fazit und nächste Schritte
+    story.append(Paragraph("VIII. Fazit und nächste Schritte", h1))
+    story.append(
+        Paragraph(
+            _narrative_or_fallback(
+                report_text.get("conclusion_next_steps"),
+                "Die priorisierten Startups bieten kurzfristige Ansatzpunkte für Pilotprojekte und strategische Kooperationen.",
+            ),
+            body,
+        )
+    )
+    next_steps = [
+        "Kurzprüfung der identifizierten Startups mit Fokus auf strategische Passung und Umsetzbarkeit.",
+        "Kontaktaufnahme mit den Top-Kandidaten und Definition eines strukturierten Evaluationsprozesses.",
+        "Durchführung von Pilotprojekten in den priorisierten Innovationsfeldern.",
+        "Aufbau eines kontinuierlichen Startup-Scouting-Prozesses mit klaren Governance-Regeln.",
+    ]
+    for idx, step in enumerate(next_steps, start=1):
+        story.append(Paragraph(f"{idx}. {step}", body_small))
+
+    doc.build(story, onFirstPage=_draw_page_number, onLaterPages=_draw_page_number)
     return output_file.stat().st_size
 
 
@@ -337,11 +553,24 @@ def run_step_9(*, req: StartupMatchupStep9Request, user_root: Path, work_root: P
     )
 
     output = _resolve_output_path(req.output_path, work_root)
-    bytes_written = _render_report_pdf(report=report, output_file=output, title=req.title)
+    company_logo = _resolve_optional_asset_path(req.company_logo_path, user_root, work_root)
+    tool_logo = _resolve_optional_asset_path(req.tool_logo_path, user_root, work_root)
+
+    bytes_written = _render_report_pdf(
+        report=report,
+        output_file=output,
+        title=req.title,
+        subtitle=req.subtitle,
+        company_name_override=req.company_name,
+        report_year=req.report_year,
+        created_by=req.created_by,
+        company_logo=company_logo,
+        tool_logo=tool_logo,
+    )
 
     return PdfReportResult(
         output_path=str(req.output_path),
         bytes_written=bytes_written,
         title=req.title,
-        text_preview="PDF generated with formatted headings, narrative sections and startup table.",
+        text_preview="PDF generated with title page, structured sections, professional tables, ranking visuals and final recommendations.",
     )

@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 
 from server.workflows.startup_matchup.common import (
     brave_answers_text,
+    clamp_score,
     clean_text,
     domain_of,
     load_json_obj,
@@ -43,6 +44,7 @@ def run_step_6(*, req: StartupMatchupStep6Request, user_root: Path, work_root: P
     for row in selected:
         name = clean_text(row.get("name") or row.get("startup_name") or "")
         website = normalize_website(row.get("website") or row.get("url") or "")
+        relevance_score = clamp_score(row.get("relevance_score") or 0.0)
         query = _build_query(name or domain_of(website), website)
         raw_text = brave_answers_text(
             query=query,
@@ -63,6 +65,7 @@ def run_step_6(*, req: StartupMatchupStep6Request, user_root: Path, work_root: P
                 domain=domain_of(website),
                 query=query,
                 raw_text=clean_text(raw_text),
+                relevance_score=relevance_score,
                 source="brave_answers",
             )
         )

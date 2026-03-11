@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 from server.workflows.startup_matchup.common import (
     clean_text,
@@ -13,7 +13,6 @@ from server.workflows.startup_matchup.common import (
     load_json_obj,
     location_from_text,
     normalize_website,
-    overlap_score,
     pick_year_from_text,
     safe_list_str,
 )
@@ -64,20 +63,6 @@ _TECH_HINTS = [
 ]
 
 
-def _build_ranked_lookup(ranked: Dict[str, Any]) -> Dict[Tuple[str, str], float]:
-    out: Dict[Tuple[str, str], float] = {}
-    items = ranked.get("startups") if isinstance(ranked.get("startups"), list) else []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        name = clean_text(item.get("name") or item.get("startup_name") or "").lower()
-        website = normalize_website(item.get("website") or item.get("url") or "")
-        domain = domain_of(website)
-        score = clamp_score(item.get("relevance_score") or 0.0)
-        out[(name, domain)] = score
-    return out
-
-
 def _heuristic_tech_focus(text: str) -> List[str]:
     low = clean_text(text).lower()
     out: List[str] = []
@@ -104,17 +89,7 @@ def run_step_7(*, req: StartupMatchupStep7Request, user_root: Path, work_root: P
         user_root=user_root,
         work_root=work_root,
     ) if (req.gap_analysis or req.gap_analysis_path) else {}
-    ranked = load_json_obj(
-        inline_obj=req.startup_ranked_list,
-        path=req.startup_ranked_list_path,
-        root_key="startup_ranked_list",
-        user_root=user_root,
-        work_root=work_root,
-    ) if (req.startup_ranked_list or req.startup_ranked_list_path) else {}
-
-    ranking_lookup = _build_ranked_lookup(ranked)
     search_fields = safe_list_str(gap.get("startup_search_fields"))
-    target_blob = "\n".join(search_fields)
 
     research_items = raw.get("startup_research") if isinstance(raw.get("startup_research"), list) else []
     profiles: List[StructuredStartupProfile] = []
@@ -132,10 +107,10 @@ def run_step_7(*, req: StartupMatchupStep7Request, user_root: Path, work_root: P
         fallback_year = pick_year_from_text(raw_text)
         fallback_location = location_from_text(raw_text)
         fallback_focus = _heuristic_tech_focus(raw_text)
-        overlap = overlap_score(raw_text, target_blob)
-
-        rank_score = ranking_lookup.get((name.lower(), domain), 0.0)
-        fallback_score = clamp_score(0.6 * overlap + 0.4 * rank_score)
+        # User requirement: Step7 must carry relevance_score from Step6 (which comes from Step5).
+        carried_score = clamp_score(item.get("relevance_score") or 0.0)
+        if carried_score == 0.0 and "relevance_score" not in item:
+            warnings.append(f"Step7 missing relevance_score in Step6 item for startup: {name or domain}")
 
         fallback_profile = {
             "name": name,
@@ -143,10 +118,8 @@ def run_step_7(*, req: StartupMatchupStep7Request, user_root: Path, work_root: P
             "location": fallback_location,
             "technology_focus": fallback_focus,
             "description": raw_text[:400],
-            "why_relevant": (
-                f"Matches search fields with overlap score {round(overlap, 3)} and ranked score {round(rank_score, 3)}."
-            ),
-            "relevance_score": fallback_score,
+            "why_relevant": "Relevant based on ranking score carried from previous steps.",
+            "relevance_score": carried_score,
         }
 
         system_prompt = (
@@ -177,7 +150,7 @@ def run_step_7(*, req: StartupMatchupStep7Request, user_root: Path, work_root: P
                 technology_focus=safe_list_str(source.get("technology_focus")) or fallback_focus,
                 description=clean_text(source.get("description")) or fallback_profile["description"],
                 why_relevant=clean_text(source.get("why_relevant")) or fallback_profile["why_relevant"],
-                relevance_score=clamp_score(source.get("relevance_score") if isinstance(source, dict) else fallback_score),
+                relevance_score=carried_score,
                 website=website,
                 domain=domain,
             )

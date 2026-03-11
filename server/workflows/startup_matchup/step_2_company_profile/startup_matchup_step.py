@@ -88,43 +88,15 @@ def _derive_profile_queries(company_name: str, workshop: Dict[str, Any], max_que
 
 def _derive_startup_intent_queries(
     *,
+    target_use_cases: List[str],
     technology_domains: List[str],
     innovation_focus: List[str],
     strategic_objectives: List[str],
     max_queries: int,
 ) -> List[str]:
-    domains = safe_list_str(technology_domains, limit=20)
-    focus_items = safe_list_str(innovation_focus, limit=20)
-    objectives = safe_list_str(strategic_objectives, limit=20)
-
-    if not domains:
-        domains = ["technology domain"]
-    if not focus_items:
-        focus_items = ["innovation focus"]
-    if not objectives:
-        objectives = ["strategic objective"]
-
-    queries: List[str] = []
-    seen: set[str] = set()
-
-    # Every query includes startup intent + technology domain + innovation focus + strategic objective.
-    for o_idx, objective in enumerate(objectives[:5]):
-        for d_idx, domain in enumerate(domains[:5]):
-            focus = focus_items[(o_idx + d_idx) % len(focus_items)]
-            q = (
-                f"startup scaleup collaboration {domain} {focus} "
-                f"{objective} enterprise pilot partnership"
-            )
-            q_clean = clean_text(q)
-            key = q_clean.lower()
-            if not q_clean or key in seen:
-                continue
-            seen.add(key)
-            queries.append(q_clean)
-            if len(queries) >= max_queries:
-                return queries
-
-    return queries[:max_queries]
+    # User requirement: Step2 research_queries are a 1:1 carry-over from Step1 target_use_cases.
+    _ = (technology_domains, innovation_focus, strategic_objectives)  # kept for stable signature
+    return safe_list_str(target_use_cases)[:max_queries]
 
 
 def run_step_2(*, req: StartupMatchupStep2Request, user_root: Path, work_root: Path) -> CompanyProfile:
@@ -195,6 +167,7 @@ def run_step_2(*, req: StartupMatchupStep2Request, user_root: Path, work_root: P
         strategic_objectives = safe_list_str(workshop.get("innovation_goals"))[:8]
 
     startup_intent_queries = _derive_startup_intent_queries(
+        target_use_cases=safe_list_str(workshop.get("target_use_cases"))[:20],
         technology_domains=technology_domains,
         innovation_focus=innovation_focus,
         strategic_objectives=strategic_objectives,

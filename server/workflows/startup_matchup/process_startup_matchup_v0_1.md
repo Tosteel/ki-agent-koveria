@@ -169,7 +169,8 @@ Output: `step5_startup_ranked_list.json`
         "startup_structured_list_path": "step4_1_startup_structured.json",
         "company_profile_path": "step2_company_profile.json",
         "gap_analysis_path": "step3_gap_analysis.json",
-        "top_k": 25
+        "top_k": 25,
+        "provider": "ionos"
       }
     },
     {
@@ -287,7 +288,13 @@ Output: `startup_matchup_report.pdf`
       "args": {
         "final_report_path": "step8_final_report.json",
         "output_path": "startup_matchup_report.pdf",
-        "title": "Startup Matchup Report"
+        "title": "Startup Matchup Report",
+        "subtitle": "Startup-Scouting für strategische Innovationspartnerschaften",
+        "company_name": null,
+        "report_year": 2026,
+        "created_by": "Startup Matchup Tool",
+        "company_logo_path": null,
+        "tool_logo_path": null
       }
     }
   ]

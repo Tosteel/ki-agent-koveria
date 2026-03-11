@@ -11,6 +11,7 @@ class DeepResearchItem(BaseModel):
     domain: str = ""
     query: str = ""
     raw_text: str = ""
+    relevance_score: float = 0.0
     source: str = "brave_answers"
 
 

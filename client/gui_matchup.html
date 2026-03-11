@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Startup Matchup GUI</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f4f7fb;
+      color: #1c2a39;
+    }
+    .wrap {
+      max-width: 760px;
+      margin: 32px auto;
+      background: #ffffff;
+      border: 1px solid #d9e1ea;
+      border-radius: 10px;
+      padding: 20px;
+    }
+    h1 {
+      margin: 0 0 16px;
+      font-size: 22px;
+    }
+    .row {
+      margin-bottom: 12px;
+    }
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #b9c8d8;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 14px;
+    }
+    input[type="file"] {
+      padding: 6px;
+    }
+    button {
+      border: 0;
+      border-radius: 8px;
+      background: #1d3557;
+      color: #fff;
+      font-weight: 600;
+      padding: 10px 14px;
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+    .status {
+      margin-top: 14px;
+      padding: 10px;
+      border-radius: 6px;
+      font-size: 14px;
+      white-space: pre-wrap;
+    }
+    .ok { background: #e9f7ef; border: 1px solid #90d2a0; }
+    .err { background: #fdecec; border: 1px solid #f2a4a4; }
+    pre {
+      margin-top: 12px;
+      padding: 10px;
+      background: #0f1720;
+      color: #d8e4f2;
+      border-radius: 6px;
+      overflow: auto;
+      max-height: 320px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Startup Matchup Bericht</h1>
+    <form id="matchupForm">
+      <div class="row">
+        <label for="workshop_file">Workshop-Ergebnisse</label>
+        <input id="workshop_file" name="workshop_file" type="file" required />
+      </div>
+
+      <div class="row">
+        <label for="company_name_step2">Eindeutige Unternehmensbezeichnung für die Web-Suche</label>
+        <input id="company_name_step2" name="company_name_step2" type="text" required />
+      </div>
+
+      <div class="row">
+        <label for="company_name_step9">Unternehmensbezeichnung im Bericht</label>
+        <input id="company_name_step9" name="company_name_step9" type="text" required />
+      </div>
+
+      <div class="row">
+        <label for="report_year">Jahreszahl im Bericht</label>
+        <input id="report_year" name="report_year" type="number" min="2000" max="2100" value="2026" required />
+      </div>
+
+      <div class="row">
+        <label for="created_by">Erstellt von</label>
+        <input id="created_by" name="created_by" type="text" value="Startup Matchup Tool" required />
+      </div>
+
+      <div class="row">
+        <label for="startup_count">Anzahl Startups</label>
+        <input id="startup_count" name="startup_count" type="number" min="5" max="30" value="10" required />
+      </div>
+
+      <div class="row">
+        <label for="recipient_email">E-Mail-Adresse fuer den Bericht</label>
+        <input id="recipient_email" name="recipient_email" type="email" required />
+      </div>
+
+      <button id="submitBtn" type="submit">Bericht erstellen</button>
+    </form>
+
+    <div id="status" class="status" style="display:none;"></div>
+    <pre id="jsonOut" style="display:none;"></pre>
+  </div>
+
+  <script>
+    const form = document.getElementById("matchupForm");
+    const submitBtn = document.getElementById("submitBtn");
+    const statusEl = document.getElementById("status");
+    const jsonOut = document.getElementById("jsonOut");
+
+    function showStatus(text, ok) {
+      statusEl.style.display = "block";
+      statusEl.className = `status ${ok ? "ok" : "err"}`;
+      statusEl.textContent = text;
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      submitBtn.disabled = true;
+      jsonOut.style.display = "none";
+      showStatus("Verarbeite Step 1 bis Step 9. Bitte warten...", true);
+
+      const fd = new FormData(form);
+      try {
+        const resp = await fetch("/api/report/create", {
+          method: "POST",
+          body: fd
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          const detail = typeof data?.detail === "string" ? data.detail : JSON.stringify(data?.detail || data);
+          showStatus(`Fehler: ${detail}`, false);
+          return;
+        }
+
+        showStatus(
+          `Fertig.\nUpload: ${data.upload_path || "-"}\nPDF: ${data.pdf_output_path || "(kein Pfad erkannt)"}`,
+          true
+        );
+        jsonOut.style.display = "block";
+        jsonOut.textContent = JSON.stringify(data.agent_response, null, 2);
+      } catch (err) {
+        showStatus(`Fehler: ${err}`, false);
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
