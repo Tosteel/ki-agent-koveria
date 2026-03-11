@@ -27,6 +27,8 @@ class StartupMatchupStep5Request(BaseModel):
     company_profile: Optional[Dict[str, Any]] = None
     company_profile_path: Optional[str] = None
     top_k: int = Field(default=25, ge=5, le=100)
+    provider: str = "ionos"
+    max_context_chars: int = Field(default=12000, ge=2000, le=40000)
 
     @model_validator(mode="after")
     def _validate_inputs(self) -> "StartupMatchupStep5Request":

@@ -12,6 +12,7 @@ class FinalReportNarrative(BaseModel):
     gap_analysis: str = ""
     startup_search_fields: str = ""
     recommended_startups: str = ""
+    conclusion_next_steps: str = ""
 
 
 class RecommendedStartup(BaseModel):

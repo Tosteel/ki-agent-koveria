@@ -250,11 +250,10 @@ def brave_answers_text(
             messages=[{"role": "user", "content": q}],
             stream=stream,
             enable_research=enable_research,
-            language=language,
-            country=country,
             timeout_s=timeout_s,
         )
-        return clean_text(llm.extract_text(resp))
+        # Keep Brave output as-is for downstream raw persistence.
+        return llm.extract_text(resp)
     except Exception as exc:
         warnings.append(f"brave query failed: {exc}")
         return ""

@@ -15,7 +15,7 @@ security = HTTPBearer(auto_error=False)
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post("/offerflow/step-4/run", response_model=OfferflowStep4Response)
+    #@router.post("/offerflow/step-4/run", response_model=OfferflowStep4Response)
     def run_offerflow_step_4(
         req: OfferflowStep4Request,
         user_id: str = Depends(get_current_user),

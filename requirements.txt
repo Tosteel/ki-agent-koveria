@@ -3,3 +3,4 @@ beautifulsoup4
 playwright
 pypdf
 langchain-core
+langgraph

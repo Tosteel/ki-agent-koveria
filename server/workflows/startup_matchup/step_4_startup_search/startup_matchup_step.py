@@ -6,9 +6,7 @@ from typing import List
 from server.workflows.startup_matchup.common import (
     brave_answers_text,
     clean_text,
-    dedupe_startup_hits,
     load_json_obj,
-    parse_startup_hits,
     safe_list_str,
 )
 
@@ -27,14 +25,8 @@ def _fallback_queries(gap_analysis: dict, max_queries: int) -> List[str]:
     return out[:max_queries]
 
 
-def _build_brave_query(query: str, per_query_results: int) -> str:
-    q = clean_text(query)
-    return (
-        f"Find up to {per_query_results} relevant startup companies for: {q}. "
-        "Return structured JSON with key search_results and items having snippet, url, source. "
-        "Do not invent startup names; leave startup_name empty if unknown. "
-        "Include only publicly reachable company websites."
-    )
+def _build_brave_query(query: str) -> str:
+    return clean_text(query)
 
 
 def run_step_4(*, req: StartupMatchupStep4Request, user_root: Path, work_root: Path) -> StartupCandidatesRaw:
@@ -57,7 +49,7 @@ def run_step_4(*, req: StartupMatchupStep4Request, user_root: Path, work_root: P
     rows: List[dict] = []
     logs: List[QueryLog] = []
     for query in queries:
-        brave_query = _build_brave_query(query, req.per_query_results)
+        brave_query = _build_brave_query(query)
         raw_text = brave_answers_text(
             query=brave_query,
             enable_research=req.brave_enable_research,
@@ -66,16 +58,18 @@ def run_step_4(*, req: StartupMatchupStep4Request, user_root: Path, work_root: P
             country=req.brave_country,
             warnings=warnings,
         )
-        logs.append(QueryLog(query=query, result_excerpt=clean_text(raw_text)))
+        logs.append(QueryLog(query=query, result_excerpt=raw_text))
 
-        parsed_rows = parse_startup_hits(raw_text, source_query=query, max_hits=req.per_query_results)
-        if not parsed_rows:
-            warnings.append(f"No startup hits extracted for query: {query}")
-            continue
-        rows.extend(parsed_rows)
+        # Raw passthrough: keep Brave response 1:1 in step4 output without parsing.
+        rows.append(
+            {
+                "snippet": raw_text,
+                "url": "",
+                "source": "brave_answers",
+            }
+        )
 
-    deduped = dedupe_startup_hits(rows, max_items=500)
-    search_results = [StartupSearchResult(**r) for r in deduped]
+    search_results = [StartupSearchResult(**r) for r in rows]
 
     if not search_results:
         warnings.append("Startup search returned no candidates.")

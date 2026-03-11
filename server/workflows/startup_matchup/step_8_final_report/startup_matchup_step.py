@@ -275,6 +275,10 @@ def run_step_8(*, req: StartupMatchupStep8Request, user_root: Path, work_root: P
         if top_names
         else "Derzeit liegen keine priorisierten Startup-Empfehlungen vor."
     )
+    fallback_conclusion = (
+        "Als naechste Schritte werden eine Kurzpruefung der Top-Startups, "
+        "eine priorisierte Kontaktaufnahme sowie die Vorbereitung von Pilotprojekten empfohlen."
+    )
 
     report.report = FinalReportNarrative(
         company_profile=_section_report_text(
@@ -315,6 +319,30 @@ def run_step_8(*, req: StartupMatchupStep8Request, user_root: Path, work_root: P
             section_title="Empfohlene Startups",
             context=startups_ctx,
             fallback_text=fallback_recommended,
+            warnings=warnings,
+        ),
+        conclusion_next_steps=_section_report_text(
+            provider=req.provider,
+            section_key="conclusion_next_steps",
+            section_title="Fazit und naechste Schritte",
+            context=compact_context(
+                [
+                    {"identified_gaps": report.identified_gaps[:10]},
+                    {"startup_search_fields": report.startup_search_fields[:10]},
+                    {
+                        "recommended_startups": [
+                            {
+                                "rank": r.rank,
+                                "name": r.startup_name,
+                                "relevance_score": r.relevance_score,
+                            }
+                            for r in report.recommended_startups[:8]
+                        ]
+                    },
+                ],
+                max_chars=req.max_context_chars,
+            ),
+            fallback_text=fallback_conclusion,
             warnings=warnings,
         ),
     )

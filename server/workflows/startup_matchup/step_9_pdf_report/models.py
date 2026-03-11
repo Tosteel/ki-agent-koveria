@@ -17,6 +17,12 @@ class StartupMatchupStep9Request(BaseModel):
     final_report_path: Optional[str] = None
     output_path: str = Field(default="startup_matchup_report.pdf", min_length=5)
     title: str = "Startup Matchup Report"
+    subtitle: str = "Startup-Scouting für strategische Innovationspartnerschaften"
+    company_name: Optional[str] = None
+    report_year: Optional[int] = Field(default=None, ge=2000, le=2100)
+    created_by: str = "Startup Matchup Tool"
+    company_logo_path: Optional[str] = None
+    tool_logo_path: Optional[str] = None
 
     @model_validator(mode="after")
     def _validate_inputs(self) -> "StartupMatchupStep9Request":

@@ -96,6 +96,9 @@ Optional fuer Tools:
 EBAY_APP_ID=
 RAG_BASE_URL=http://localhost:8005
 SEARCH_BASE_URL=http://localhost:8002
+# Runtime fuer Planner/Tool-Dispatch:
+# langgraph (Default), langchain, legacy
+KOVERIA_RUNTIME=langgraph
 ```
 
 ### 2) Auth-Token

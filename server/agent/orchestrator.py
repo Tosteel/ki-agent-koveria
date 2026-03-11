@@ -2,14 +2,30 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, TypedDict
 
 from pydantic import ValidationError
 
 from ..agent.models import AgentStep
-from ..agent.langchain_runtime import dispatch_tool_chain
+from ..agent.langchain_runtime import dispatch_tool_chain, tool_dispatch_runtime_mode
 from ..agent.policies import tools_allowed
 from ..agent.tool_registry import ToolRegistry, ToolContext
+
+try:
+    from langgraph.graph import END, StateGraph
+
+    HAS_LANGGRAPH = True
+except Exception:
+    HAS_LANGGRAPH = False
+    END = None  # type: ignore[assignment]
+    StateGraph = None  # type: ignore[assignment]
+
+
+class _WorkflowState(TypedDict, total=False):
+    steps: List[Dict[str, Any]]
+    index: int
+    payload: Dict[str, Any]
+    outputs: List[Dict[str, Any]]
 
 
 class Orchestrator:
@@ -17,51 +33,115 @@ class Orchestrator:
         self.registry = registry
 
     def run_steps(self, ctx: ToolContext, steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if tool_dispatch_runtime_mode() == "langgraph" and HAS_LANGGRAPH:
+            return self._run_steps_langgraph(ctx, steps)
+        return self._run_steps_legacy(ctx, steps)
+
+    def _run_steps_legacy(self, ctx: ToolContext, steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         outputs: List[Dict[str, Any]] = []
         payload: Dict[str, Any] = {}
 
         for i, raw_step in enumerate(steps, start=1):
-            try:
-                step = AgentStep.model_validate(raw_step).model_dump()
-            except ValidationError as e:
-                entry = {
-                    "step": i,
-                    "tool": str((raw_step or {}).get("tool") if isinstance(raw_step, dict) else ""),
-                    "ok": False,
-                    "error": f"invalid_step_schema: {e.errors()}",
-                    "payload": payload,
-                }
-                outputs.append(entry)
-                self._log_step_output(entry)
-                continue
-
-            tool = (step.get("tool") or "").strip()
-            args = self._merge_with_payload(step.get("args") or {}, payload)
-            goal = (getattr(ctx, "goal", "") or "").strip()
-            if goal and "goal" not in args:
-                args["goal"] = goal
-            args = self._resolve_placeholders(args, outputs, payload)
-            expected = self.registry.expected_input(tool)
-            self._log_step_input(i, tool, args, expected)
-
-            if not tools_allowed(tool):
-                entry = {"step": i, "tool": tool, "ok": False, "error": "tool_not_allowed", "payload": payload}
-                outputs.append(entry)
-                self._log_step_output(entry)
-                continue
-
-            try:
-                res = dispatch_tool_chain(registry=self.registry, tool_name=tool, ctx=ctx, args=args)
-                payload = self._as_payload(res, i, tool)
-                entry = {"step": i, "tool": tool, "ok": True, "result": res, "payload": payload}
-                outputs.append(entry)
-                self._log_step_output(entry)
-            except Exception as e:
-                entry = {"step": i, "tool": tool, "ok": False, "error": str(e), "payload": payload}
-                outputs.append(entry)
-                self._log_step_output(entry)
+            payload, entry = self._execute_single_step(
+                step_no=i,
+                raw_step=raw_step,
+                ctx=ctx,
+                payload=payload,
+                outputs=outputs,
+            )
+            outputs.append(entry)
+            self._log_step_output(entry)
 
         return outputs
+
+    def _run_steps_langgraph(self, ctx: ToolContext, steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not HAS_LANGGRAPH:
+            return self._run_steps_legacy(ctx, steps)
+
+        def _execute_step(state: _WorkflowState) -> Dict[str, Any]:
+            idx = int(state.get("index") or 0)
+            raw_steps = state.get("steps") or []
+            if idx < 0 or idx >= len(raw_steps):
+                return {}
+
+            payload = dict(state.get("payload") or {})
+            outputs = list(state.get("outputs") or [])
+            payload, entry = self._execute_single_step(
+                step_no=idx + 1,
+                raw_step=raw_steps[idx],
+                ctx=ctx,
+                payload=payload,
+                outputs=outputs,
+            )
+            outputs.append(entry)
+            self._log_step_output(entry)
+            return {"index": idx + 1, "payload": payload, "outputs": outputs}
+
+        def _route(state: _WorkflowState) -> str:
+            idx = int(state.get("index") or 0)
+            raw_steps = state.get("steps") or []
+            return "continue" if idx < len(raw_steps) else "end"
+
+        graph_builder = StateGraph(_WorkflowState)
+        graph_builder.add_node("execute_step", _execute_step)
+        graph_builder.set_entry_point("execute_step")
+        graph_builder.add_conditional_edges(
+            "execute_step",
+            _route,
+            {
+                "continue": "execute_step",
+                "end": END,
+            },
+        )
+        graph = graph_builder.compile()
+        out = graph.invoke({"steps": steps, "index": 0, "payload": {}, "outputs": []})
+
+        if isinstance(out, dict) and isinstance(out.get("outputs"), list):
+            return out.get("outputs") or []
+        return []
+
+    def _execute_single_step(
+        self,
+        *,
+        step_no: int,
+        raw_step: Dict[str, Any],
+        ctx: ToolContext,
+        payload: Dict[str, Any],
+        outputs: List[Dict[str, Any]],
+    ) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        try:
+            step = AgentStep.model_validate(raw_step).model_dump()
+        except ValidationError as e:
+            entry = {
+                "step": step_no,
+                "tool": str((raw_step or {}).get("tool") if isinstance(raw_step, dict) else ""),
+                "ok": False,
+                "error": f"invalid_step_schema: {e.errors()}",
+                "payload": payload,
+            }
+            return payload, entry
+
+        tool = (step.get("tool") or "").strip()
+        args = self._merge_with_payload(step.get("args") or {}, payload)
+        goal = (getattr(ctx, "goal", "") or "").strip()
+        if goal and "goal" not in args:
+            args["goal"] = goal
+        args = self._resolve_placeholders(args, outputs, payload)
+        expected = self.registry.expected_input(tool)
+        self._log_step_input(step_no, tool, args, expected)
+
+        if not tools_allowed(tool):
+            entry = {"step": step_no, "tool": tool, "ok": False, "error": "tool_not_allowed", "payload": payload}
+            return payload, entry
+
+        try:
+            res = dispatch_tool_chain(registry=self.registry, tool_name=tool, ctx=ctx, args=args)
+            new_payload = self._as_payload(res, step_no, tool)
+            entry = {"step": step_no, "tool": tool, "ok": True, "result": res, "payload": new_payload}
+            return new_payload, entry
+        except Exception as e:
+            entry = {"step": step_no, "tool": tool, "ok": False, "error": str(e), "payload": payload}
+            return payload, entry
 
     @staticmethod
     def _merge_with_payload(args: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
