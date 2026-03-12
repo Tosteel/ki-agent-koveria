@@ -80,6 +80,18 @@ class MailUnansweredFetchRequest(BaseModel):
     mailbox: str = Field(default="INBOX", description="Mailbox fuer die Suche nach unbeantworteten E-Mails.")
 
 
+class MailReadRequest(BaseModel):
+    mail_id: str = Field(..., min_length=1, description="UID der zu lesenden E-Mail.")
+    mailbox: str = Field(default="INBOX", description="Mailbox der E-Mail.")
+    include_html: bool = Field(default=False, description="Wenn True, wird HTML-Inhalt ebenfalls zurueckgegeben.")
+    max_chars: int = Field(
+        default=20000,
+        ge=500,
+        le=200000,
+        description="Maximale Zeichenlaenge fuer body_text/body_html.",
+    )
+
+
 class MailInboxItem(BaseModel):
     uid: str = ""
     from_email: str = ""
@@ -96,6 +108,24 @@ class MailInboxFetchResponse(BaseModel):
     text: str = ""
 
 
+class MailReadResponse(BaseModel):
+    mailbox: str = "INBOX"
+    mail_id: str = ""
+    from_email: str = ""
+    to: List[str] = Field(default_factory=list)
+    cc: List[str] = Field(default_factory=list)
+    subject: str = ""
+    date: str = ""
+    message_id: str = ""
+    in_reply_to: str = ""
+    references: str = ""
+    has_attachments: bool = False
+    attachment_names: List[str] = Field(default_factory=list)
+    body_text: str = ""
+    body_html: str = ""
+    text: str = ""
+
+
 __all__ = [
     "MailSendRequest",
     "MailSendResponse",
@@ -104,4 +134,6 @@ __all__ = [
     "MailInboxFetchRequest",
     "MailUnansweredFetchRequest",
     "MailInboxFetchResponse",
+    "MailReadRequest",
+    "MailReadResponse",
 ]

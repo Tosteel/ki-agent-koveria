@@ -4,12 +4,14 @@ from typing import Any, Dict
 
 from server.agent.tool_registry import ToolContext, ToolRegistry
 
-from .mail import answer_mail, fetch_inbox_mails, fetch_unanswered_mails, send_mail
+from .mail import answer_mail, fetch_inbox_mails, fetch_unanswered_mails, read_mail, send_mail
 from .models import (
     MailAnswerRequest,
     MailAnswerResponse,
     MailInboxFetchRequest,
     MailInboxFetchResponse,
+    MailReadRequest,
+    MailReadResponse,
     MailUnansweredFetchRequest,
     MailSendRequest,
     MailSendResponse,
@@ -62,6 +64,16 @@ def register(registry: ToolRegistry) -> None:
         )
         return MailAnswerResponse(**result).model_dump()
 
+    def tool_read_mail(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+        req = MailReadRequest(**args)
+        result = read_mail(
+            mail_id=req.mail_id,
+            mailbox=req.mailbox,
+            include_html=req.include_html,
+            max_chars=req.max_chars,
+        )
+        return MailReadResponse(**result).model_dump()
+
     registry.register(
         "send_mail",
         tool_send_mail,
@@ -85,4 +97,10 @@ def register(registry: ToolRegistry) -> None:
         tool_answer_mail,
         request_model=MailAnswerRequest,
         response_model=MailAnswerResponse,
+    )
+    registry.register(
+        "read_mail",
+        tool_read_mail,
+        request_model=MailReadRequest,
+        response_model=MailReadResponse,
     )

@@ -31,12 +31,7 @@ def _requested_runtime() -> str:
     if raw is not None and str(raw).strip():
         mode = str(raw).strip().lower()
     else:
-        # Backward compatibility with existing deployments.
-        legacy_flag = os.getenv("KOVERIA_USE_LANGCHAIN")
-        if legacy_flag is not None:
-            mode = "langchain" if str(legacy_flag).strip().lower() not in {"0", "false", "no", "off"} else "legacy"
-        else:
-            mode = "langgraph"
+        mode = "langgraph"
 
     if mode not in {"legacy", "langchain", "langgraph"}:
         return "langgraph"

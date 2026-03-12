@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import email
 import email.utils
+import html as html_lib
 import imaplib
 import mimetypes
 import os
+import re
 import smtplib
 from email.message import EmailMessage
 from pathlib import Path
@@ -129,6 +131,91 @@ def _extract_addresses(raw_header: str | None) -> List[str]:
         if a and a not in out:
             out.append(a)
     return out
+
+
+def _decode_message_part(part: email.message.Message) -> str:
+    payload = part.get_payload(decode=True)
+    if payload is None:
+        raw = part.get_payload()
+        return str(raw or "")
+
+    charset = part.get_content_charset() or "utf-8"
+    try:
+        return payload.decode(charset, errors="replace")
+    except Exception:
+        return payload.decode("utf-8", errors="replace")
+
+
+def _normalize_text(value: str, *, max_chars: int) -> str:
+    txt = str(value or "").strip()
+    if max_chars > 0 and len(txt) > max_chars:
+        return txt[: max_chars - 1].rstrip() + "…"
+    return txt
+
+
+def _html_to_text(html_raw: str) -> str:
+    txt = str(html_raw or "")
+    txt = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", txt)
+    txt = re.sub(r"(?s)<[^>]+>", " ", txt)
+    txt = html_lib.unescape(txt)
+    return " ".join(txt.split()).strip()
+
+
+def _extract_mail_bodies(msg: email.message.Message, *, max_chars: int) -> tuple[str, str]:
+    plain_parts: List[str] = []
+    html_parts: List[str] = []
+
+    if msg.is_multipart():
+        for part in msg.walk():
+            if part.is_multipart():
+                continue
+            ctype = (part.get_content_type() or "").lower()
+            disp = (part.get("Content-Disposition") or "").lower()
+            if "attachment" in disp:
+                continue
+            if ctype == "text/plain":
+                text = _decode_message_part(part)
+                if text.strip():
+                    plain_parts.append(text)
+            elif ctype == "text/html":
+                html_body = _decode_message_part(part)
+                if html_body.strip():
+                    html_parts.append(html_body)
+    else:
+        ctype = (msg.get_content_type() or "").lower()
+        if ctype == "text/html":
+            html_body = _decode_message_part(msg)
+            if html_body.strip():
+                html_parts.append(html_body)
+        else:
+            text = _decode_message_part(msg)
+            if text.strip():
+                plain_parts.append(text)
+
+    body_text = _normalize_text("\n\n".join(plain_parts), max_chars=max_chars)
+    body_html = _normalize_text("\n\n".join(html_parts), max_chars=max_chars)
+    if not body_text and body_html:
+        body_text = _normalize_text(_html_to_text(body_html), max_chars=max_chars)
+    return body_text, body_html
+
+
+def _attachment_info(msg: email.message.Message) -> tuple[bool, List[str]]:
+    has_attachments = False
+    names: List[str] = []
+    if not msg.is_multipart():
+        return has_attachments, names
+
+    for part in msg.walk():
+        if part.is_multipart():
+            continue
+        disp = (part.get("Content-Disposition") or "").lower()
+        filename = _decode_header_value(part.get_filename())
+        if "attachment" not in disp and not filename:
+            continue
+        has_attachments = True
+        if filename and filename not in names:
+            names.append(filename)
+    return has_attachments, names
 
 
 def _mark_answered_flag(*, mail_id: str, mailbox: str) -> bool:
@@ -372,6 +459,121 @@ def fetch_unanswered_mails(
     mailbox: str = "INBOX",
 ) -> Dict[str, object]:
     return _fetch_mails_by_query(limit=limit, mailbox=mailbox, query="UNANSWERED")
+
+
+def read_mail(
+    *,
+    mail_id: str,
+    mailbox: str = "INBOX",
+    include_html: bool = False,
+    max_chars: int = 20000,
+) -> Dict[str, object]:
+    mail_id_clean = (mail_id or "").strip()
+    if not mail_id_clean:
+        raise HTTPException(status_code=422, detail="mail_id is required")
+
+    imap_host = os.getenv("IMAP_HOST", "").strip() or os.getenv("SMTP_HOST", "").strip()
+    if not imap_host:
+        raise HTTPException(status_code=500, detail="IMAP is not configured: IMAP_HOST is missing")
+
+    imap_port_raw = os.getenv("IMAP_PORT", "").strip()
+    if imap_port_raw:
+        try:
+            imap_port = int(imap_port_raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=500, detail="IMAP_PORT must be a number") from exc
+    else:
+        imap_port = 993
+
+    imap_user = os.getenv("IMAP_USERNAME", "").strip() or os.getenv("SMTP_USERNAME", "").strip()
+    imap_password = os.getenv("IMAP_PASSWORD", "").strip() or os.getenv("SMTP_PASSWORD", "").strip()
+    if not imap_user:
+        raise HTTPException(status_code=500, detail="IMAP username is missing (IMAP_USERNAME/SMTP_USERNAME)")
+    if not imap_password:
+        raise HTTPException(status_code=500, detail="IMAP password is missing (IMAP_PASSWORD/SMTP_PASSWORD)")
+
+    use_ssl = _env_bool("IMAP_USE_SSL", True)
+    timeout_s = float(os.getenv("IMAP_TIMEOUT_SECONDS", "15").strip() or "15")
+    mailbox_name = (mailbox or "INBOX").strip() or "INBOX"
+    max_chars = max(500, min(int(max_chars), 200000))
+
+    try:
+        if use_ssl:
+            client = imaplib.IMAP4_SSL(imap_host, imap_port, timeout=timeout_s)
+        else:
+            client = imaplib.IMAP4(imap_host, imap_port, timeout=timeout_s)
+
+        with client:
+            client.login(imap_user, imap_password)
+            status, _ = client.select(mailbox_name, readonly=True)
+            if status != "OK":
+                raise HTTPException(status_code=502, detail=f"IMAP mailbox not selectable: {mailbox_name}")
+
+            status, msg_data = client.uid("FETCH", mail_id_clean, "(RFC822)")
+            if status != "OK":
+                raise HTTPException(status_code=502, detail=f"IMAP fetch failed for mail_id={mail_id_clean}")
+
+            raw_msg = None
+            for part in (msg_data or []):
+                if isinstance(part, tuple) and len(part) >= 2:
+                    raw_msg = part[1]
+                    break
+            if not raw_msg:
+                raise HTTPException(status_code=404, detail=f"Mail not found: {mail_id_clean}")
+
+            msg = email.message_from_bytes(raw_msg)
+
+    except HTTPException:
+        raise
+    except (imaplib.IMAP4.error, OSError) as exc:
+        raise HTTPException(status_code=502, detail=f"IMAP read failed: {exc}") from exc
+
+    sender = _decode_header_value(msg.get("From"))
+    subject = _decode_header_value(msg.get("Subject"))
+    date_raw = _decode_header_value(msg.get("Date"))
+    parsed_date = ""
+    try:
+        dt = email.utils.parsedate_to_datetime(date_raw)
+        if dt is not None:
+            parsed_date = dt.isoformat()
+    except Exception:
+        parsed_date = date_raw
+
+    body_text, body_html = _extract_mail_bodies(msg, max_chars=max_chars)
+    has_attachments, attachment_names = _attachment_info(msg)
+    to_addrs = _extract_addresses(msg.get("To"))
+    cc_addrs = _extract_addresses(msg.get("Cc"))
+
+    lines = [
+        f"Mailbox: {mailbox_name}",
+        f"Mail ID: {mail_id_clean}",
+        f"From: {sender}",
+        f"Subject: {subject}",
+        f"Date: {parsed_date or date_raw}",
+        "",
+    ]
+    if body_text:
+        lines.append(body_text)
+    else:
+        lines.append(_extract_text_snippet(msg, max_len=min(max_chars, 1000)))
+
+    return {
+        "mailbox": mailbox_name,
+        "mail_id": mail_id_clean,
+        "from_email": sender,
+        "to": to_addrs,
+        "cc": cc_addrs,
+        "subject": subject,
+        "date": parsed_date or date_raw,
+        "message_id": _decode_header_value(msg.get("Message-Id")),
+        "in_reply_to": _decode_header_value(msg.get("In-Reply-To")),
+        "references": _decode_header_value(msg.get("References")),
+        "has_attachments": has_attachments,
+        "attachment_names": attachment_names,
+        "body_text": body_text,
+        "body_html": body_html if include_html else "",
+        "text": "\n".join(lines).strip(),
+    }
 
 
 def _fetch_mails_by_query(

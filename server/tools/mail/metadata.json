@@ -38,6 +38,17 @@
       "output": "mail-Objekte",
       "capabilities": ["inbox_read"],
       "side_effect_level": "none"
+    },
+    "read_mail": {
+      "name": "Einzelne Mail vollständig lesen",
+      "input": "mail_id, optional mailbox/include_html/max_chars",
+      "output": "Vollständige Maildaten inkl. body_text/body_html",
+      "capabilities": ["inbox_read", "mail_content_read"],
+      "side_effect_level": "none",
+      "quality_signals": {
+        "min_text_length": 40
+      },
+      "allows_goal_injection": false
     }
   }
 }
