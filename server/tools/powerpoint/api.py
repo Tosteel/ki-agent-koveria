@@ -12,7 +12,7 @@ from .powerpoint import export_text_pptx
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post('/ppt/export', response_model=PptExportResponse)
+    @router.post('/tools/ppt/export', response_model=PptExportResponse)
     def ppt_export(
         req: PptExportRequest,
         user_id: str = Depends(get_current_user),

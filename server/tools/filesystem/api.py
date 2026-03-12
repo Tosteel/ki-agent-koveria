@@ -26,7 +26,7 @@ def _safe_upload_name(raw_name: str) -> str:
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post('/files/read', response_model=FileReadResponse)
+    @router.post('/tools/files/read', response_model=FileReadResponse)
     def files_read(
         req: FileReadRequest,
         user_id: str = Depends(get_current_user),
@@ -41,7 +41,7 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         )
         return FileReadResponse(path=req.path, content=content)
 
-    @router.post('/files/write', response_model=FileWriteResponse)
+    @router.post('/tools/files/write', response_model=FileWriteResponse)
     def files_write(
         req: FileWriteRequest,
         user_id: str = Depends(get_current_user),
@@ -64,7 +64,7 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         )
         return FileWriteResponse(path=req.path, bytes_written=n)
 
-    @router.post('/files/upload')
+    @router.post('/tools/files/upload')
     async def files_upload(
         file: UploadFile = File(...),
         user_id: str = Depends(get_current_user),

@@ -16,10 +16,15 @@ BASIC_TOOLS = {
     "search_ebay",
     "view_website",
     "browse_website",
+    "browse_whitelist",
     "send_mail",
     "answer_mail",
     "fetch_inbox_mails",
     "fetch_unanswered_mails",
+    "score_reply",
+    "create_review_ticket",
+    "update_review_ticket",
+    "policy_check",
     "list_skills",
 }
 

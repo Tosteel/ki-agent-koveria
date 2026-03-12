@@ -12,7 +12,7 @@ from .tool_template import run_tool
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post("/template_tool/run", response_model=TemplateToolResponse)
+    @router.post("/tools/template_tool/run", response_model=TemplateToolResponse)
     def template_tool_run(
         req: TemplateToolRequest,
         user_id: str = Depends(get_current_user),

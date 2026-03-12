@@ -12,7 +12,7 @@ from .professional_pdf_publisher import publish_competition_pdf
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post('/competitive/report/publish-pdf', response_model=ProfessionalPdfPublisherResponse)
+    #@router.post('/competitive/report/publish-pdf', response_model=ProfessionalPdfPublisherResponse)
     def publish_pdf(
         req: ProfessionalPdfPublisherRequest,
         user_id: str = Depends(get_current_user),

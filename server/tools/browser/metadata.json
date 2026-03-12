@@ -36,6 +36,28 @@
         "require_sources": true,
         "min_text_length": 120
       }
+    },
+    "browse_whitelist": {
+      "name": "Website browsen mit Domain-Whitelist",
+      "input": "url, query, optional allowed_domains/click/select settings",
+      "output": "Treffer über mehrere Seiten (Fallback: view_website)",
+      "capabilities": ["web_search", "web_search_whitelist"],
+      "side_effect_level": "none",
+      "fallback": {
+        "strategy": "ordered",
+        "chain": ["browse_website", "view_website"]
+      },
+      "retry_policy": {
+        "max_retries": 1,
+        "backoff_ms": 250,
+        "retry_on": ["timeout", "connection_error", "rate_limit"]
+      },
+      "quality_signals": {
+        "min_hits": 1,
+        "require_sources": true,
+        "min_text_length": 120
+      },
+      "allows_goal_injection": false
     }
   }
 }

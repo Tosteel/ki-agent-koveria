@@ -49,6 +49,39 @@
         "min_text_length": 40
       },
       "allows_goal_injection": false
+    },
+    "read_mail_thread": {
+      "name": "Mail-Thread lesen",
+      "input": "mail_id, optional mailbox/max_messages/include_html/max_chars",
+      "output": "Thread-Nachrichten mit Text/Metadaten",
+      "capabilities": ["inbox_read", "mail_content_read", "thread_read"],
+      "side_effect_level": "none",
+      "quality_signals": {
+        "min_text_length": 40
+      },
+      "allows_goal_injection": false
+    },
+    "read_mail_attachments": {
+      "name": "Mail-Anhänge lesen",
+      "input": "mail_id, optional mailbox/include_content/max_attachment_chars/extract_text_pdf",
+      "output": "Anhang-Liste inkl. Metadaten und optionalem Text",
+      "capabilities": ["inbox_read", "mail_attachment_read"],
+      "side_effect_level": "none",
+      "quality_signals": {
+        "min_text_length": 20
+      },
+      "allows_goal_injection": false
+    },
+    "classify_mail": {
+      "name": "Mail-Absicht klassifizieren",
+      "input": "text oder subject/body_text, optional from_email",
+      "output": "intent (info|beschwerde|angebot|termin|eskalation), confidence, reason",
+      "capabilities": ["mail_intent_classification"],
+      "side_effect_level": "none",
+      "quality_signals": {
+        "min_text_length": 10
+      },
+      "allows_goal_injection": false
     }
   }
 }

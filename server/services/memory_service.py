@@ -23,7 +23,7 @@ def user_tasks_memory_path(s: Settings, user_id: str) -> Path:
 
 
 def user_agents_memory_path(s: Settings, user_id: str) -> Path:
-    return s.user_dir(user_id) / 'agents_config.json'
+    return s.user_dir(user_id) / 'template_config.json'
 
 
 def normalize_tasks_payload(raw: Any) -> List[Dict[str, Any]]:

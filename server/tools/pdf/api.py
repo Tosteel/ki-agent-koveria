@@ -14,7 +14,7 @@ from .pdf import export_text_pdf, read_pdf_text
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post('/pdf/export', response_model=PdfExportResponse)
+    @router.post('/tools/pdf/export', response_model=PdfExportResponse)
     def pdf_export(
         req: PdfExportRequest,
         user_id: str = Depends(get_current_user),
@@ -25,7 +25,7 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         size = export_text_pdf(out, title=req.title, text=req.text)
         return PdfExportResponse(output_path=req.output_path, bytes_written=size)
 
-    @router.post('/pdf/read', response_model=PdfReadResponse)
+    @router.post('/tools/pdf/read', response_model=PdfReadResponse)
     def pdf_read(
         req: PdfReadRequest,
         user_id: str = Depends(get_current_user),

@@ -12,7 +12,7 @@ from .models import CompetitorIdentificationRequest, CompetitorIdentificationRes
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post('/competitive/competitors/identify', response_model=CompetitorIdentificationResponse)
+    #@router.post('/competitive/competitors/identify', response_model=CompetitorIdentificationResponse)
     def competitive_identify(
         req: CompetitorIdentificationRequest,
         user_id: str = Depends(get_current_user),

@@ -37,7 +37,7 @@ def _raise_backend_error(resp: requests.Response, prefix: str) -> None:
 
 
 def _upload_workshop_file(file: UploadFile) -> Dict[str, Any]:
-    url = f"{BACKEND_BASE_URL}/files/upload"
+    url = f"{BACKEND_BASE_URL}/tools/files/upload"
     files = {
         "file": (
             file.filename or "workshop_upload.bin",

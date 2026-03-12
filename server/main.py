@@ -22,6 +22,7 @@ from .deps import get_current_user, settings as dep_settings
 from .auth import get_token_for_user
 
 from .tools.loader import create_all_tool_api_router, register_all_tools
+from .assistants.loader import create_all_assistant_api_router
 from .triggers import TriggerRegistry, TriggerRuntime, register_all_triggers
 from .triggers.store import load_user_triggers, save_user_triggers
 from .api.agent_routes import create_agent_router
@@ -70,7 +71,7 @@ def _user_tasks_memory_path(s: Settings, user_id: str) -> Path:
 
 
 def _user_agents_memory_path(s: Settings, user_id: str) -> Path:
-    return s.user_dir(user_id) / "agents_config.json"
+    return s.user_dir(user_id) / "template_config.json"
 
 
 def _normalize_tasks_payload(raw: Any) -> List[Dict[str, Any]]:
@@ -217,6 +218,11 @@ def _ensure_user_dirs(s: Settings, user_id: str) -> None:
 app.include_router(user_router)
 app.include_router(
     create_all_tool_api_router(
+        ensure_user_dirs=_ensure_user_dirs,
+    )
+)
+app.include_router(
+    create_all_assistant_api_router(
         ensure_user_dirs=_ensure_user_dirs,
     )
 )

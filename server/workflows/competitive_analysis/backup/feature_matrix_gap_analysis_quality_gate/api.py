@@ -15,7 +15,7 @@ from .models import (
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post('/competitive/feature-matrix-gap/quality-gate', response_model=FeatureMatrixGapAnalysisQualityGateResponse)
+    #@router.post('/competitive/feature-matrix-gap/quality-gate', response_model=FeatureMatrixGapAnalysisQualityGateResponse)
     def competitive_feature_matrix_gap_quality_gate(
         req: FeatureMatrixGapAnalysisQualityGateRequest,
         user_id: str = Depends(get_current_user),

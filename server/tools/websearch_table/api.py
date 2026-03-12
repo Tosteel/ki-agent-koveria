@@ -17,7 +17,7 @@ security = HTTPBearer(auto_error=False)
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post('/search/generate_json')
+    @router.post('/tools/search/generate_json')
     def search_generate_json(
         req: SearchGenerateJsonRequest,
         user_id: str = Depends(get_current_user),

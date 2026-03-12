@@ -17,7 +17,7 @@ security = HTTPBearer(auto_error=False)
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post('/video/analyze_json_sync_from_prompt')
+    @router.post('/tools/video/analyze_json_sync_from_prompt')
     def analyze_json_sync_from_prompt(
         req: VideoAnalyzeSyncRequest,
         user_id: str = Depends(get_current_user),

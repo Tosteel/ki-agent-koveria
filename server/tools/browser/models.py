@@ -33,6 +33,22 @@ class BrowseWebsiteRequest(BaseModel):
     follow_links_matching: str = ""
 
 
+class BrowseWhitelistRequest(BaseModel):
+    url: str = Field(..., min_length=1)
+    query: str = Field(..., min_length=1)
+    selector: str = "body"
+    max_matches: int = Field(8, ge=1, le=50)
+    context_chars: int = Field(180, ge=60, le=600)
+    timeout_ms: int = Field(15000, ge=2000, le=120000)
+    max_pages: int = Field(3, ge=1, le=10)
+    click_selectors: List[str] = Field(default_factory=list)
+    follow_links_matching: str = ""
+    allowed_domains: List[str] = Field(
+        default_factory=list,
+        description="Optionale Whitelist erlaubter Domains (z. B. ['tagesschau.de', 'zdf.de']).",
+    )
+
+
 class WebsiteSearchResponse(BaseModel):
     url: str
     final_url: str

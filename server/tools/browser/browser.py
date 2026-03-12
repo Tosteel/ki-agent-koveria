@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from collections import deque
 from typing import Any, Dict, List, Tuple
@@ -290,6 +291,47 @@ def _same_domain(base_url: str, target_url: str) -> bool:
     return urlparse(base_url).netloc == urlparse(target_url).netloc
 
 
+def _normalized_domain(domain_or_url: str) -> str:
+    raw = (domain_or_url or "").strip().lower()
+    if not raw:
+        return ""
+    parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+    host = (parsed.netloc or parsed.path or "").strip().lower()
+    if ":" in host:
+        host = host.split(":", 1)[0]
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
+def _domain_allowed(host: str, allowed_domains: List[str]) -> bool:
+    base = _normalized_domain(host)
+    if not base:
+        return False
+    wl = [_normalized_domain(x) for x in allowed_domains if _normalized_domain(x)]
+    for allowed in wl:
+        if base == allowed or base.endswith(f".{allowed}"):
+            return True
+    return False
+
+
+def _whitelist_from_env() -> List[str]:
+    raw = (
+        os.getenv("BROWSE_WHITELIST_DOMAINS", "").strip()
+        or os.getenv("SEARCH_WEB_WHITELIST_DOMAINS", "").strip()
+        or os.getenv("WEB_WHITELIST_DOMAINS", "").strip()
+    )
+    if not raw:
+        return []
+    vals = [x.strip() for x in raw.split(",") if x.strip()]
+    out: List[str] = []
+    for item in vals:
+        d = _normalized_domain(item)
+        if d and d not in out:
+            out.append(d)
+    return out
+
+
 def _canonical_url(url: str) -> str:
     parsed = urlparse(url)
     path = parsed.path or "/"
@@ -462,3 +504,72 @@ def browse_website(
         "visited_urls": visited_urls,
         "text": text,
     }
+
+
+def browse_whitelist(
+    *,
+    url: str,
+    query: str,
+    selector: str = "body",
+    max_matches: int = 8,
+    context_chars: int = 180,
+    timeout_ms: int = 15000,
+    max_pages: int = 3,
+    click_selectors: List[str] | None = None,
+    follow_links_matching: str = "",
+    allowed_domains: List[str] | None = None,
+) -> Dict[str, Any]:
+    normalized_allowed: List[str] = []
+    for item in (allowed_domains or []):
+        d = _normalized_domain(item)
+        if d and d not in normalized_allowed:
+            normalized_allowed.append(d)
+
+    if not normalized_allowed:
+        normalized_allowed = _whitelist_from_env()
+
+    url_host = _normalized_domain(url)
+    if not url_host:
+        raise HTTPException(status_code=422, detail="Invalid url")
+
+    # Safe default: if no external whitelist is configured, lock to requested domain.
+    if not normalized_allowed:
+        normalized_allowed = [url_host]
+
+    if not _domain_allowed(url_host, normalized_allowed):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Domain not allowed by whitelist: {url_host}",
+        )
+
+    browse_error: HTTPException | None = None
+    try:
+        browse_result = browse_website(
+            url=url,
+            query=query,
+            selector=selector,
+            max_matches=max_matches,
+            context_chars=context_chars,
+            timeout_ms=timeout_ms,
+            max_pages=max_pages,
+            click_selectors=click_selectors,
+            follow_links_matching=follow_links_matching,
+        )
+        if int(browse_result.get("count") or 0) > 0:
+            return browse_result
+    except HTTPException as exc:
+        browse_error = exc
+
+    try:
+        return view_website(
+            url=url,
+            query=query,
+            selector=selector,
+            max_matches=max_matches,
+            context_chars=context_chars,
+            timeout_ms=timeout_ms,
+        )
+    except HTTPException as exc:
+        if browse_error is not None:
+            raise browse_error
+        raise exc

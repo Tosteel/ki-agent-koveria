@@ -12,7 +12,7 @@ from .models import AdaptiveAnalysisPlanRequest, AdaptiveAnalysisPlanResponse
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post('/competitive/analysis/plan', response_model=AdaptiveAnalysisPlanResponse)
+    #@router.post('/competitive/analysis/plan', response_model=AdaptiveAnalysisPlanResponse)
     def competitive_analysis_plan(
         req: AdaptiveAnalysisPlanRequest,
         user_id: str = Depends(get_current_user),

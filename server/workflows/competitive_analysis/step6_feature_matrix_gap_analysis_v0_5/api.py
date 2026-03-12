@@ -12,8 +12,8 @@ from .models import FeatureMatrixGapAnalysisV05Request, FeatureMatrixGapAnalysis
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post('/competitive/feature-matrix-gap/v0.5', response_model=FeatureMatrixGapAnalysisV05Response)
-    @router.post('/competitive/feature-matrx-gap/v0.5', response_model=FeatureMatrixGapAnalysisV05Response)
+    #@router.post('/competitive/feature-matrix-gap/v0.5', response_model=FeatureMatrixGapAnalysisV05Response)
+    #@router.post('/competitive/feature-matrx-gap/v0.5', response_model=FeatureMatrixGapAnalysisV05Response)
     def competitive_feature_matrix_gap_v0_5(
         req: FeatureMatrixGapAnalysisV05Request,
         user_id: str = Depends(get_current_user),

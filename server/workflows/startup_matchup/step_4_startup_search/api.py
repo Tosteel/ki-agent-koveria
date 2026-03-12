@@ -12,7 +12,7 @@ from .startup_matchup_step import run_step_4
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post("/startup-matchup/step-4/run", response_model=StartupMatchupStep4Response)
+    #@router.post("/startup-matchup/step-4/run", response_model=StartupMatchupStep4Response)
     def startup_matchup_step_4_run(
         req: StartupMatchupStep4Request,
         user_id: str = Depends(get_current_user),

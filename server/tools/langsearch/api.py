@@ -14,7 +14,7 @@ from .models import LangSearchRequest
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post('/langsearch/search')
+    @router.post('/tools/langsearch/search')
     def langsearch_search(
         req: LangSearchRequest,
         user_id: str = Depends(get_current_user),

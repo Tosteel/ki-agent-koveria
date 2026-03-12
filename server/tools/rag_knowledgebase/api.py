@@ -17,7 +17,7 @@ security = HTTPBearer(auto_error=False)
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post('/rag/query')
+    @router.post('/tools/rag/query')
     def rag_query(
         req: RagQueryRequest,
         user_id: str = Depends(get_current_user),
@@ -32,7 +32,7 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         data = service.query(query=req.query, top_k=req.top_k, classification=req.classification)
         return data
 
-    @router.post('/rag/upload')
+    @router.post('/tools/rag/upload')
     async def rag_upload(
         request: Request,
         user_id: str = Depends(get_current_user),

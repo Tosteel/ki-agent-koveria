@@ -23,7 +23,7 @@ from .models import (
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post('/competitive/competitors/profiles', response_model=CompetitorProfileExtractionResponse)
+    #@router.post('/competitive/competitors/profiles', response_model=CompetitorProfileExtractionResponse)
     def competitive_competitor_profiles(
         req: CompetitorProfileExtractionRequest,
         user_id: str = Depends(get_current_user),
@@ -48,7 +48,7 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         )
         return CompetitorProfileExtractionResponse(competitor_profiles=result)
 
-    @router.post('/competitive/competitors/profiles/merge', response_model=CompetitorProfileMergeResponse)
+    #@router.post('/competitive/competitors/profiles/merge', response_model=CompetitorProfileMergeResponse)
     def competitive_competitor_profiles_merge(
         req: CompetitorProfileMergeRequest,
         user_id: str = Depends(get_current_user),
@@ -63,7 +63,7 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         )
         return CompetitorProfileMergeResponse(competitor_profiles=result)
 
-    @router.post('/competitive/competitors/sources/verify', response_model=SourceRegistryVerifyResponse)
+    #@router.post('/competitive/competitors/sources/verify', response_model=SourceRegistryVerifyResponse)
     def competitive_competitor_source_registry_verify(
         req: SourceRegistryVerifyRequest,
         user_id: str = Depends(get_current_user),

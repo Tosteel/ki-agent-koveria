@@ -4,12 +4,13 @@ from typing import Any, Dict
 
 from server.agent.tool_registry import ToolContext, ToolRegistry
 
-from .browser import browse_website, view_website
-from .models import BrowseWebsiteRequest, ViewWebsiteRequest, WebsiteSearchResponse
+from .browser import browse_website, browse_whitelist, view_website
+from .models import BrowseWebsiteRequest, BrowseWhitelistRequest, ViewWebsiteRequest, WebsiteSearchResponse
 
 
 TOOL_VIEW = "view_website"
 TOOL_BROWSE = "browse_website"
+TOOL_BROWSE_WHITELIST = "browse_whitelist"
 
 
 def register(registry: ToolRegistry) -> None:
@@ -40,6 +41,22 @@ def register(registry: ToolRegistry) -> None:
         )
         return WebsiteSearchResponse(**result).model_dump()
 
+    def tool_browse_whitelist(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+        req = BrowseWhitelistRequest(**args)
+        result = browse_whitelist(
+            url=req.url,
+            query=req.query,
+            selector=req.selector,
+            max_matches=req.max_matches,
+            context_chars=req.context_chars,
+            timeout_ms=req.timeout_ms,
+            max_pages=req.max_pages,
+            click_selectors=req.click_selectors,
+            follow_links_matching=req.follow_links_matching,
+            allowed_domains=req.allowed_domains,
+        )
+        return WebsiteSearchResponse(**result).model_dump()
+
     registry.register(
         TOOL_VIEW,
         tool_view_website,
@@ -50,5 +67,11 @@ def register(registry: ToolRegistry) -> None:
         TOOL_BROWSE,
         tool_browse_website,
         request_model=BrowseWebsiteRequest,
+        response_model=WebsiteSearchResponse,
+    )
+    registry.register(
+        TOOL_BROWSE_WHITELIST,
+        tool_browse_whitelist,
+        request_model=BrowseWhitelistRequest,
         response_model=WebsiteSearchResponse,
     )

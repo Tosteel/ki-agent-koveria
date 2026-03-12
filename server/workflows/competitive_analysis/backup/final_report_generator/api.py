@@ -12,7 +12,7 @@ from .models import FinalReportRequest, FinalReportResponse
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post('/competitive/final-report', response_model=FinalReportResponse)
+    #@router.post('/competitive/final-report', response_model=FinalReportResponse)
     def competitive_final_report(
         req: FinalReportRequest,
         user_id: str = Depends(get_current_user),

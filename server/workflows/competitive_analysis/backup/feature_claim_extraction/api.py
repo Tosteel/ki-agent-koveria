@@ -15,7 +15,7 @@ from .models import (
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post("/competitive/profile/extract", response_model=CompetitiveFeatureClaimExtractionResponse)
+    #@router.post("/competitive/profile/extract", response_model=CompetitiveFeatureClaimExtractionResponse)
     def competitive_profile_extract(
         req: CompetitiveFeatureClaimExtractionRequest,
         user_id: str = Depends(get_current_user),

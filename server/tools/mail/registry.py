@@ -4,14 +4,29 @@ from typing import Any, Dict
 
 from server.agent.tool_registry import ToolContext, ToolRegistry
 
-from .mail import answer_mail, fetch_inbox_mails, fetch_unanswered_mails, read_mail, send_mail
+from .mail import (
+    answer_mail,
+    classify_mail,
+    fetch_inbox_mails,
+    fetch_unanswered_mails,
+    read_mail,
+    read_mail_attachments,
+    read_mail_thread,
+    send_mail,
+)
 from .models import (
     MailAnswerRequest,
     MailAnswerResponse,
+    MailClassifyRequest,
+    MailClassifyResponse,
     MailInboxFetchRequest,
     MailInboxFetchResponse,
+    MailReadAttachmentsRequest,
+    MailReadAttachmentsResponse,
     MailReadRequest,
     MailReadResponse,
+    MailReadThreadRequest,
+    MailReadThreadResponse,
     MailUnansweredFetchRequest,
     MailSendRequest,
     MailSendResponse,
@@ -74,6 +89,38 @@ def register(registry: ToolRegistry) -> None:
         )
         return MailReadResponse(**result).model_dump()
 
+    def tool_read_mail_thread(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+        req = MailReadThreadRequest(**args)
+        result = read_mail_thread(
+            mail_id=req.mail_id,
+            mailbox=req.mailbox,
+            max_messages=req.max_messages,
+            include_html=req.include_html,
+            max_chars=req.max_chars,
+        )
+        return MailReadThreadResponse(**result).model_dump()
+
+    def tool_read_mail_attachments(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+        req = MailReadAttachmentsRequest(**args)
+        result = read_mail_attachments(
+            mail_id=req.mail_id,
+            mailbox=req.mailbox,
+            include_content=req.include_content,
+            max_attachment_chars=req.max_attachment_chars,
+            extract_text_pdf=req.extract_text_pdf,
+        )
+        return MailReadAttachmentsResponse(**result).model_dump()
+
+    def tool_classify_mail(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+        req = MailClassifyRequest(**args)
+        result = classify_mail(
+            text=req.text,
+            subject=req.subject,
+            body_text=req.body_text,
+            from_email=req.from_email,
+        )
+        return MailClassifyResponse(**result).model_dump()
+
     registry.register(
         "send_mail",
         tool_send_mail,
@@ -103,4 +150,22 @@ def register(registry: ToolRegistry) -> None:
         tool_read_mail,
         request_model=MailReadRequest,
         response_model=MailReadResponse,
+    )
+    registry.register(
+        "read_mail_thread",
+        tool_read_mail_thread,
+        request_model=MailReadThreadRequest,
+        response_model=MailReadThreadResponse,
+    )
+    registry.register(
+        "read_mail_attachments",
+        tool_read_mail_attachments,
+        request_model=MailReadAttachmentsRequest,
+        response_model=MailReadAttachmentsResponse,
+    )
+    registry.register(
+        "classify_mail",
+        tool_classify_mail,
+        request_model=MailClassifyRequest,
+        response_model=MailClassifyResponse,
     )

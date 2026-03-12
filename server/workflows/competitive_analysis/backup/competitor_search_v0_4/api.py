@@ -12,7 +12,7 @@ from .models import CompetitorSearchV04Request, CompetitorSearchV04Response
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post("/competitive/competitors/search/v0.4", response_model=CompetitorSearchV04Response)
+    #@router.post("/competitive/competitors/search/v0.4", response_model=CompetitorSearchV04Response)
     def competitive_company_search_v0_4(
         req: CompetitorSearchV04Request,
         user_id: str = Depends(get_current_user),

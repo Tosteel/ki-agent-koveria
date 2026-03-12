@@ -12,7 +12,7 @@ from .stratetic_analysis_swot_positioning_v0_5 import run_stratetic_analysis_swo
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post('/competitive/strategic-analysis/v0.5', response_model=StrateticAnalysisSwotPositioningV05Response)
+    #@router.post('/competitive/strategic-analysis/v0.5', response_model=StrateticAnalysisSwotPositioningV05Response)
     def competitive_stratetic_analysis_swot_positioning_v0_5(
         req: StrateticAnalysisSwotPositioningV05Request,
         user_id: str = Depends(get_current_user),

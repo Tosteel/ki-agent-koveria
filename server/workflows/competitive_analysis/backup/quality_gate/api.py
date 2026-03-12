@@ -12,7 +12,7 @@ from .quality_gate import run_competitive_quality_gate
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post("/competitive/quality-gate", response_model=CompetitiveQualityGateResponse)
+    #@router.post("/competitive/quality-gate", response_model=CompetitiveQualityGateResponse)
     def competitive_quality_gate(
         req: CompetitiveQualityGateRequest,
         user_id: str = Depends(get_current_user),

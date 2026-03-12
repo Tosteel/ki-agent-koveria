@@ -15,7 +15,7 @@ from .models import (
 def create_router(*, ensure_user_dirs) -> APIRouter:
     router = APIRouter()
 
-    @router.post('/competitive/competitors/profiles/quality-gate', response_model=CompetitorProfileExtractionQualityGateResponse)
+    #@router.post('/competitive/competitors/profiles/quality-gate', response_model=CompetitorProfileExtractionQualityGateResponse)
     def competitive_competitor_profiles_quality_gate(
         req: CompetitorProfileExtractionQualityGateRequest,
         user_id: str = Depends(get_current_user),

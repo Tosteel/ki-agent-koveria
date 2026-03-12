@@ -92,6 +92,40 @@ class MailReadRequest(BaseModel):
     )
 
 
+class MailReadThreadRequest(BaseModel):
+    mail_id: str = Field(..., min_length=1, description="UID einer Mail im Thread.")
+    mailbox: str = Field(default="INBOX", description="Mailbox der Thread-Mail.")
+    max_messages: int = Field(default=20, ge=1, le=100, description="Maximale Anzahl Thread-Mails.")
+    include_html: bool = Field(default=False, description="Wenn True, wird HTML pro Thread-Mail zurückgegeben.")
+    max_chars: int = Field(default=8000, ge=500, le=200000, description="Maximale Länge der Textfelder.")
+
+
+class MailReadAttachmentsRequest(BaseModel):
+    mail_id: str = Field(..., min_length=1, description="UID der E-Mail.")
+    mailbox: str = Field(default="INBOX", description="Mailbox der E-Mail.")
+    include_content: bool = Field(
+        default=False,
+        description="Wenn True, wird soweit möglich Textinhalt aus Anhängen extrahiert.",
+    )
+    max_attachment_chars: int = Field(
+        default=4000,
+        ge=200,
+        le=50000,
+        description="Maximale Textlänge pro Anhang bei include_content.",
+    )
+    extract_text_pdf: bool = Field(
+        default=True,
+        description="Wenn True und pypdf verfügbar, wird aus PDFs Text extrahiert.",
+    )
+
+
+class MailClassifyRequest(BaseModel):
+    text: str = Field(default="", description="Gesamter Mailtext (optional, falls subject/body_text separat vorhanden).")
+    subject: str = Field(default="", description="Mail-Betreff (optional).")
+    body_text: str = Field(default="", description="Mail-Inhalt als Klartext (optional).")
+    from_email: str = Field(default="", description="Absender (optional).")
+
+
 class MailInboxItem(BaseModel):
     uid: str = ""
     from_email: str = ""
@@ -126,6 +160,54 @@ class MailReadResponse(BaseModel):
     text: str = ""
 
 
+class MailThreadItem(BaseModel):
+    mail_id: str = ""
+    from_email: str = ""
+    to: List[str] = Field(default_factory=list)
+    cc: List[str] = Field(default_factory=list)
+    subject: str = ""
+    date: str = ""
+    message_id: str = ""
+    in_reply_to: str = ""
+    references: str = ""
+    body_text: str = ""
+    body_html: str = ""
+    text: str = ""
+
+
+class MailReadThreadResponse(BaseModel):
+    mailbox: str = "INBOX"
+    mail_id: str = ""
+    count: int = 0
+    messages: List[MailThreadItem] = Field(default_factory=list)
+    text: str = ""
+
+
+class MailAttachmentItem(BaseModel):
+    filename: str = ""
+    content_type: str = ""
+    size_bytes: int = 0
+    text: str = ""
+
+
+class MailReadAttachmentsResponse(BaseModel):
+    mailbox: str = "INBOX"
+    mail_id: str = ""
+    count: int = 0
+    has_attachments: bool = False
+    attachments: List[MailAttachmentItem] = Field(default_factory=list)
+    text: str = ""
+
+
+class MailClassifyResponse(BaseModel):
+    intent: str = "info"
+    confidence: float = 0.0
+    reason: str = ""
+    fallback_used: bool = False
+    model: str = ""
+    text: str = ""
+
+
 __all__ = [
     "MailSendRequest",
     "MailSendResponse",
@@ -136,4 +218,10 @@ __all__ = [
     "MailInboxFetchResponse",
     "MailReadRequest",
     "MailReadResponse",
+    "MailReadThreadRequest",
+    "MailReadThreadResponse",
+    "MailReadAttachmentsRequest",
+    "MailReadAttachmentsResponse",
+    "MailClassifyRequest",
+    "MailClassifyResponse",
 ]

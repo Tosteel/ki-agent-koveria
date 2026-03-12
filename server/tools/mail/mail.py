@@ -4,6 +4,8 @@ import email
 import email.utils
 import html as html_lib
 import imaplib
+import io
+import json
 import mimetypes
 import os
 import re
@@ -13,6 +15,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from fastapi import HTTPException
+from server.services.llm_ionos import IonosLLM
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -216,6 +219,331 @@ def _attachment_info(msg: email.message.Message) -> tuple[bool, List[str]]:
         if filename and filename not in names:
             names.append(filename)
     return has_attachments, names
+
+
+def _imap_fetch_message(*, mail_id: str, mailbox: str = "INBOX", readonly: bool = True) -> email.message.Message:
+    mail_id_clean = (mail_id or "").strip()
+    if not mail_id_clean:
+        raise HTTPException(status_code=422, detail="mail_id is required")
+
+    imap_host = os.getenv("IMAP_HOST", "").strip() or os.getenv("SMTP_HOST", "").strip()
+    if not imap_host:
+        raise HTTPException(status_code=500, detail="IMAP is not configured: IMAP_HOST is missing")
+
+    imap_port_raw = os.getenv("IMAP_PORT", "").strip()
+    if imap_port_raw:
+        try:
+            imap_port = int(imap_port_raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=500, detail="IMAP_PORT must be a number") from exc
+    else:
+        imap_port = 993
+
+    imap_user = os.getenv("IMAP_USERNAME", "").strip() or os.getenv("SMTP_USERNAME", "").strip()
+    imap_password = os.getenv("IMAP_PASSWORD", "").strip() or os.getenv("SMTP_PASSWORD", "").strip()
+    if not imap_user:
+        raise HTTPException(status_code=500, detail="IMAP username is missing (IMAP_USERNAME/SMTP_USERNAME)")
+    if not imap_password:
+        raise HTTPException(status_code=500, detail="IMAP password is missing (IMAP_PASSWORD/SMTP_PASSWORD)")
+
+    use_ssl = _env_bool("IMAP_USE_SSL", True)
+    timeout_s = float(os.getenv("IMAP_TIMEOUT_SECONDS", "15").strip() or "15")
+    mailbox_name = (mailbox or "INBOX").strip() or "INBOX"
+
+    try:
+        if use_ssl:
+            client = imaplib.IMAP4_SSL(imap_host, imap_port, timeout=timeout_s)
+        else:
+            client = imaplib.IMAP4(imap_host, imap_port, timeout=timeout_s)
+
+        with client:
+            client.login(imap_user, imap_password)
+            status, _ = client.select(mailbox_name, readonly=readonly)
+            if status != "OK":
+                raise HTTPException(status_code=502, detail=f"IMAP mailbox not selectable: {mailbox_name}")
+
+            status, msg_data = client.uid("FETCH", mail_id_clean, "(RFC822)")
+            if status != "OK":
+                raise HTTPException(status_code=502, detail=f"IMAP fetch failed for mail_id={mail_id_clean}")
+
+            raw_msg = None
+            for part in (msg_data or []):
+                if isinstance(part, tuple) and len(part) >= 2:
+                    raw_msg = part[1]
+                    break
+            if not raw_msg:
+                raise HTTPException(status_code=404, detail=f"Mail not found: {mail_id_clean}")
+            return email.message_from_bytes(raw_msg)
+
+    except HTTPException:
+        raise
+    except (imaplib.IMAP4.error, OSError) as exc:
+        raise HTTPException(status_code=502, detail=f"IMAP read failed: {exc}") from exc
+
+
+def _mail_payload_from_message(
+    *,
+    msg: email.message.Message,
+    mailbox_name: str,
+    mail_id_clean: str,
+    include_html: bool,
+    max_chars: int,
+) -> Dict[str, object]:
+    sender = _decode_header_value(msg.get("From"))
+    subject = _decode_header_value(msg.get("Subject"))
+    date_raw = _decode_header_value(msg.get("Date"))
+    parsed_date = ""
+    try:
+        dt = email.utils.parsedate_to_datetime(date_raw)
+        if dt is not None:
+            parsed_date = dt.isoformat()
+    except Exception:
+        parsed_date = date_raw
+
+    body_text, body_html = _extract_mail_bodies(msg, max_chars=max_chars)
+    has_attachments, attachment_names = _attachment_info(msg)
+    to_addrs = _extract_addresses(msg.get("To"))
+    cc_addrs = _extract_addresses(msg.get("Cc"))
+
+    lines = [
+        f"Mailbox: {mailbox_name}",
+        f"Mail ID: {mail_id_clean}",
+        f"From: {sender}",
+        f"Subject: {subject}",
+        f"Date: {parsed_date or date_raw}",
+        "",
+    ]
+    if body_text:
+        lines.append(body_text)
+    else:
+        lines.append(_extract_text_snippet(msg, max_len=min(max_chars, 1000)))
+
+    return {
+        "mailbox": mailbox_name,
+        "mail_id": mail_id_clean,
+        "from_email": sender,
+        "to": to_addrs,
+        "cc": cc_addrs,
+        "subject": subject,
+        "date": parsed_date or date_raw,
+        "message_id": _decode_header_value(msg.get("Message-Id")),
+        "in_reply_to": _decode_header_value(msg.get("In-Reply-To")),
+        "references": _decode_header_value(msg.get("References")),
+        "has_attachments": has_attachments,
+        "attachment_names": attachment_names,
+        "body_text": body_text,
+        "body_html": body_html if include_html else "",
+        "text": "\n".join(lines).strip(),
+    }
+
+
+def _extract_ref_tokens(*headers: str) -> List[str]:
+    out: List[str] = []
+    for header in headers:
+        raw = str(header or "").strip()
+        if not raw:
+            continue
+        for token in re.findall(r"<[^>]+>", raw):
+            t = token.strip()
+            if t and t not in out:
+                out.append(t)
+    return out
+
+
+def _mail_classification_heuristic(text: str) -> Dict[str, object]:
+    content = str(text or "").lower()
+    buckets = {
+        "eskalation": [
+            "eskal",
+            "anwalt",
+            "frist",
+            "kündig",
+            "schadensersatz",
+            "compliance",
+            "vorstand",
+            "management",
+            "sofort",
+        ],
+        "beschwerde": [
+            "beschwerde",
+            "reklamation",
+            "unzufrieden",
+            "problem",
+            "fehler",
+            "defekt",
+            "enttäuscht",
+            "ärger",
+            "frustriert",
+        ],
+        "angebot": [
+            "angebot",
+            "preis",
+            "kosten",
+            "konditionen",
+            "rabatt",
+            "quote",
+            "offerte",
+            "budget",
+        ],
+        "termin": [
+            "termin",
+            "meeting",
+            "besprechung",
+            "call",
+            "kalender",
+            "uhr",
+            "datum",
+            "verfügbar",
+            "verschieben",
+        ],
+        "info": ["info", "frage", "bitte", "anfrage", "auskunft", "details"],
+    }
+
+    best_intent = "info"
+    best_hits = 0
+    for intent, terms in buckets.items():
+        hits = sum(1 for t in terms if t in content)
+        if hits > best_hits:
+            best_hits = hits
+            best_intent = intent
+
+    if best_hits >= 3:
+        confidence = 0.9
+    elif best_hits == 2:
+        confidence = 0.78
+    elif best_hits == 1:
+        confidence = 0.64
+    else:
+        confidence = 0.5
+
+    reason = "keyword_match" if best_hits > 0 else "default_info"
+    return {
+        "intent": best_intent,
+        "confidence": confidence,
+        "reason": reason,
+        "fallback_used": True,
+        "model": "",
+    }
+
+
+def _parse_json_obj(text: str) -> Dict[str, object]:
+    raw = str(text or "").strip()
+    if not raw:
+        return {}
+    try:
+        obj = json.loads(raw)
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        pass
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            obj = json.loads(raw[start : end + 1])
+            return obj if isinstance(obj, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _classify_mail_with_llm(text: str) -> Dict[str, object]:
+    client = IonosLLM()
+    if not client.enabled():
+        return {}
+    schema = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "mail_intent_classification",
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "intent": {
+                        "type": "string",
+                        "enum": ["info", "beschwerde", "angebot", "termin", "eskalation"],
+                    },
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "reason": {"type": "string"},
+                },
+                "required": ["intent", "confidence", "reason"],
+            },
+            "strict": True,
+        },
+    }
+    completion = client.chat_completions(
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Du klassifizierst E-Mails in genau eine Absicht: "
+                    "info, beschwerde, angebot, termin, eskalation.\n"
+                    "Bewerte konservativ und gib nur JSON gemäß Schema zurück."
+                ),
+            },
+            {"role": "user", "content": f"E-Mail-Inhalt:\n{text}"},
+        ],
+        response_format=schema,
+        temperature=0.0,
+        top_p=0.1,
+        max_tokens=180,
+    )
+    parsed = _parse_json_obj(client.extract_text(completion))
+    if not parsed:
+        return {}
+    return {
+        "intent": str(parsed.get("intent") or "info").strip().lower(),
+        "confidence": max(0.0, min(1.0, float(parsed.get("confidence") or 0.0))),
+        "reason": str(parsed.get("reason") or "").strip(),
+        "fallback_used": False,
+        "model": getattr(client.cfg, "model", ""),
+    }
+
+
+def classify_mail(
+    *,
+    text: str = "",
+    subject: str = "",
+    body_text: str = "",
+    from_email: str = "",
+) -> Dict[str, object]:
+    merged = "\n".join(
+        x
+        for x in [
+            f"From: {str(from_email or '').strip()}",
+            f"Subject: {str(subject or '').strip()}",
+            str(body_text or "").strip(),
+            str(text or "").strip(),
+        ]
+        if x and str(x).strip()
+    ).strip()
+    if not merged:
+        raise HTTPException(status_code=422, detail="text or subject/body_text is required")
+
+    llm_out: Dict[str, object] = {}
+    try:
+        llm_out = _classify_mail_with_llm(merged)
+    except Exception:
+        llm_out = {}
+
+    if not llm_out:
+        llm_out = _mail_classification_heuristic(merged)
+
+    intent = str(llm_out.get("intent") or "info").strip().lower()
+    if intent not in {"info", "beschwerde", "angebot", "termin", "eskalation"}:
+        intent = "info"
+    confidence = float(llm_out.get("confidence") or 0.0)
+    confidence = max(0.0, min(1.0, confidence))
+    reason = str(llm_out.get("reason") or "").strip()
+    fallback_used = bool(llm_out.get("fallback_used"))
+    model = str(llm_out.get("model") or "").strip()
+    return {
+        "intent": intent,
+        "confidence": confidence,
+        "reason": reason,
+        "fallback_used": fallback_used,
+        "model": model,
+        "text": f"Absicht: {intent} (confidence={confidence:.2f})",
+    }
 
 
 def _mark_answered_flag(*, mail_id: str, mailbox: str) -> bool:
@@ -471,107 +799,187 @@ def read_mail(
     mail_id_clean = (mail_id or "").strip()
     if not mail_id_clean:
         raise HTTPException(status_code=422, detail="mail_id is required")
-
-    imap_host = os.getenv("IMAP_HOST", "").strip() or os.getenv("SMTP_HOST", "").strip()
-    if not imap_host:
-        raise HTTPException(status_code=500, detail="IMAP is not configured: IMAP_HOST is missing")
-
-    imap_port_raw = os.getenv("IMAP_PORT", "").strip()
-    if imap_port_raw:
-        try:
-            imap_port = int(imap_port_raw)
-        except ValueError as exc:
-            raise HTTPException(status_code=500, detail="IMAP_PORT must be a number") from exc
-    else:
-        imap_port = 993
-
-    imap_user = os.getenv("IMAP_USERNAME", "").strip() or os.getenv("SMTP_USERNAME", "").strip()
-    imap_password = os.getenv("IMAP_PASSWORD", "").strip() or os.getenv("SMTP_PASSWORD", "").strip()
-    if not imap_user:
-        raise HTTPException(status_code=500, detail="IMAP username is missing (IMAP_USERNAME/SMTP_USERNAME)")
-    if not imap_password:
-        raise HTTPException(status_code=500, detail="IMAP password is missing (IMAP_PASSWORD/SMTP_PASSWORD)")
-
-    use_ssl = _env_bool("IMAP_USE_SSL", True)
-    timeout_s = float(os.getenv("IMAP_TIMEOUT_SECONDS", "15").strip() or "15")
     mailbox_name = (mailbox or "INBOX").strip() or "INBOX"
     max_chars = max(500, min(int(max_chars), 200000))
+    msg = _imap_fetch_message(mail_id=mail_id_clean, mailbox=mailbox_name, readonly=True)
+    return _mail_payload_from_message(
+        msg=msg,
+        mailbox_name=mailbox_name,
+        mail_id_clean=mail_id_clean,
+        include_html=include_html,
+        max_chars=max_chars,
+    )
 
-    try:
-        if use_ssl:
-            client = imaplib.IMAP4_SSL(imap_host, imap_port, timeout=timeout_s)
-        else:
-            client = imaplib.IMAP4(imap_host, imap_port, timeout=timeout_s)
 
-        with client:
-            client.login(imap_user, imap_password)
-            status, _ = client.select(mailbox_name, readonly=True)
-            if status != "OK":
-                raise HTTPException(status_code=502, detail=f"IMAP mailbox not selectable: {mailbox_name}")
+def read_mail_thread(
+    *,
+    mail_id: str,
+    mailbox: str = "INBOX",
+    max_messages: int = 20,
+    include_html: bool = False,
+    max_chars: int = 8000,
+) -> Dict[str, object]:
+    mail_id_clean = (mail_id or "").strip()
+    if not mail_id_clean:
+        raise HTTPException(status_code=422, detail="mail_id is required")
 
-            status, msg_data = client.uid("FETCH", mail_id_clean, "(RFC822)")
-            if status != "OK":
-                raise HTTPException(status_code=502, detail=f"IMAP fetch failed for mail_id={mail_id_clean}")
+    mailbox_name = (mailbox or "INBOX").strip() or "INBOX"
+    max_messages = max(1, min(int(max_messages), 100))
+    max_chars = max(500, min(int(max_chars), 200000))
 
-            raw_msg = None
-            for part in (msg_data or []):
-                if isinstance(part, tuple) and len(part) >= 2:
-                    raw_msg = part[1]
-                    break
-            if not raw_msg:
-                raise HTTPException(status_code=404, detail=f"Mail not found: {mail_id_clean}")
+    root = read_mail(
+        mail_id=mail_id_clean,
+        mailbox=mailbox_name,
+        include_html=include_html,
+        max_chars=max_chars,
+    )
 
-            msg = email.message_from_bytes(raw_msg)
+    tokens = _extract_ref_tokens(
+        str(root.get("message_id") or ""),
+        str(root.get("in_reply_to") or ""),
+        str(root.get("references") or ""),
+    )
 
-    except HTTPException:
-        raise
-    except (imaplib.IMAP4.error, OSError) as exc:
-        raise HTTPException(status_code=502, detail=f"IMAP read failed: {exc}") from exc
+    thread_ids: List[str] = [mail_id_clean]
+    imap_host = os.getenv("IMAP_HOST", "").strip() or os.getenv("SMTP_HOST", "").strip()
+    if imap_host and tokens:
+        try:
+            imap_port = int((os.getenv("IMAP_PORT", "").strip() or "993"))
+        except ValueError:
+            imap_port = 993
+        imap_user = os.getenv("IMAP_USERNAME", "").strip() or os.getenv("SMTP_USERNAME", "").strip()
+        imap_password = os.getenv("IMAP_PASSWORD", "").strip() or os.getenv("SMTP_PASSWORD", "").strip()
+        use_ssl = _env_bool("IMAP_USE_SSL", True)
+        timeout_s = float(os.getenv("IMAP_TIMEOUT_SECONDS", "15").strip() or "15")
+        if imap_user and imap_password:
+            try:
+                if use_ssl:
+                    client = imaplib.IMAP4_SSL(imap_host, imap_port, timeout=timeout_s)
+                else:
+                    client = imaplib.IMAP4(imap_host, imap_port, timeout=timeout_s)
+                with client:
+                    client.login(imap_user, imap_password)
+                    status, _ = client.select(mailbox_name, readonly=True)
+                    if status == "OK":
+                        for token in tokens[:30]:
+                            for header_name in ("MESSAGE-ID", "IN-REPLY-TO", "REFERENCES"):
+                                status, data = client.uid("SEARCH", None, "HEADER", header_name, token)
+                                if status != "OK" or not data or not data[0]:
+                                    continue
+                                for raw_uid in data[0].split():
+                                    uid = raw_uid.decode(errors="ignore").strip()
+                                    if uid and uid not in thread_ids:
+                                        thread_ids.append(uid)
+            except Exception:
+                pass
 
-    sender = _decode_header_value(msg.get("From"))
-    subject = _decode_header_value(msg.get("Subject"))
-    date_raw = _decode_header_value(msg.get("Date"))
-    parsed_date = ""
-    try:
-        dt = email.utils.parsedate_to_datetime(date_raw)
-        if dt is not None:
-            parsed_date = dt.isoformat()
-    except Exception:
-        parsed_date = date_raw
+    messages: List[Dict[str, object]] = []
+    for uid in thread_ids[:max_messages]:
+        try:
+            msg_payload = read_mail(
+                mail_id=uid,
+                mailbox=mailbox_name,
+                include_html=include_html,
+                max_chars=max_chars,
+            )
+            messages.append(msg_payload)
+        except Exception:
+            continue
 
-    body_text, body_html = _extract_mail_bodies(msg, max_chars=max_chars)
-    has_attachments, attachment_names = _attachment_info(msg)
-    to_addrs = _extract_addresses(msg.get("To"))
-    cc_addrs = _extract_addresses(msg.get("Cc"))
+    def _sort_key(item: Dict[str, object]) -> str:
+        return str(item.get("date") or "")
 
-    lines = [
-        f"Mailbox: {mailbox_name}",
-        f"Mail ID: {mail_id_clean}",
-        f"From: {sender}",
-        f"Subject: {subject}",
-        f"Date: {parsed_date or date_raw}",
-        "",
-    ]
-    if body_text:
-        lines.append(body_text)
-    else:
-        lines.append(_extract_text_snippet(msg, max_len=min(max_chars, 1000)))
+    messages.sort(key=_sort_key)
+    lines = [f"Mailbox: {mailbox_name}", f"Thread for mail_id={mail_id_clean}", f"Messages: {len(messages)}", ""]
+    for i, item in enumerate(messages, start=1):
+        lines.append(f"[{i}] {str(item.get('subject') or '(ohne Betreff)')}")
+        lines.append(f"from={str(item.get('from_email') or '')} date={str(item.get('date') or '')}")
+        snippet = str(item.get("body_text") or "").strip()
+        if snippet:
+            lines.append(snippet[:300] + ("…" if len(snippet) > 300 else ""))
+        lines.append("")
 
     return {
         "mailbox": mailbox_name,
         "mail_id": mail_id_clean,
-        "from_email": sender,
-        "to": to_addrs,
-        "cc": cc_addrs,
-        "subject": subject,
-        "date": parsed_date or date_raw,
-        "message_id": _decode_header_value(msg.get("Message-Id")),
-        "in_reply_to": _decode_header_value(msg.get("In-Reply-To")),
-        "references": _decode_header_value(msg.get("References")),
-        "has_attachments": has_attachments,
-        "attachment_names": attachment_names,
-        "body_text": body_text,
-        "body_html": body_html if include_html else "",
+        "count": len(messages),
+        "messages": messages,
+        "text": "\n".join(lines).strip(),
+    }
+
+
+def read_mail_attachments(
+    *,
+    mail_id: str,
+    mailbox: str = "INBOX",
+    include_content: bool = False,
+    max_attachment_chars: int = 4000,
+    extract_text_pdf: bool = True,
+) -> Dict[str, object]:
+    mail_id_clean = (mail_id or "").strip()
+    if not mail_id_clean:
+        raise HTTPException(status_code=422, detail="mail_id is required")
+    mailbox_name = (mailbox or "INBOX").strip() or "INBOX"
+    max_attachment_chars = max(200, min(int(max_attachment_chars), 50000))
+
+    msg = _imap_fetch_message(mail_id=mail_id_clean, mailbox=mailbox_name, readonly=True)
+    attachments: List[Dict[str, object]] = []
+    for part in msg.walk():
+        if part.is_multipart():
+            continue
+        disp = (part.get("Content-Disposition") or "").lower()
+        filename = _decode_header_value(part.get_filename())
+        if "attachment" not in disp and not filename:
+            continue
+        payload = part.get_payload(decode=True) or b""
+        ctype = str(part.get_content_type() or "application/octet-stream")
+        text_content = ""
+        if include_content:
+            if ctype.startswith("text/"):
+                text_content = _normalize_text(_decode_message_part(part), max_chars=max_attachment_chars)
+            elif ctype == "application/pdf" and extract_text_pdf:
+                try:
+                    from pypdf import PdfReader  # type: ignore
+
+                    reader = PdfReader(io.BytesIO(payload))
+                    pages: List[str] = []
+                    for p in reader.pages:
+                        pages.append(str(p.extract_text() or ""))
+                    text_content = _normalize_text("\n".join(pages).strip(), max_chars=max_attachment_chars)
+                except Exception:
+                    text_content = ""
+
+        attachments.append(
+            {
+                "filename": filename,
+                "content_type": ctype,
+                "size_bytes": len(payload),
+                "text": text_content,
+            }
+        )
+
+    lines = [
+        f"Mailbox: {mailbox_name}",
+        f"Mail ID: {mail_id_clean}",
+        f"Attachments: {len(attachments)}",
+        "",
+    ]
+    for i, att in enumerate(attachments, start=1):
+        lines.append(
+            f"[{i}] {str(att.get('filename') or '(ohne Name)')} "
+            f"type={str(att.get('content_type') or '')} bytes={int(att.get('size_bytes') or 0)}"
+        )
+        txt = str(att.get("text") or "").strip()
+        if txt:
+            lines.append(txt[:300] + ("…" if len(txt) > 300 else ""))
+        lines.append("")
+
+    return {
+        "mailbox": mailbox_name,
+        "mail_id": mail_id_clean,
+        "count": len(attachments),
+        "has_attachments": len(attachments) > 0,
+        "attachments": attachments,
         "text": "\n".join(lines).strip(),
     }
 

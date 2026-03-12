@@ -142,13 +142,13 @@ GUI aufrufen:
 
 Direkt-Tool-Endpunkte:
 
-- `POST /rag/query`
-- `POST /search/generate_json`
-- `POST /files/read`
-- `POST /files/write`
-- `POST /pdf/export`
-- `POST /ppt/export`
-- `POST /mail/send`
+- `POST /tools/rag/query`
+- `POST /tools/search/generate_json`
+- `POST /tools/files/read`
+- `POST /tools/files/write`
+- `POST /tools/pdf/export`
+- `POST /tools/ppt/export`
+- `POST /tools/mail/send`
 
 ## API-Kontrakt: `/agent/plan`
 

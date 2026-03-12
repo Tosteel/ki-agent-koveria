@@ -215,7 +215,7 @@ def _user_task_path(user_id: str) -> Path:
 
 def _user_agent_path(user_id: str) -> Path:
     safe_user_id = _sanitize_user_id(user_id)
-    return USER_DATA_DIR / safe_user_id / "agents_config.json"
+    return USER_DATA_DIR / safe_user_id / "template_config.json"
 
 
 def _planned_steps_block(steps: List[str]) -> str:
@@ -293,7 +293,7 @@ def _files_upload_url_from_ask_url(ask_url: str) -> str:
     parsed = urlsplit(raw)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         return ""
-    return urlunsplit((parsed.scheme, parsed.netloc, "/files/upload", "", ""))
+    return urlunsplit((parsed.scheme, parsed.netloc, "/tools/files/upload", "", ""))
 
 
 def _compact_planned_steps(steps: List[str]) -> List[str]:
@@ -1019,7 +1019,7 @@ def api_upload(
     settings = _load_settings_for_user(resolved_user_id)
     upload_url = _files_upload_url_from_ask_url(settings.get("ask_ionos_url", ""))
     if not upload_url:
-        raise HTTPException(status_code=422, detail="Ungültige Agent-Ask URL.")
+        raise HTTPException(status_code=422, detail="Ungültige Vorlagen-Ask URL.")
     api_key = settings.get("api_key", "").strip()
 
     headers: Dict[str, str] = {}
@@ -1054,7 +1054,7 @@ def planned_task_explain(req: TaskExplainRequest) -> JSONResponse:
     run_url = _agent_run_url_from_ask_url(settings.get("ask_ionos_url", ""))
     api_key = settings.get("api_key", "").strip()
     if not run_url:
-        raise HTTPException(status_code=422, detail="Ungültige Agent-Ask URL.")
+        raise HTTPException(status_code=422, detail="Ungültige Vorlagen-Ask URL.")
 
     steps = [str(s).strip() for s in (req.steps or []) if str(s).strip()]
     if not steps:
@@ -1544,7 +1544,7 @@ def replan_task(req: TaskReplanRequest) -> JSONResponse:
     plan_url = _agent_plan_url_from_ask_url(settings.get("ask_ionos_url", ""))
     api_key = settings.get("api_key", "").strip()
     if not plan_url:
-        raise HTTPException(status_code=422, detail="Ungültige Agent-Ask URL.")
+        raise HTTPException(status_code=422, detail="Ungültige Vorlagen-Ask URL.")
 
     current_steps = [str(s).strip() for s in (req.planned_steps or []) if str(s).strip()]
     if not current_steps:
@@ -1662,7 +1662,7 @@ def rerun_task(req: TaskRerunRequest) -> JSONResponse:
     run_url = _agent_run_url_from_ask_url(ask_url)
     api_key = settings.get("api_key", "").strip()
     if not run_url:
-        raise HTTPException(status_code=422, detail="Ungültige Agent-Ask URL.")
+        raise HTTPException(status_code=422, detail="Ungültige Vorlagen-Ask URL.")
 
     clean_steps = [str(s).strip() for s in (req.planned_steps or []) if str(s).strip()]
     if not clean_steps:
@@ -1783,7 +1783,7 @@ def delete_agent(req: AgentDeleteRequest) -> JSONResponse:
             continue
         kept.append(a)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        raise HTTPException(status_code=404, detail="Template not found")
     _write_agents_for_user(user_id, kept)
     return JSONResponse({"ok": True, "user_id": user_id, "agent_id": req.agent_id})
 
@@ -1804,7 +1804,7 @@ def rename_agent(req: AgentRenameRequest) -> JSONResponse:
         updated = a
         break
     if updated is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        raise HTTPException(status_code=404, detail="Template not found")
     _write_agents_for_user(user_id, agents)
     return JSONResponse({"ok": True, "user_id": user_id, "agent": updated})
 
@@ -1864,7 +1864,7 @@ def update_agent(req: AgentUpdateRequest) -> JSONResponse:
         updated = agent
         break
     if updated is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        raise HTTPException(status_code=404, detail="Template not found")
 
     _write_agents_for_user(user_id, agents)
     return JSONResponse({"ok": True, "user_id": user_id, "agent": updated})
@@ -1877,7 +1877,7 @@ def replan_agent(req: AgentReplanRequest) -> JSONResponse:
     plan_url = _agent_plan_url_from_ask_url(settings.get("ask_ionos_url", ""))
     api_key = settings.get("api_key", "").strip()
     if not plan_url:
-        raise HTTPException(status_code=422, detail="Ungültige Agent-Ask URL.")
+        raise HTTPException(status_code=422, detail="Ungültige Vorlagen-Ask URL.")
 
     current_steps = [str(s).strip() for s in (req.planned_steps or []) if str(s).strip()]
     if not current_steps:

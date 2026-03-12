@@ -1,0 +1,88 @@
+{
+  "name": "Customer Support",
+  "version": "1.0",
+  "description": "Bewertung, Compliance-Check und Human-in-the-loop Tickets fuer Support-Antworten.",
+  "tools": {
+    "score_reply": {
+      "name": "Antwort bewerten",
+      "input": "user_message, draft_reply, optional knowledge_evidence",
+      "output": "total_score, verdict, dimensions, reasons, improvements",
+      "capabilities": ["reply_quality_scoring"],
+      "retry_policy": {
+        "max_attempts": 1,
+        "retry_on": ["transient_error"]
+      },
+      "fallback": {
+        "enabled": false
+      },
+      "side_effect_level": "none",
+      "result_contract": {
+        "success_keys_any": ["total_score", "verdict"]
+      },
+      "quality_signals": {
+        "min_text_length": 20
+      },
+      "allows_goal_injection": false
+    },
+    "create_review_ticket": {
+      "name": "Review-Ticket erstellen",
+      "input": "title, optional user_message/draft_reply/score/reasons/priority",
+      "output": "ticket_id, status, created_at",
+      "capabilities": ["human_review_ticket_write"],
+      "retry_policy": {
+        "max_attempts": 1
+      },
+      "fallback": {
+        "enabled": false
+      },
+      "side_effect_level": "medium",
+      "result_contract": {
+        "success_keys_any": ["ticket_id", "status"]
+      },
+      "quality_signals": {
+        "min_text_length": 3
+      },
+      "allows_goal_injection": false
+    },
+    "update_review_ticket": {
+      "name": "Review-Ticket aktualisieren",
+      "input": "ticket_id, optional status/reviewer_note/assignee/draft_reply/score",
+      "output": "ticket_id, status, updated_at",
+      "capabilities": ["human_review_ticket_write"],
+      "retry_policy": {
+        "max_attempts": 1
+      },
+      "fallback": {
+        "enabled": false
+      },
+      "side_effect_level": "medium",
+      "result_contract": {
+        "success_keys_any": ["ticket_id", "status", "updated_at"]
+      },
+      "quality_signals": {
+        "min_text_length": 1
+      },
+      "allows_goal_injection": false
+    },
+    "policy_check": {
+      "name": "Policy-Check",
+      "input": "text, optional policy_profile/strict_mode",
+      "output": "allowed, risk_level, violations, warnings, redacted_text",
+      "capabilities": ["compliance_policy_check"],
+      "retry_policy": {
+        "max_attempts": 1
+      },
+      "fallback": {
+        "enabled": false
+      },
+      "side_effect_level": "none",
+      "result_contract": {
+        "success_keys_any": ["allowed", "risk_level"]
+      },
+      "quality_signals": {
+        "min_text_length": 10
+      },
+      "allows_goal_injection": false
+    }
+  }
+}

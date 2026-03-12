@@ -814,7 +814,7 @@
             <path d="M5 19l3-3"/>
           </svg>
         </button>
-        <button class="mode-btn" id="modeAgentsBtn" title="Agenten" aria-label="Agenten">
+        <button class="mode-btn" id="modeAgentsBtn" title="Vorlagen" aria-label="Vorlagen">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <rect x="7" y="7" width="10" height="10" rx="2"/>
             <circle cx="10" cy="11" r="1"/>
@@ -872,7 +872,7 @@
   <div class="overlay" id="settingsOverlay">
     <div class="modal">
       <h2>API Einstellungen</h2>
-      <label for="apiUrl">Agent Ask Endpoint URL</label>
+      <label for="apiUrl">Vorlagen-API Endpoint URL</label>
       <input id="apiUrl" type="text" placeholder="http://127.0.0.1:8012/agent/ask" />
 
       <label for="modelProvider">KI-Modell</label>
@@ -1201,7 +1201,7 @@
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'option-btn';
-            btn.innerHTML = '<span class="option-icon">🤖</span><span>Agent erstellen</span>';
+            btn.innerHTML = '<span class="option-icon">🤖</span><span>Vorlage erstellen</span>';
             btn.addEventListener('click', async () => {
               const taskId = Number(opt?.taskId || 0);
               if (!Number.isInteger(taskId) || taskId < 1) return;
@@ -1210,9 +1210,9 @@
               const result = await createAgentFromTask(taskId);
               if (!result.ok) {
                 btn.disabled = false;
-                btn.innerHTML = '<span class="option-icon">🤖</span><span>Agent erstellen</span>';
+                btn.innerHTML = '<span class="option-icon">🤖</span><span>Vorlage erstellen</span>';
                 messagesEl.appendChild(
-                  createMessageElement('bot', `Agent konnte nicht erstellt werden: ${result.error || 'Unbekannter Fehler'}`, {
+                  createMessageElement('bot', `Vorlage konnte nicht erstellt werden: ${result.error || 'Unbekannter Fehler'}`, {
                     timestamp: nowIso()
                   })
                 );
@@ -1220,9 +1220,9 @@
                 return;
               }
               btn.disabled = true;
-              btn.innerHTML = '<span class="option-icon">🤖</span><span>Agent erstellt</span>';
+              btn.innerHTML = '<span class="option-icon">🤖</span><span>Vorlage erstellt</span>';
               messagesEl.appendChild(
-                createMessageElement('bot', `Agent erstellt: ${agentTitle(result.agent || {}) || 'Neuer Agent'}`, {
+                createMessageElement('bot', `Vorlage erstellt: ${agentTitle(result.agent || {}) || 'Neue Vorlage'}`, {
                   timestamp: nowIso()
                 })
               );
@@ -1453,7 +1453,7 @@
     function agentTitle(agent) {
       const preferred = String(agent?.title || '').trim();
       const text = preferred || String(agent?.text || '').trim();
-      if (!text) return 'Agent';
+      if (!text) return 'Vorlage';
       return text.replace(/\s+/g, ' ');
     }
 
@@ -1511,7 +1511,7 @@
         const delBtn = document.createElement('button');
         delBtn.className = 'item-delete';
         delBtn.type = 'button';
-        delBtn.setAttribute('aria-label', 'Agent löschen');
+        delBtn.setAttribute('aria-label', 'Vorlage löschen');
         delBtn.textContent = '×';
         delBtn.addEventListener('click', async (ev) => {
           ev.stopPropagation();
@@ -1857,11 +1857,11 @@
 
     function renderActiveAgent() {
       const agent = getActiveAgent();
-      chatTitleEl.textContent = 'Agenten';
+      chatTitleEl.textContent = 'Vorlagen';
       chatTitleEl.classList.add('title-editable');
       messagesEl.innerHTML = '';
       if (!agent) {
-        messagesEl.appendChild(createMessageElement('bot', 'Keine Agenten vorhanden.', { timestamp: nowIso() }));
+        messagesEl.appendChild(createMessageElement('bot', 'Keine Vorlagen vorhanden.', { timestamp: nowIso() }));
         refreshComposerState();
         return;
       }
@@ -2115,7 +2115,7 @@
         return;
       }
       if (sidebarMode === 'agents') {
-        inputEl.placeholder = 'Agent bearbeiten...';
+        inputEl.placeholder = 'Vorlage bearbeiten...';
         const agent = getActiveAgent();
         const isPending = !!agent && pendingAgents.has(Number(agent.id));
         sendBtn.disabled = isPending || !agent;
@@ -2907,7 +2907,7 @@
         if (!okPersist) {
           agent.dialog.push({
             role: 'bot',
-            text: 'Hinweis: Die Änderung konnte noch nicht in agents_config gespeichert werden.',
+            text: 'Hinweis: Die Änderung konnte noch nicht in template_config gespeichert werden.',
             timestamp: nowIso()
           });
         }
@@ -2981,7 +2981,7 @@
         if (!okPersist) {
           agent.dialog.push({
             role: 'bot',
-            text: 'Hinweis: Die aktualisierten Schritte konnten nicht in agents_config gespeichert werden.',
+            text: 'Hinweis: Die aktualisierten Schritte konnten nicht in template_config gespeichert werden.',
             timestamp: nowIso()
           });
         }
@@ -2991,7 +2991,7 @@
         if (!okPersist) {
           agent.dialog.push({
             role: 'bot',
-            text: 'Hinweis: Die Fehlermeldung konnte nicht in agents_config gespeichert werden.',
+            text: 'Hinweis: Die Fehlermeldung konnte nicht in template_config gespeichert werden.',
             timestamp: nowIso()
           });
         }
