@@ -227,6 +227,65 @@ def _try_customer_context(
     return {}
 
 
+def _classify_mail_intent(
+    *,
+    registry: ToolRegistry,
+    ctx: ToolContext,
+    mail_payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    out = _safe_tool_call(
+        registry=registry,
+        ctx=ctx,
+        tool="classify_mail",
+        args={
+            "text": str(mail_payload.get("text") or "").strip(),
+            "subject": str(mail_payload.get("subject") or "").strip(),
+            "body_text": str(mail_payload.get("body_text") or "").strip(),
+            "from_email": str(mail_payload.get("from_email") or "").strip(),
+        },
+    )
+    if out and not out.get("_error"):
+        intent = str(out.get("intent") or "info").strip().lower()
+        if intent not in {"info", "beschwerde", "angebot", "termin", "eskalation"}:
+            intent = "info"
+        confidence = float(out.get("confidence") or 0.0)
+        confidence = max(0.0, min(1.0, confidence))
+        reason = str(out.get("reason") or "").strip()
+        return {"intent": intent, "confidence": confidence, "reason": reason, "raw": out}
+    return {"intent": "info", "confidence": 0.0, "reason": "classify_mail_unavailable", "raw": {}}
+
+
+def _intent_policy(intent: str) -> Dict[str, Any]:
+    i = str(intent or "info").strip().lower()
+    if i in {"eskalation", "beschwerde"}:
+        return {
+            "force_human_review": True,
+            "require_actionable": True,
+            "rag_top_k_boost": 2,
+            "draft_hint": "Sei deeskalierend, empathisch und biete klare nächste Schritte an.",
+        }
+    if i == "termin":
+        return {
+            "force_human_review": False,
+            "require_actionable": True,
+            "rag_top_k_boost": 1,
+            "draft_hint": "Gib konkrete Terminoptionen oder frage gezielt nach fehlenden Zeitangaben.",
+        }
+    if i == "angebot":
+        return {
+            "force_human_review": False,
+            "require_actionable": True,
+            "rag_top_k_boost": 1,
+            "draft_hint": "Antworte strukturiert und nenne klare Angebots-/Nächste-Schritte-Optionen.",
+        }
+    return {
+        "force_human_review": False,
+        "require_actionable": False,
+        "rag_top_k_boost": 0,
+        "draft_hint": "Antworte sachlich und präzise.",
+    }
+
+
 def _retrieve_context(
     *,
     registry: ToolRegistry,
@@ -330,6 +389,8 @@ def _draft_reply(
     context_text: str,
     customer_context: str,
     sources: List[str],
+    intent: str,
+    intent_hint: str,
 ) -> str:
     source_lines = "\n".join(f"- {s}" for s in sources[:20])
     compose_input = (
@@ -345,7 +406,8 @@ def _draft_reply(
     instruction = (
         "Erstelle eine präzise, höfliche Antwortmail auf Deutsch. "
         "Nutze nur belastbare Informationen aus dem Kontext. "
-        "Wenn Daten fehlen, stelle eine kurze Rückfrage statt zu raten."
+        "Wenn Daten fehlen, stelle eine kurze Rückfrage statt zu raten. "
+        f"Intent={intent}. {intent_hint}"
     )
     out = _tool_call(
         registry=registry,
@@ -363,6 +425,7 @@ def _score_reply(
     user_message: str,
     draft: str,
     sources: List[str],
+    require_actionable: bool,
 ) -> Dict[str, Any]:
     out = _safe_tool_call(
         registry=registry,
@@ -372,7 +435,7 @@ def _score_reply(
             "user_message": user_message,
             "draft_reply": draft,
             "knowledge_evidence": sources[:20],
-            "require_actionable": True,
+            "require_actionable": bool(require_actionable),
         },
     )
     if out and not out.get("_error"):
@@ -544,6 +607,21 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: MailAssista
             continue
 
         query = _mail_query(mail_payload) or subject or from_email or f"mail {mail_id}"
+        intent_info = _classify_mail_intent(registry=registry, ctx=ctx, mail_payload=mail_payload)
+        intent = str(intent_info.get("intent") or "info")
+        intent_conf = float(intent_info.get("confidence") or 0.0)
+        intent_reason = str(intent_info.get("reason") or "")
+        ip = _intent_policy(intent)
+        _trace_log(
+            "INTENT",
+            [
+                f"mail_id={mail_id}",
+                f"intent={intent}",
+                f"confidence={intent_conf:.2f}",
+                f"reason={intent_reason}",
+            ],
+        )
+
         customer_ctx_out = _try_customer_context(
             registry=registry,
             ctx=ctx,
@@ -564,7 +642,7 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: MailAssista
             registry=registry,
             ctx=ctx,
             query=query,
-            rag_top_k=req.rag_top_k,
+            rag_top_k=max(1, min(20, int(req.rag_top_k) + int(ip.get("rag_top_k_boost") or 0))),
             web_sources=req.web_sources,
             web_whitelist_domains=req.web_whitelist_domains,
             max_context_chars=req.max_context_chars,
@@ -588,6 +666,8 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: MailAssista
                 context_text=context_text,
                 customer_context=customer_text,
                 sources=sources,
+                intent=intent,
+                intent_hint=str(ip.get("draft_hint") or ""),
             )
         except Exception as exc:
             run_items.append(
@@ -608,6 +688,7 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: MailAssista
             user_message=str(mail_payload.get("text") or "").strip(),
             draft=draft,
             sources=sources,
+            require_actionable=bool(ip.get("require_actionable")),
         )
         score_total = float(score.get("score_total") or 0.0)
         verdict = str(score.get("verdict") or "needs_review").strip().lower()
@@ -642,6 +723,7 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: MailAssista
             and score_total >= req.auto_send_threshold
             and verdict == "send"
             and policy_risk not in {"high", "critical"}
+            and not bool(ip.get("force_human_review"))
         )
 
         if can_auto_send:
@@ -678,6 +760,7 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: MailAssista
             reason_parts.append("policy_blocked")
         if violations:
             reason_parts.append("violations=" + ", ".join(str(v) for v in violations[:3]))
+        reason_parts.append(f"intent={intent}")
         reason_text = " | ".join(x for x in reason_parts if x)
 
         ticket_id = ""
@@ -697,6 +780,7 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: MailAssista
                         "mail_id": mail_id,
                         "mailbox": req.mailbox,
                         "from_email": from_email,
+                        "intent": intent,
                     },
                 },
             )
