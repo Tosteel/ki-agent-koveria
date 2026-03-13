@@ -1,0 +1,13 @@
+{
+  "name": "step3_1_matrix",
+  "version": "0.1",
+  "description": "Schritt 3.1: Erzeugt pro Unternehmen eine LLM-basierte Stichpunkt-Auswertung aus Schritt 2.4 als Basis fuer eine Vergleichstabelle.",
+  "input": "competitor_trends oder competitor_trends_path (step2.4), optional provider (ionos/openai) und Bullet-Limits.",
+  "output": "step3.1_matrix.json mit profiles: Profil-, Segment-, Aktionen-, Ratings-, Social-Reach-Stichpunkte sowie Trendname+Score+Keywords je Trend.",
+  "capabilities": ["text_compose"],
+  "result_contract": {
+    "success_if_any": ["matrix", "profiles"],
+    "empty_if": ["profiles_empty", "input_missing"]
+  }
+}
+

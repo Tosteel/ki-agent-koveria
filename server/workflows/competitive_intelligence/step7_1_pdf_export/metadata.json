@@ -1,0 +1,13 @@
+{
+  "name": "step7_1_pdf_export",
+  "version": "0.1",
+  "description": "Schritt 7.1: Exportiert den finalen Report aus Schritt 6.1 als PDF.",
+  "input": "final_report oder final_report_path (step6.1), optional output_path und title.",
+  "output": "step7.1_report.pdf (output_file) plus bytes_written.",
+  "capabilities": ["artifact_export"],
+  "result_contract": {
+    "success_if_any": ["pdf_export", "output_file", "bytes_written"],
+    "empty_if": ["input_missing"]
+  }
+}
+

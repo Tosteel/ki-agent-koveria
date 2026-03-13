@@ -1,0 +1,13 @@
+{
+  "name": "step4_1_insights",
+  "version": "0.1",
+  "description": "Schritt 4.1: Leitet aus step3.1_matrix komprimierte Wettbewerbs-Insights je Fragestellung ab.",
+  "input": "matrix oder matrix_path (step3.1), optional provider (ionos/openai).",
+  "output": "step4.1_insights.json mit customer_segment_insights, actions_insights, ratings_insights, trend_items_insights, competitor_comparison_insights.",
+  "capabilities": ["text_compose"],
+  "result_contract": {
+    "success_if_any": ["insights", "customer_segment_insights", "actions_insights", "ratings_insights", "trend_items_insights", "competitor_comparison_insights"],
+    "empty_if": ["profiles_empty", "input_missing"]
+  }
+}
+

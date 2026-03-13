@@ -1,0 +1,12 @@
+{
+  "name": "step1_3_market_trends_summary",
+  "version": "0.1",
+  "description": "Schritt 1.3: Fasst Kernaussagen aus Schritt 1.2 LLM-basiert zu Trend-Summaries zusammen und hinterlegt alle zugehoerigen Quellen (heuristisch nur Fallback).",
+  "input": "market_trends_structured oder market_trends_structured_path, optional provider (ionos/openai) und Cluster-Parameter.",
+  "output": "market_trends_summary mit summaries: summary + source_urls (+ evidence_points) pro Trend-Cluster.",
+  "capabilities": ["text_compose"],
+  "result_contract": {
+    "success_if_any": ["market_trends_summary", "summaries"],
+    "empty_if": ["items_empty", "text_blank"]
+  }
+}

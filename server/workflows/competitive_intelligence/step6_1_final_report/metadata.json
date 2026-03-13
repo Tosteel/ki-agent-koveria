@@ -1,0 +1,13 @@
+{
+  "name": "step6_1_final_report",
+  "version": "0.1",
+  "description": "Schritt 6.1: Baut den finalen Report aus den Schritten 1.3, 2.4, 3.1, 4.1 und 5.1 in fuenf Kapiteln auf.",
+  "input": "market_trends_summary, competitor_trends, matrix, insights, recommendations (jeweils inline oder path), optional provider.",
+  "output": "step6.1_final_report.json mit Kapiteln 1-5 und report_markdown.",
+  "capabilities": ["text_compose"],
+  "result_contract": {
+    "success_if_any": ["final_report", "chapters", "report_markdown"],
+    "empty_if": ["input_missing"]
+  }
+}
+

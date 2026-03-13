@@ -1,0 +1,7 @@
+{
+  "name": "competitive_intelligence",
+  "version": "0",
+  "description": "Workflow zur Analyse von Markttrends, Wettbewerbern und zur Ableitung strategischer Empfehlungen.",
+  "input": "Marktkontext, optionale Suchquellen, Wettbewerberliste (Name, Website, Region) und optionale Suchparameter.",
+  "output": "Strukturierte Artefakte fuer step1.1 market_trends_raw, step1.2 market_trends_structured, step1.3 market_trends_summary, step2.2 competitor_profile_raw, step2.3 competitor_profile_structured, step2.4 competitor_trends, step3.1 matrix, step4.1 insights, step5.1 recommendations, step6.1 final_report, step7.1 pdf_export sowie weitere Vergleichs-/Insight-/Empfehlungsartefakte."
+}

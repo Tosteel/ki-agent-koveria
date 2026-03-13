@@ -1,0 +1,13 @@
+{
+  "name": "step5_1_recommendations",
+  "version": "0.1",
+  "description": "Schritt 5.1: Leitet aus step3.1_matrix konkrete Handlungsempfehlungen fuer das evaluierte Unternehmen (erstes Profil) je Kategorie ab.",
+  "input": "matrix oder matrix_path (step3.1), optional provider (ionos/openai).",
+  "output": "step5.1_recommendations.json mit customer_segements_recommendations, actions_recommendations, ratings_recommendations, trend_items_recommendations, competitor_comparison_recommendations.",
+  "capabilities": ["text_compose"],
+  "result_contract": {
+    "success_if_any": ["recommendations", "customer_segements_recommendations", "actions_recommendations", "ratings_recommendations", "trend_items_recommendations", "competitor_comparison_recommendations"],
+    "empty_if": ["profiles_empty", "input_missing"]
+  }
+}
+

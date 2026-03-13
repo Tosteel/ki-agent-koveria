@@ -1,0 +1,12 @@
+{
+  "name": "step2_3_competitor_profile_structured",
+  "version": "0.2",
+  "description": "Schritt 2.3: Strukturiert step2.2 Rohdaten pro Wettbewerber via LLM und zieht Quellen mit.",
+  "input": "competitor_profile_raw (inline oder path), optional provider (ionos/openai).",
+  "output": "step2.3_competitor_profile_structured.json mit profiles: company, website, region, company_profile_target_audience, offers_actions, ratings_reach, press_coverage.",
+  "capabilities": ["text_compose"],
+  "result_contract": {
+    "success_if_any": ["competitor_profile_structured", "profiles"],
+    "empty_if": ["items_empty", "text_blank"]
+  }
+}

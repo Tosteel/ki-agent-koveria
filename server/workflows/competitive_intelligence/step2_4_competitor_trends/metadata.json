@@ -1,0 +1,12 @@
+{
+  "name": "step2_4_competitor_trends",
+  "version": "0.1",
+  "description": "Schritt 2.4: LLM-basierte Keyword-Erzeugung je Trend, Website-Suche je Unternehmen und LLM-Bewertung der gefundenen Snippets.",
+  "input": "competitor_profile_structured (inline oder path), market_trends_summary (inline oder path), provider (ionos/openai) und optionale Limits fuer Website-Scan und Matching.",
+  "output": "step2.4_competitor_trends.json im Profilformat von Schritt 2.3 plus trend_matches je Unternehmen.",
+  "capabilities": ["web_fetch", "text_compose"],
+  "result_contract": {
+    "success_if_any": ["competitor_trends", "profiles"],
+    "empty_if": ["items_empty", "text_blank"]
+  }
+}

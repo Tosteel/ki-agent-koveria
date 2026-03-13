@@ -1,0 +1,12 @@
+{
+  "name": "step2_2_competitor_profile_raw",
+  "version": "0.1",
+  "description": "Schritt 2.2: Pro Unternehmen 4 Brave-Suchqueries fuer Unternehmensprofil, Angebote, Bewertungen/Social-Reichweite und Presse.",
+  "input": "Unternehmensliste (inline oder companies_path) sowie step1_3_market_trends_summary (inline oder path).",
+  "output": "step2.2_competitor_profile_raw.json mit raw_searches je Unternehmen und Query.",
+  "capabilities": ["web_search"],
+  "result_contract": {
+    "success_if_any": ["competitor_profile_raw", "companies"],
+    "empty_if": ["items_empty", "text_blank"]
+  }
+}

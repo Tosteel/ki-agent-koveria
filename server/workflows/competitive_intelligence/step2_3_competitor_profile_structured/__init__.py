@@ -1,0 +1,3 @@
+from .competitor_profile_structured import run_step_2_3_competitor_profile_structured
+
+__all__ = ["run_step_2_3_competitor_profile_structured"]

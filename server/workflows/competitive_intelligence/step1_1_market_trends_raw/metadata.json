@@ -1,0 +1,12 @@
+{
+  "name": "step1_1_market_trends_raw",
+  "version": "0.1",
+  "description": "Schritt 1.1: Fuehrt eine Brave-Websuche mit einfacher Query aus und liefert Rohtexte fuer Markttrends.",
+  "input": "market_context, optional search_sources sowie optionale Brave-Parameter (country, language, enable_*).",
+  "output": "market_trends_raw inklusive Query, Raw-Text, Raw-Response, Warnings und Zielartefakt step1.1_market_trends_raw.json.",
+  "capabilities": ["web_search"],
+  "result_contract": {
+    "success_if_any": ["market_trends_raw"],
+    "empty_if": ["text_blank", "no_sources"]
+  }
+}
