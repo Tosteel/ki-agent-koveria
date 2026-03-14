@@ -8,7 +8,6 @@ BASIC_TOOLS = {
     "pdf_export",
     "ppt_export",
     "websearch_table",
-    "search_multitable",
     "websearch_videoanalyzer",
     "langsearch",
     #"google_search",

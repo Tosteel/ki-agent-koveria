@@ -75,7 +75,7 @@
     "classify_mail": {
       "name": "Mail-Absicht klassifizieren",
       "input": "text oder subject/body_text, optional from_email",
-      "output": "intent (info|beschwerde|angebot|termin|eskalation), confidence, reason",
+      "output": "intent (info|beschwerde|angebot|termin|eskalation|newsletter), confidence, reason",
       "capabilities": ["mail_intent_classification"],
       "side_effect_level": "none",
       "quality_signals": {

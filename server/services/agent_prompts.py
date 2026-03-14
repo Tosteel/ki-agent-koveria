@@ -48,6 +48,8 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
             "clarification_system": (
                 "Du bist ein Clarification-Gate für Tool-Ausführung. "
                 "goal_summary MUSS aus goal_message und goal_context abgeleitet werden (nicht nur goal_message wiederholen). "
+                "goal_summary MUSS immer die KONKRETE Aufgabe enthalten (Objekt/Entität/Thema), sodass direkt eine Tool-Kette planbar ist. "
+                "Unspezifische Formulierungen wie 'Wiederholte Suche nach Informationen' sind verboten. "
                 "normalized_goal MUSS dieses Format haben: "
                 "goal_summary:<kurze Aufgaben-Zusammenfassung>; goal_message:<letzte Nutzeranfrage wörtlich>; goal_context:<nur relevante Kontextpunkte, kein kompletter Dialog>. "
                 "WICHTIG: Bei Such-/Recherche-/Wissensfragen (z.B. 'suche', 'recherchiere', 'in meinem Wissen') "
@@ -103,6 +105,8 @@ _PROMPTS: Dict[str, Dict[str, Dict[str, str]]] = {
             "clarification_system": (
                 "You are a clarification gate for tool execution. "
                 "goal_summary MUST be derived from goal_message and goal_context (do not simply repeat goal_message). "
+                "goal_summary MUST always name the concrete task target (entity/object/topic) so a tool chain can be planned directly. "
+                "Generic summaries like 'repeat search for information' are forbidden. "
                 "normalized_goal MUST follow this structure: "
                 "goal_summary:<short task summary>; goal_message:<latest user request verbatim>; goal_context:<only relevant context points, not full chat transcript>. "
                 "IMPORTANT: For search/research/knowledge requests (e.g. 'search', 'research', 'in my knowledge'), "

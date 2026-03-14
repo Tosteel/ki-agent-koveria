@@ -246,7 +246,7 @@ def _classify_mail_intent(
     )
     if out and not out.get("_error"):
         intent = str(out.get("intent") or "info").strip().lower()
-        if intent not in {"info", "beschwerde", "angebot", "termin", "eskalation"}:
+        if intent not in {"info", "beschwerde", "angebot", "termin", "eskalation", "newsletter"}:
             intent = "info"
         confidence = float(out.get("confidence") or 0.0)
         confidence = max(0.0, min(1.0, confidence))
@@ -257,8 +257,17 @@ def _classify_mail_intent(
 
 def _intent_policy(intent: str) -> Dict[str, Any]:
     i = str(intent or "info").strip().lower()
+    if i == "newsletter":
+        return {
+            "force_skip": True,
+            "force_human_review": False,
+            "require_actionable": False,
+            "rag_top_k_boost": 0,
+            "draft_hint": "Keine Antwort senden; als Newsletter/Systemmail behandeln.",
+        }
     if i in {"eskalation", "beschwerde"}:
         return {
+            "force_skip": False,
             "force_human_review": True,
             "require_actionable": True,
             "rag_top_k_boost": 2,
@@ -266,6 +275,7 @@ def _intent_policy(intent: str) -> Dict[str, Any]:
         }
     if i == "termin":
         return {
+            "force_skip": False,
             "force_human_review": False,
             "require_actionable": True,
             "rag_top_k_boost": 1,
@@ -273,12 +283,14 @@ def _intent_policy(intent: str) -> Dict[str, Any]:
         }
     if i == "angebot":
         return {
+            "force_skip": False,
             "force_human_review": False,
             "require_actionable": True,
             "rag_top_k_boost": 1,
             "draft_hint": "Antworte strukturiert und nenne klare Angebots-/Nächste-Schritte-Optionen.",
         }
     return {
+        "force_skip": False,
         "force_human_review": False,
         "require_actionable": False,
         "rag_top_k_boost": 0,
@@ -621,6 +633,21 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: MailAssista
                 f"reason={intent_reason}",
             ],
         )
+        if bool(ip.get("force_skip")):
+            skipped_count += 1
+            processed_count += 1
+            mark_processed(state, mail_id)
+            run_items.append(
+                MailAssistantRunItem(
+                    mail_id=mail_id,
+                    subject=subject,
+                    from_email=from_email,
+                    decision="skipped",
+                    reason=f"intent={intent}",
+                )
+            )
+            _trace_log("MAIL SKIPPED", [f"mail_id={mail_id}", f"reason=intent={intent}"])
+            continue
 
         customer_ctx_out = _try_customer_context(
             registry=registry,

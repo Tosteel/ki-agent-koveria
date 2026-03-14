@@ -352,7 +352,38 @@ def _extract_ref_tokens(*headers: str) -> List[str]:
 
 def _mail_classification_heuristic(text: str) -> Dict[str, object]:
     content = str(text or "").lower()
+    if any(
+        marker in content
+        for marker in (
+            "mailings@",
+            "noreply@",
+            "no-reply@",
+            "newsletter",
+            "automatisch versendete nachricht",
+            "antwort auf diese e-mail ist nicht möglich",
+            "antwort ist nicht möglich",
+        )
+    ):
+        return {
+            "intent": "newsletter",
+            "confidence": 0.92,
+            "reason": "newsletter_sender_pattern",
+            "fallback_used": True,
+            "model": "",
+        }
     buckets = {
+        "newsletter": [
+            "newsletter",
+            "automatisch versendete nachricht",
+            "antwort auf diese e-mail ist nicht möglich",
+            "antwort ist nicht möglich",
+            "noreply",
+            "no-reply",
+            "mailings@",
+            "abbestellen",
+            "unsubscribe",
+            "impressum",
+        ],
         "eskalation": [
             "eskal",
             "anwalt",
@@ -460,7 +491,7 @@ def _classify_mail_with_llm(text: str) -> Dict[str, object]:
                 "properties": {
                     "intent": {
                         "type": "string",
-                        "enum": ["info", "beschwerde", "angebot", "termin", "eskalation"],
+                        "enum": ["info", "beschwerde", "angebot", "termin", "eskalation", "newsletter"],
                     },
                     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                     "reason": {"type": "string"},
@@ -476,7 +507,9 @@ def _classify_mail_with_llm(text: str) -> Dict[str, object]:
                 "role": "system",
                 "content": (
                     "Du klassifizierst E-Mails in genau eine Absicht: "
-                    "info, beschwerde, angebot, termin, eskalation.\n"
+                    "info, beschwerde, angebot, termin, eskalation, newsletter.\n"
+                    "Nutze newsletter für Massenmails, Marketing-Mails, No-Reply-/Mailing-Absender "
+                    "oder wenn im Text steht, dass Antworten nicht möglich sind.\n"
                     "Bewerte konservativ und gib nur JSON gemäß Schema zurück."
                 ),
             },
@@ -529,7 +562,7 @@ def classify_mail(
         llm_out = _mail_classification_heuristic(merged)
 
     intent = str(llm_out.get("intent") or "info").strip().lower()
-    if intent not in {"info", "beschwerde", "angebot", "termin", "eskalation"}:
+    if intent not in {"info", "beschwerde", "angebot", "termin", "eskalation", "newsletter"}:
         intent = "info"
     confidence = float(llm_out.get("confidence") or 0.0)
     confidence = max(0.0, min(1.0, confidence))

@@ -422,6 +422,55 @@ def _one_line_summary(text: str, *, max_len: int = 220) -> str:
     return cleaned[: max_len - 1].rstrip() + "…"
 
 
+def _is_generic_goal_summary(text: str) -> bool:
+    t = str(text or "").strip().lower()
+    if not t:
+        return True
+    generic_markers = (
+        "wiederholte suche",
+        "erneute suche",
+        "suche nach information",
+        "informationen suchen",
+        "informationen recherchieren",
+        "versuch",
+        "nochmals",
+        "nochmal",
+        "erneut",
+        "allgemeine suche",
+    )
+    if any(m in t for m in generic_markers):
+        return True
+    # Very short summaries tend to be too unspecific for planning.
+    return len(t) < 24
+
+
+def _derive_goal_summary_from_context(goal_message: str, goal_context: str) -> str:
+    msg = str(goal_message or "").strip()
+    ctx = str(goal_context or "").strip()
+
+    if msg and not re.search(r"\b(nochmals?|erneut|versuch(e|en)?|wiederhole?)\b", msg.lower()):
+        return _one_line_summary(msg)
+
+    # Prefer the most recent concrete user request from context.
+    if ctx:
+        for line in reversed(ctx.splitlines()):
+            l = str(line).strip()
+            if not l.lower().startswith("nutzer:"):
+                continue
+            content = l.split(":", 1)[1].strip() if ":" in l else l
+            low = content.lower()
+            if not content:
+                continue
+            if re.search(r"\b(nochmals?|erneut|versuch(e|en)?|wiederhole?)\b", low):
+                continue
+            if any(k in low for k in ("wer ist", "suche", "recherche", "was kostet", "preis", "finde")):
+                return _one_line_summary(content)
+            if len(content) >= 12:
+                return _one_line_summary(content)
+
+    return _one_line_summary(msg)
+
+
 def _build_normalized_goal_structured(*, goal_summary: str, goal_message: str, goal_context: str) -> str:
     summary = _one_line_summary(goal_summary) or _one_line_summary(goal_message) or "-"
     message = str(goal_message or "").strip() or "-"
@@ -511,6 +560,10 @@ def run_clarification_gate(llm: Any, goal: str) -> Dict[str, Any]:
         llm_summary = goal_message or str(goal or "")
     if llm_goal_summary:
         llm_summary = llm_goal_summary
+    if _is_generic_goal_summary(llm_summary):
+        improved = _derive_goal_summary_from_context(goal_message or str(goal or ""), goal_context)
+        if improved:
+            llm_summary = improved
 
     normalized_goal = _build_normalized_goal_structured(
         goal_summary=llm_summary,
