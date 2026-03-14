@@ -127,11 +127,12 @@ class LlmOpenai:
                 "additionalProperties": False,
                 "properties": {
                     "status": {"type": "string", "enum": ["ready", "needs_info"]},
+                    "goal_summary": {"type": "string"},
                     "normalized_goal": {"type": "string"},
                     "missing_fields": {"type": "array", "items": {"type": "string"}},
                     "questions": {"type": "array", "items": {"type": "string"}},
                 },
-                "required": ["status", "normalized_goal", "missing_fields", "questions"],
+                "required": ["status", "goal_summary", "normalized_goal", "missing_fields", "questions"],
             },
             "strict": False,
         }
@@ -159,6 +160,7 @@ class LlmOpenai:
             status = "ready"
         return {
             "status": status,
+            "goal_summary": str(parsed.get("goal_summary") or ""),
             "normalized_goal": str(parsed.get("normalized_goal") or goal),
             "missing_fields": list(parsed.get("missing_fields") or []),
             "questions": list(parsed.get("questions") or []),

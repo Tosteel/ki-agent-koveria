@@ -1,9 +1,9 @@
 {
   "name": "step1_2_market_trends_structured",
   "version": "0.1",
-  "description": "Schritt 1.2: Strukturiert den Raw-Trendtext aus Schritt 1.1 pro Quelle (URL), reichert den Originaltext per get_website an und erzeugt Kernaussagen via LLM.",
-  "input": "market_trends_raw oder market_trends_raw_path, optional provider (ionos/openai), get_website-Parameter und Limits fuer Quellen/Summary.",
-  "output": "market_trends_structured mit Eintraegen pro Quelle: url, originaltext (get_website), originaltext_raw (aus Schritt 1.1) und kernaussage (Stichpunkte).",
+  "description": "Schritt 1.2: Strukturiert den Raw-Trendtext aus Schritt 1.1 pro Quelle (URL), reichert den Originaltext per web_fetch_page an und erzeugt Kernaussagen via LLM.",
+  "input": "market_trends_raw oder market_trends_raw_path, optional provider (ionos/openai), web_fetch_page-Parameter und Limits fuer Quellen/Summary.",
+  "output": "market_trends_structured mit Eintraegen pro Quelle: url, originaltext (web_fetch_page), originaltext_raw (aus Schritt 1.1) und kernaussage (Stichpunkte).",
   "capabilities": ["text_compose"],
   "result_contract": {
     "success_if_any": ["market_trends_structured"],

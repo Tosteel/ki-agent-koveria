@@ -36,10 +36,7 @@ def get_settings() -> Settings:
     data_dir = Path(os.getenv("KOVERIA_DATA_DIR", base_dir / "data"))
     rag_base_url = os.getenv("RAG_BASE_URL", "http://localhost:8005").rstrip("/")
     search_base_url = os.getenv("SEARCH_BASE_URL", "http://localhost:8002").rstrip("/")
-    video_analyzer_base_url = os.getenv(
-        "VIDEOANALIZER_BASE_URL",
-        os.getenv("VIDEO_ANALYZER_BASE_URL", "http://localhost:8003"),
-    ).rstrip("/")
+    video_analyzer_base_url = os.getenv("VIDEOANALYZER_BASE_URL", "http://localhost:8003").rstrip("/")
 
     _settings = Settings(
         base_dir=base_dir,

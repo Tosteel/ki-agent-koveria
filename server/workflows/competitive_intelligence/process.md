@@ -44,7 +44,7 @@ Output: `step1.2_market_trends_structured.json`
 Zweck:
 - Strukturiert den Raw-Text aus Schritt 1.1 pro Quelle.
 - Ausgabe pro Quelle:
-  `url` (Quelle), `originaltext` (per `get_website`), `originaltext_raw` (aus Schritt 1.1), `kernaussage` (LLM-Stichpunkte).
+  `url` (Quelle), `originaltext` (per `web_fetch_page`), `originaltext_raw` (aus Schritt 1.1), `kernaussage` (LLM-Stichpunkte).
 
 ```json
 {
@@ -54,7 +54,7 @@ Zweck:
       "args": {
         "market_trends_raw_path": "step1.1_market_trends_raw.json",
         "provider": "ionos",
-        "use_view_website": true,
+        "use_web_fetch_page": true,
         "view_timeout_ms": 20000,
         "max_sources": 12,
         "max_chars_per_source": 120000,
@@ -185,7 +185,7 @@ Output: `step2.4_competitor_trends.json`
 
 Zweck:
 - Prueft pro Unternehmen, ob Trend-Keywords aus Schritt 1.3 auf der Unternehmenswebsite vorkommen.
-- Nutzt `browse_website` zum Website-Scan und erstellt `trend_matches` je Profil.
+- Nutzt `web_crawl_site` zum Website-Scan und erstellt `trend_matches` je Profil.
 - Struktur bleibt kompatibel zu Schritt 2.3 (plus `trend_matches`), um spaeter leicht zu mergen.
 
 ```json

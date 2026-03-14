@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Step12MarketTrendSource(BaseModel):
@@ -21,10 +21,12 @@ class Step12MarketTrendsStructuredResult(BaseModel):
 
 
 class Step12MarketTrendsStructuredRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     market_trends_raw: Optional[Dict[str, Any]] = None
     market_trends_raw_path: Optional[str] = None
     provider: str = "ionos"
-    use_view_website: bool = True
+    use_web_fetch_page: bool = Field(default=True, validation_alias="use_view_website")
     view_query: Optional[str] = None
     view_max_matches: int = Field(default=8, ge=1, le=30)
     view_context_chars: int = Field(default=180, ge=60, le=600)

@@ -1,0 +1,36 @@
+{
+  "name": "LLM Text",
+  "version": "1.0",
+  "description": "Textbezogene LLM-Funktionen: formulieren, zusammenfassen, chatten.",
+  "tools": {
+    "llm_text_compose": {
+      "name": "LLM Text Compose",
+      "input": "text, optional goal/instruction",
+      "output": "text/composed_text",
+      "capabilities": ["text_compose"],
+      "side_effect_level": "none",
+      "quality_signals": {
+        "min_text_length": 40
+      }
+    },
+    "llm_text_summarize": {
+      "name": "LLM Text Summarize",
+      "input": "text",
+      "output": "summary/text",
+      "capabilities": ["text_compose"],
+      "side_effect_level": "none",
+      "quality_signals": {
+        "min_text_length": 40
+      }
+    },
+    "llm_text_chat": {
+      "name": "LLM Text Chat",
+      "input": "message, optional tone/max_chars",
+      "output": "reply/text",
+      "capabilities": ["text_compose"],
+      "side_effect_level": "none",
+      "allows_goal_injection": false
+    }
+  }
+}
+

@@ -183,11 +183,11 @@ class IonosLLM:
             '{ "steps": [ { "tool": "<tool-name>", "args": { ... } } ] }\n\n'
 
             "Tool-Auswahl-Regeln:\n"
-            "- Wenn Fakten/Informationen gesucht werden (z.B. Preise, Definitionen, Inhalte aus Dokumenten): nutze zuerst query_rag.\n"
+            "- Wenn Fakten/Informationen gesucht werden (z.B. Preise, Definitionen, Inhalte aus Dokumenten): nutze zuerst rag_knowledgebase.\n"
             "- Nutze read_file nur, wenn der Nutzer explizit eine konkrete Datei genannt hat ODER wenn ein vorheriger Schritt den Dateinamen geliefert hat.\n"
-            "- Wenn query_rag Ergebnisse liefert: nutze die Snippets für die Antwort oder schreibe eine Zusammenfassung in eine Datei.\n"
-            "- Wenn der Nutzer keine konkrete Datei nennt: verwende KEIN read_file. In diesem Fall MUSS query_rag genutzt werden.\n"
-            "- Formuliere query_rag-Queries als Suchanfrage (keine SQL). Beispiel: 'Deckenabhängung Preis €/m²'.\n"
+            "- Wenn rag_knowledgebase Ergebnisse liefert: nutze die Snippets für die Antwort oder schreibe eine Zusammenfassung in eine Datei.\n"
+            "- Wenn der Nutzer keine konkrete Datei nennt: verwende KEIN read_file. In diesem Fall MUSS rag_knowledgebase genutzt werden.\n"
+            "- Formuliere rag_knowledgebase-Queries als Suchanfrage (keine SQL). Beispiel: 'Deckenabhängung Preis €/m²'.\n"
             "- Für Export: nutze pdf_export.\n"
 
 

@@ -36,7 +36,7 @@ def create_agent_router(
     run_planner_guard: Callable[[Any, str, str, List[Dict[str, Any]], ToolRegistry | None], Dict[str, Any]],
     clarification_response: Callable[[str, Dict[str, Any]], AgentAskResponse],
     goal_with_context: Callable[[Any, str, str, Any], str],
-    inject_llm_summary_before_pdf: Callable[[List[Dict[str, Any]], str], List[Dict[str, Any]]],
+    inject_llm_text_before_pdf: Callable[[List[Dict[str, Any]], str], List[Dict[str, Any]]],
     run_steps_internal: Callable[..., Any],
     finalize_internal: Callable[..., str],
     sanitize_execution_steps: Callable[[List[Dict[str, Any]]], List[Dict[str, Any]]],
@@ -97,7 +97,7 @@ def create_agent_router(
         }
         guarded_goal = _build_effective_goal(goal, replan_additional_props, s, user_id)
         replanned = planner.create_steps(goal=guarded_goal)
-        replanned = inject_llm_summary_before_pdf(replanned, guarded_goal)
+        replanned = inject_llm_text_before_pdf(replanned, guarded_goal)
         gate2 = run_planner_guard(llm, provider, goal, replanned, planner.registry)
         print('\n===== PLANNER GUARD (REPLAN) =====')
         print(f"status={gate2.get('status')}")
@@ -160,7 +160,7 @@ def create_agent_router(
         effective_goal = _build_effective_goal(req.goal, additional_props, s, user_id)
         planner = Planner(llm, registry)
         steps = planner.create_steps(goal=effective_goal)
-        steps = inject_llm_summary_before_pdf(steps, effective_goal)
+        steps = inject_llm_text_before_pdf(steps, effective_goal)
 
         print('\n===== PLANNED STEPS =====')
         for i, step in enumerate(steps, 1):
@@ -268,7 +268,7 @@ def create_agent_router(
         effective_goal = append_agent_tools_hint(effective_goal, s, user_id)
         planner = Planner(llm, build_registry(user_id, s))
         steps = planner.create_steps(goal=effective_goal)
-        steps = inject_llm_summary_before_pdf(steps, effective_goal)
+        steps = inject_llm_text_before_pdf(steps, effective_goal)
         steps, plan_gate = _apply_planner_guard(llm, provider, planner, effective_goal, steps, s, user_id)
         if plan_gate.get("status") != "ready":
             missing = [str(x) for x in (plan_gate.get("missing") or [])]
@@ -303,7 +303,7 @@ def create_agent_router(
             repl_goal = _build_effective_goal(effective_goal, replan_additional_props, s, user_id)
             replanner = Planner(llm, build_registry(user_id, s))
             replanned_steps = replanner.create_steps(goal=repl_goal)
-            replanned_steps = inject_llm_summary_before_pdf(replanned_steps, repl_goal)
+            replanned_steps = inject_llm_text_before_pdf(replanned_steps, repl_goal)
             replanned_steps, repl_gate = _apply_planner_guard(
                 llm, provider, replanner, effective_goal, replanned_steps, s, user_id
             )

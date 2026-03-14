@@ -9,7 +9,7 @@ from fastapi import HTTPException
 
 from server.services.llm_ionos import IonosLLM
 from server.services.llm_openai import LlmOpenai
-from server.tools.browser.browser import get_website
+from server.tools.web.browser import web_fetch_page
 
 from .models import (
     Step12MarketTrendSource,
@@ -276,9 +276,9 @@ def run_step_1_2_market_trends_structured(
     for _idx, (url, source_text) in enumerate(extracted, start=1):
         original_text_raw = _clean_text(source_text)[: req.max_chars_per_source]
         original_text = original_text_raw
-        if req.use_view_website:
+        if req.use_web_fetch_page:
             try:
-                vw = get_website(
+                vw = web_fetch_page(
                     url=url,
                     selector="body",
                     timeout_ms=req.view_timeout_ms,
@@ -289,9 +289,9 @@ def run_step_1_2_market_trends_structured(
                 if vw_text:
                     original_text = vw_text[: req.max_chars_per_source]
                 else:
-                    warnings.append(f"get_website_empty_text:{url}")
+                    warnings.append(f"web_fetch_page_empty_text:{url}")
             except Exception as exc:
-                warnings.append(f"get_website_failed:{url}:{exc}")
+                warnings.append(f"web_fetch_page_failed:{url}:{exc}")
 
         bullets = _summarize_with_llm(
             provider=provider,

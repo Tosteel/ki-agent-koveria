@@ -322,7 +322,7 @@ def _retrieve_context(
         out = _safe_tool_call(
             registry=registry,
             ctx=ctx,
-            tool="browse_whitelist",
+            tool="web_crawl_site_whitelist",
             args={
                 "url": u,
                 "query": query,
@@ -336,15 +336,15 @@ def _retrieve_context(
             if txt:
                 parts.append(f"WEB({u}):\n{txt}")
             sources.extend(_extract_sources(out))
-            trace.append(f"browse_whitelist:{u}:ok")
+            trace.append(f"web_crawl_site_whitelist:{u}:ok")
             continue
         if out.get("_error"):
-            trace.append(f"browse_whitelist:{u}:error")
+            trace.append(f"web_crawl_site_whitelist:{u}:error")
 
         fallback = _safe_tool_call(
             registry=registry,
             ctx=ctx,
-            tool="view_website",
+            tool="web_search_page",
             args={"url": u, "query": query},
         )
         if fallback and not fallback.get("_error"):
@@ -352,7 +352,7 @@ def _retrieve_context(
             if txt:
                 parts.append(f"WEB({u}):\n{txt}")
             sources.extend(_extract_sources(fallback))
-            trace.append(f"view_website:{u}:ok")
+            trace.append(f"web_search_page:{u}:ok")
 
     merged = "\n\n".join(parts).strip()
     if len(merged) < 220 or len(sources) == 0:
@@ -412,7 +412,7 @@ def _draft_reply(
     out = _tool_call(
         registry=registry,
         ctx=ctx,
-        tool="llm_compose",
+        tool="llm_text_compose",
         args={"text": compose_input, "instruction": instruction, "max_chars": 2500},
     )
     return str(out.get("text") or "").strip()

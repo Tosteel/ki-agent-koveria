@@ -1,31 +1,31 @@
 import unittest
 
-from server.main import _compact_tool_outputs, _inject_llm_summary_before_pdf, _outputs_for_final_answer
+from server.main import _compact_tool_outputs, _inject_llm_text_before_pdf, _outputs_for_final_answer
 
 
 class PlanPostprocessTests(unittest.TestCase):
-    def test_injects_llm_compose_before_pdf_when_goal_wants_summary(self):
+    def test_injects_llm_text_compose_before_pdf_when_goal_wants_summary(self):
         steps = [
-            {"tool": "query_rag", "args": {"query": "kunden"}},
+            {"tool": "rag_knowledgebase", "args": {"query": "kunden"}},
             {"tool": "pdf_export", "args": {"output_path": "kunden.pdf", "text": "${steps[0].text}"}},
         ]
-        out = _inject_llm_summary_before_pdf(steps, "Fasse nur die Kunden zusammen")
-        self.assertEqual(out[1]["tool"], "llm_compose")
+        out = _inject_llm_text_before_pdf(steps, "Fasse nur die Kunden zusammen")
+        self.assertEqual(out[1]["tool"], "llm_text_compose")
         self.assertEqual(out[2]["tool"], "pdf_export")
         self.assertEqual(out[2]["args"]["text"], "{last.text}")
 
-    def test_rewrites_existing_llm_summarize_step_to_llm_compose(self):
+    def test_rewrites_existing_llm_text_summarize_step_to_llm_text_compose(self):
         steps = [
-            {"tool": "query_rag", "args": {"query": "kunden"}},
-            {"tool": "llm_summarize", "args": {"text": "{last.text}"}},
+            {"tool": "rag_knowledgebase", "args": {"query": "kunden"}},
+            {"tool": "llm_text_summarize", "args": {"text": "{last.text}"}},
             {"tool": "pdf_export", "args": {"output_path": "kunden.pdf", "text": "{last.text}"}},
         ]
-        out = _inject_llm_summary_before_pdf(steps, "Fasse nur die Kunden zusammen")
-        self.assertEqual(out[1]["tool"], "llm_compose")
+        out = _inject_llm_text_before_pdf(steps, "Fasse nur die Kunden zusammen")
+        self.assertEqual(out[1]["tool"], "llm_text_compose")
 
     def test_compact_outputs_keep_only_payload_for_success(self):
         full = [
-            {"step": 1, "tool": "query_rag", "ok": True, "result": {"x": 1}, "payload": {"_step": 1, "x": 1}},
+            {"step": 1, "tool": "rag_knowledgebase", "ok": True, "result": {"x": 1}, "payload": {"_step": 1, "x": 1}},
             {"step": 2, "tool": "pdf_export", "ok": False, "error": "boom", "payload": {"_step": 1, "x": 1}},
         ]
         compact = _compact_tool_outputs(full)
@@ -33,11 +33,11 @@ class PlanPostprocessTests(unittest.TestCase):
         self.assertEqual(compact[0]["payload"]["x"], 1)
         self.assertEqual(compact[1]["error"], "boom")
 
-    def test_compact_outputs_drop_query_rag_text_when_hits_exist(self):
+    def test_compact_outputs_drop_rag_knowledgebase_text_when_hits_exist(self):
         full = [
             {
                 "step": 1,
-                "tool": "query_rag",
+                "tool": "rag_knowledgebase",
                 "ok": True,
                 "payload": {"_step": 1, "hits": [{"snippet": "x"}], "text": "redundant"},
             }
@@ -46,11 +46,11 @@ class PlanPostprocessTests(unittest.TestCase):
         self.assertIn("hits", compact[0]["payload"])
         self.assertNotIn("text", compact[0]["payload"])
 
-    def test_compact_outputs_drop_llm_summary_text_when_summary_exists(self):
+    def test_compact_outputs_drop_llm_text_summarize_text_when_summary_exists(self):
         full = [
             {
                 "step": 2,
-                "tool": "llm_summarize",
+                "tool": "llm_text_summarize",
                 "ok": True,
                 "payload": {"_step": 2, "summary": "abc", "text": "abc"},
             }
@@ -59,11 +59,11 @@ class PlanPostprocessTests(unittest.TestCase):
         self.assertIn("summary", compact[0]["payload"])
         self.assertNotIn("text", compact[0]["payload"])
 
-    def test_compact_outputs_drop_llm_compose_text_when_composed_exists(self):
+    def test_compact_outputs_drop_llm_text_compose_when_composed_exists(self):
         full = [
             {
                 "step": 2,
-                "tool": "llm_compose",
+                "tool": "llm_text_compose",
                 "ok": True,
                 "payload": {"_step": 2, "composed_text": "abc", "text": "abc"},
             }
@@ -76,13 +76,13 @@ class PlanPostprocessTests(unittest.TestCase):
         full = [
             {
                 "step": 1,
-                "tool": "query_rag",
+                "tool": "rag_knowledgebase",
                 "ok": True,
                 "payload": {"_step": 1, "hits": [{"snippet": "a"}, {"snippet": "b"}], "text": "x"},
             },
             {
                 "step": 2,
-                "tool": "llm_summarize",
+                "tool": "llm_text_summarize",
                 "ok": True,
                 "payload": {"_step": 2, "summary": "ok", "usage": {"total_tokens": 123}, "model": "m"},
             },
@@ -93,11 +93,11 @@ class PlanPostprocessTests(unittest.TestCase):
         self.assertNotIn("usage", lean[1]["payload"])
         self.assertNotIn("model", lean[1]["payload"])
 
-    def test_outputs_for_final_answer_drop_llm_compose_model_usage(self):
+    def test_outputs_for_final_answer_drop_llm_text_compose_model_usage(self):
         full = [
             {
                 "step": 3,
-                "tool": "llm_compose",
+                "tool": "llm_text_compose",
                 "ok": True,
                 "payload": {"_step": 3, "composed_text": "ok", "usage": {"total_tokens": 1}, "model": "m"},
             }

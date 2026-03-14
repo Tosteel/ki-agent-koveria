@@ -46,7 +46,7 @@ requirements.txt
 - Python 3.11+
 - Virtuelle Umgebung empfohlen
 - Abhaengigkeiten aus `requirements.txt`
-- Fuer `browse_website` (Playwright): Browser installieren
+- Fuer `web_crawl_site` (Playwright): Browser installieren
 
 ## Installation
 
@@ -161,8 +161,8 @@ Request:
   "goal": "bitte nach der tagesschau auch auf http://www.zdf.de suchen.",
   "additional_props": {
     "planned_steps": [
-      "1. tool=view_website args={\"url\":\"https://www.tagesschau.de/\",\"query\":\"Friedrich Merz\"}",
-      "2. tool=llm_compose args={\"text\":\"{steps[0].text}\"}"
+      "1. tool=web_search_page args={\"url\":\"https://www.tagesschau.de/\",\"query\":\"Friedrich Merz\"}",
+      "2. tool=llm_text_compose args={\"text\":\"{steps[0].text}\"}"
     ]
   }
 }
@@ -177,8 +177,8 @@ Response (Beispiel):
   "normalized_goal": "...",
   "status": "ready",
   "steps": [
-    { "tool": "view_website", "args": { "url": "...", "query": "..." } },
-    { "tool": "llm_compose", "args": { "text": "{steps[0].text}" } }
+    { "tool": "web_search_page", "args": { "url": "...", "query": "..." } },
+    { "tool": "llm_text_compose", "args": { "text": "{steps[0].text}" } }
   ]
 }
 ```

@@ -18,7 +18,7 @@
   "fallback": {
     "on_empty_capabilities": ["web_search"],
     "on_transient_error_capabilities": ["web_search"],
-    "fallback_candidates": ["websearch_table", "search_multitable", "langsearch", "view_website"]
+    "fallback_candidates": ["websearch_table", "search_multitable", "langsearch", "web_search_page"]
   },
   "quality_signals": {
     "min_hits": 1,

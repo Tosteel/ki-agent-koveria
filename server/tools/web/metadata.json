@@ -1,11 +1,28 @@
 {
-  "name": "Browser",
+  "name": "Web",
   "version": "1.0",
   "description": "Durchsucht Webseiten (einzeln oder über Navigation).",
   "tools": {
-    "view_website": {
+    "web_fetch_page": {
+      "name": "Website Body laden",
+      "input": "url, optional selector/timeout_ms/max_chars/include_image_urls",
+      "output": "Volltext des Seiten-Body (text) plus HTML",
+      "capabilities": ["web_search"],
+      "side_effect_level": "none",
+      "retry_policy": {
+        "max_retries": 1,
+        "backoff_ms": 250,
+        "retry_on": ["timeout", "connection_error", "rate_limit"]
+      },
+      "quality_signals": {
+        "min_hits": 0,
+        "require_sources": false,
+        "min_text_length": 80
+      }
+    },
+    "web_search_page": {
       "name": "Website nur unter dem angegebenen Link ansehen",
-      "input": "url, query, optional selector/max_matches",
+      "input": "url, query, optional selector/max_matches/include_full_text/full_text_max_chars",
       "output": "Treffer inkl. Textstellen/Links",
       "capabilities": ["web_search"],
       "side_effect_level": "none",
@@ -20,7 +37,7 @@
         "min_text_length": 80
       }
     },
-    "browse_website": {
+    "web_crawl_site": {
       "name": "Website umfangreich browsen",
       "input": "url, query, optional click/select settings",
       "output": "Treffer über mehrere Seiten",
@@ -37,15 +54,15 @@
         "min_text_length": 120
       }
     },
-    "browse_whitelist": {
+    "web_crawl_site_whitelist": {
       "name": "Website browsen mit Domain-Whitelist",
       "input": "url, query, optional allowed_domains/click/select settings",
-      "output": "Treffer über mehrere Seiten (Fallback: view_website)",
+      "output": "Treffer über mehrere Seiten (Fallback: web_search_page)",
       "capabilities": ["web_search", "web_search_whitelist"],
       "side_effect_level": "none",
       "fallback": {
         "strategy": "ordered",
-        "chain": ["browse_website", "view_website"]
+        "chain": ["web_crawl_site", "web_search_page"]
       },
       "retry_policy": {
         "max_retries": 1,

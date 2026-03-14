@@ -9,7 +9,18 @@ DEFAULT_TOOL_POLICY: Dict[str, Any] = {
     "side_effect_level": "none",
     "requires": {},
     "result_contract": {
-        "success_if_any": ["text", "summary", "composed_text", "hits", "rows", "results", "items", "data", "sent"],
+        "success_if_any": [
+            "text",
+            "summary",
+            "composed_text",
+            "hits",
+            "rows",
+            "results",
+            "items",
+            "data",
+            "sent",
+            "bytes_written",
+        ],
         "empty_if": ["hits_empty", "rows_empty", "text_blank", "no_sources"],
     },
     "retry_policy": {
@@ -42,25 +53,7 @@ TOOL_POLICY_OVERRIDES: Dict[str, Dict[str, Any]] = {
         "fallback": {
             "on_empty_capabilities": ["web_search"],
             "on_transient_error_capabilities": ["web_search"],
-            "fallback_candidates": ["websearch_table", "search_multitable", "langsearch", "view_website"],
-        },
-        "quality_signals": {
-            "min_hits": 1,
-            "require_sources": True,
-            "min_text_length": 120,
-        },
-    },
-    "query_rag": {
-        "capabilities": ["knowledge_search"],
-        "retry_policy": {
-            "max_retries": 2,
-            "backoff_ms": 350,
-            "retry_on": ["timeout", "connection_refused", "connection_error", "rate_limit"],
-        },
-        "fallback": {
-            "on_empty_capabilities": ["web_search"],
-            "on_transient_error_capabilities": ["web_search"],
-            "fallback_candidates": ["websearch_table", "search_multitable", "langsearch", "view_website"],
+            "fallback_candidates": ["langsearch", "search_multitable", "websearch_table"],
         },
         "quality_signals": {
             "min_hits": 1,
@@ -83,21 +76,26 @@ TOOL_POLICY_OVERRIDES: Dict[str, Dict[str, Any]] = {
         "retry_policy": {"max_retries": 1, "backoff_ms": 250, "retry_on": ["timeout", "connection_error", "rate_limit"]},
         "quality_signals": {"min_hits": 1, "require_sources": True, "min_text_length": 120},
     },
-    "view_website": {
+    "web_search_page": {
         "capabilities": ["web_search"],
         "retry_policy": {"max_retries": 1, "backoff_ms": 250, "retry_on": ["timeout", "connection_error", "rate_limit"]},
         "quality_signals": {"min_hits": 1, "require_sources": True, "min_text_length": 80},
     },
-    "browse_website": {
+    "web_crawl_site": {
         "capabilities": ["web_search"],
         "retry_policy": {"max_retries": 1, "backoff_ms": 250, "retry_on": ["timeout", "connection_error", "rate_limit"]},
         "quality_signals": {"min_hits": 1, "require_sources": True, "min_text_length": 120},
     },
-    "llm_compose": {
+    "web_crawl_site_whitelist": {
+        "capabilities": ["web_search", "web_search_whitelist"],
+        "retry_policy": {"max_retries": 1, "backoff_ms": 250, "retry_on": ["timeout", "connection_error", "rate_limit"]},
+        "quality_signals": {"min_hits": 1, "require_sources": True, "min_text_length": 120},
+    },
+    "llm_text_compose": {
         "capabilities": ["text_compose"],
         "quality_signals": {"min_hits": 0, "require_sources": False, "min_text_length": 40},
     },
-    "llm_summarize": {
+    "llm_text_summarize": {
         "capabilities": ["text_compose"],
         "quality_signals": {"min_hits": 0, "require_sources": False, "min_text_length": 40},
     },
@@ -119,9 +117,9 @@ TOOL_POLICY_OVERRIDES: Dict[str, Dict[str, Any]] = {
 
 
 CAPABILITY_FALLBACK_PRIORITY: Dict[str, List[str]] = {
-    "web_search": ["websearch_table", "search_multitable", "langsearch", "view_website", "browse_website"],
-    "knowledge_search": ["rag_knowledgebase", "query_rag"],
-    "text_compose": ["llm_compose", "llm_summarize"],
+    "web_search": ["websearch_table", "search_multitable", "langsearch", "web_search_page", "web_crawl_site"],
+    "knowledge_search": ["rag_knowledgebase"],
+    "text_compose": ["llm_text_compose", "llm_text_summarize"],
 }
 
 

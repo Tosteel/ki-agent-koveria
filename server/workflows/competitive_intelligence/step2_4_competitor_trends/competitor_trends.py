@@ -10,7 +10,7 @@ from fastapi import HTTPException
 
 from server.services.llm_ionos import IonosLLM
 from server.services.llm_openai import LlmOpenai
-from server.tools.browser.browser import browse_website
+from server.tools.web.browser import web_crawl_site
 
 from .models import (
     Step24CompetitorTrendProfile,
@@ -376,7 +376,7 @@ def _first_snippet(text: str, keyword: str, *, window: int = 180) -> str:
     return _sanitize_text(snippet, max_chars=260)
 
 
-def _browse_website_for_trend(
+def _web_crawl_site_for_trend(
     *,
     url: str,
     keywords: List[str],
@@ -392,7 +392,7 @@ def _browse_website_for_trend(
         query_keywords = _extract_keywords(trend_summary, min_len=4, max_keywords=4)
     query = " ".join(query_keywords[:4]).strip() or _sanitize_text(trend_summary, max_chars=120)
     try:
-        result = browse_website(
+        result = web_crawl_site(
             url=url,
             query=query,
             selector="body",
@@ -426,7 +426,7 @@ def _browse_website_for_trend(
             "visited_urls": visited_urls,
         }
     except Exception as exc:
-        warnings.append(f"browse_website_failed:{url}:{exc}")
+        warnings.append(f"web_crawl_site_failed:{url}:{exc}")
         return {"count": 0, "text": "", "snippet": "", "snippets": [], "visited_urls": []}
 
 
@@ -501,7 +501,7 @@ def run_step_2_4_competitor_trends(
         trend_matches: List[TrendMatchItem] = []
         for t in trend_specs:
             keywords = list(t["keywords"])
-            browse = _browse_website_for_trend(
+            browse = _web_crawl_site_for_trend(
                 url=website,
                 keywords=keywords,
                 trend_summary=t["summary"],

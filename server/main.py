@@ -130,8 +130,8 @@ def _rewrite_summarize_to_compose(steps: list[Dict[str, Any]]) -> list[Dict[str,
     return agent_service.rewrite_summarize_to_compose(steps)
 
 
-def _inject_llm_summary_before_pdf(steps: list[Dict[str, Any]], goal: str) -> list[Dict[str, Any]]:
-    return agent_service.inject_llm_summary_before_pdf(steps, goal)
+def _inject_llm_text_before_pdf(steps: list[Dict[str, Any]], goal: str) -> list[Dict[str, Any]]:
+    return agent_service.inject_llm_text_before_pdf(steps, goal)
 
 
 def _compact_tool_outputs(tool_outputs: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
@@ -357,7 +357,7 @@ app.include_router(
         run_planner_guard=_run_planner_guard,
         clarification_response=_clarification_response,
         goal_with_context=_goal_with_context,
-        inject_llm_summary_before_pdf=_inject_llm_summary_before_pdf,
+        inject_llm_text_before_pdf=_inject_llm_text_before_pdf,
         run_steps_internal=_run_steps_internal,
         finalize_internal=_finalize_internal,
         sanitize_execution_steps=_sanitize_execution_steps,

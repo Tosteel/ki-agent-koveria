@@ -788,7 +788,7 @@
         },
         {
           "role": "user",
-          "text": "bitte durchsuche https://www.ipa.fraunhofer.de/ mit browse_website nach künstlicher intelligenz.",
+          "text": "bitte durchsuche https://www.ipa.fraunhofer.de/ mit web_crawl_site nach künstlicher intelligenz.",
           "downloadUrl": "",
           "downloadLabel": "",
           "timestamp": "2026-02-14T18:41:42.917Z"
@@ -802,7 +802,7 @@
         },
         {
           "role": "user",
-          "text": "bitte durchsuche https://www.ipa.fraunhofer.de/ mit browse_website nach künstlicher intelligenz.",
+          "text": "bitte durchsuche https://www.ipa.fraunhofer.de/ mit web_crawl_site nach künstlicher intelligenz.",
           "downloadUrl": "",
           "downloadLabel": "",
           "timestamp": "2026-02-14T18:44:13.775Z"

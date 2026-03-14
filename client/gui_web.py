@@ -1080,7 +1080,7 @@ def planned_task_explain(req: TaskExplainRequest) -> JSONResponse:
         "log_label": "TEXTBASE FOR FINAL ANSWER",
         "steps": [
             {
-                "tool": "llm_compose",
+                "tool": "llm_text_compose",
                 "args": {
                     "text": source_text,
                     "instruction": compose_instruction,
@@ -1367,7 +1367,7 @@ def interpret_trigger_update(req: TriggerInterpretRequest) -> JSONResponse:
     payload = {
         "steps": [
             {
-                "tool": "llm_compose",
+                "tool": "llm_text_compose",
                 "args": {
                     "text": source_text,
                     "instruction": instruction,

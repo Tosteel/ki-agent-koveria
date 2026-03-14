@@ -1,11 +1,11 @@
 import types
 import unittest
 
-from server.tools.llm_summary import llm_summarize_text
+from server.tools.llm_text import llm_text_compose
 
 
 class _FakeLlm:
-    def __init__(self, enabled: bool, text: str = "Kurzfassung", model: str = "fake-model"):
+    def __init__(self, enabled: bool, text: str = "Ausformulierter Text", model: str = "fake-model"):
         self._enabled = enabled
         self._text = text
         self.cfg = types.SimpleNamespace(model=model)
@@ -16,7 +16,7 @@ class _FakeLlm:
 
     def chat_completions(self, **kwargs):
         self.last_messages = kwargs.get("messages") or []
-        return {"choices": [{"message": {"content": self._text}}], "usage": {"total_tokens": 12}}
+        return {"choices": [{"message": {"content": self._text}}], "usage": {"total_tokens": 10}}
 
     @staticmethod
     def extract_text(completion):
@@ -27,23 +27,22 @@ class _FakeLlm:
         return completion.get("usage")
 
 
-class LlmSummaryToolTests(unittest.TestCase):
+class LlmComposeToolTests(unittest.TestCase):
     def test_uses_llm_when_enabled(self):
-        fake = _FakeLlm(enabled=True, text="Zusammenfassung")
-        res = llm_summarize_text(
-            "Preis: 60,00 EUR",
-            goal="Bitte mit Quelle zusammenfassen",
+        fake = _FakeLlm(enabled=True, text="Kohärenter Text.")
+        res = llm_text_compose(
+            "- Kunde A\n- Kunde B",
+            goal="Formuliere einen zusammenhängenden Text mit Quelle.",
             llm=fake,
         )
-        self.assertEqual(res["summary"], "Zusammenfassung")
+        self.assertEqual(res["text"], "Kohärenter Text.")
         self.assertFalse(res["fallback_used"])
-        self.assertEqual(res["model"], "fake-model")
-        self.assertIn("Bitte mit Quelle zusammenfassen", fake.last_messages[1]["content"])
+        self.assertIn("Formuliere einen zusammenhängenden Text", fake.last_messages[1]["content"])
 
     def test_fallback_when_disabled(self):
-        res = llm_summarize_text("Zeile 1\nZeile 2", llm=_FakeLlm(enabled=False))
+        res = llm_text_compose("- A\n- B", llm=_FakeLlm(enabled=False))
         self.assertTrue(res["fallback_used"])
-        self.assertIn("Zeile 1", res["summary"])
+        self.assertIn("A", res["text"])
 
 
 if __name__ == "__main__":

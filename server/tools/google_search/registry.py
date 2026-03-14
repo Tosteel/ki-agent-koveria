@@ -9,7 +9,6 @@ from .models import GoogleSearchRequest, GoogleSearchResponse
 
 
 TOOL_NAME = "google_search"
-TOOL_ALIAS = "google_seach"
 
 
 def register(registry: ToolRegistry) -> None:
@@ -28,12 +27,6 @@ def register(registry: ToolRegistry) -> None:
 
     registry.register(
         TOOL_NAME,
-        tool_google_search,
-        request_model=GoogleSearchRequest,
-        response_model=GoogleSearchResponse,
-    )
-    registry.register(
-        TOOL_ALIAS,
         tool_google_search,
         request_model=GoogleSearchRequest,
         response_model=GoogleSearchResponse,

@@ -47,7 +47,7 @@ def register(registry: ToolRegistry) -> None:
         response_model=VideoAnalyzeSyncResponse,
     )
     registry.register(
-        "websearch_videoanalizer",
+        "websearch_videoanalyzer",
         tool_websearch_videoanalyzer,
         request_model=VideoAnalyzeSyncRequest,
         response_model=VideoAnalyzeSyncResponse,

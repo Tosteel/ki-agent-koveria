@@ -24,7 +24,7 @@ class OrchestratorPlaceholderTests(unittest.TestCase):
     def setUp(self):
         self.registry = ToolRegistry()
 
-        def query_rag(_ctx, _args):
+        def rag_knowledgebase(_ctx, _args):
             return {
                 "hits": [
                     {
@@ -38,19 +38,19 @@ class OrchestratorPlaceholderTests(unittest.TestCase):
         def pdf_export(_ctx, args):
             return {"output_path": args["output_path"], "text": args["text"]}
 
-        def llm_summarize(_ctx, args):
+        def llm_text_summarize(_ctx, args):
             return {"text": args.get("text", ""), "goal": args.get("goal", "")}
 
-        self.registry.register("query_rag", query_rag, request_model=QueryArgs)
+        self.registry.register("rag_knowledgebase", rag_knowledgebase, request_model=QueryArgs)
         self.registry.register("pdf_export", pdf_export, request_model=PdfArgs)
-        self.registry.register("llm_summarize", llm_summarize, request_model=LlmSummaryArgs)
+        self.registry.register("llm_text_summarize", llm_text_summarize, request_model=LlmSummaryArgs)
 
         self.orch = Orchestrator(self.registry)
         self.ctx = ToolContext(user_id="u", settings=object(), api_key="k")
 
     def test_resolves_placeholder_in_following_step(self):
         steps = [
-            {"tool": "query_rag", "args": {"query": "rechnung"}},
+            {"tool": "rag_knowledgebase", "args": {"query": "rechnung"}},
             {
                 "tool": "pdf_export",
                 "args": {
@@ -72,7 +72,7 @@ class OrchestratorPlaceholderTests(unittest.TestCase):
 
     def test_full_value_placeholder_returns_native_value(self):
         steps = [
-            {"tool": "query_rag", "args": {"query": "rechnung"}},
+            {"tool": "rag_knowledgebase", "args": {"query": "rechnung"}},
             {
                 "tool": "pdf_export",
                 "args": {
@@ -88,7 +88,7 @@ class OrchestratorPlaceholderTests(unittest.TestCase):
 
     def test_legacy_steps_index_placeholder_is_resolved(self):
         steps = [
-            {"tool": "query_rag", "args": {"query": "rechnung"}},
+            {"tool": "rag_knowledgebase", "args": {"query": "rechnung"}},
             {
                 "tool": "pdf_export",
                 "args": {
@@ -104,7 +104,7 @@ class OrchestratorPlaceholderTests(unittest.TestCase):
 
     def test_dollar_placeholder_is_resolved(self):
         steps = [
-            {"tool": "query_rag", "args": {"query": "rechnung"}},
+            {"tool": "rag_knowledgebase", "args": {"query": "rechnung"}},
             {
                 "tool": "pdf_export",
                 "args": {
@@ -119,7 +119,7 @@ class OrchestratorPlaceholderTests(unittest.TestCase):
         self.assertEqual(outputs[1]["result"]["text"], "Preis netto: 199,00 EUR")
 
     def test_goal_is_injected_into_each_step_args(self):
-        steps = [{"tool": "llm_summarize", "args": {"text": "input"}}]
+        steps = [{"tool": "llm_text_summarize", "args": {"text": "input"}}]
         self.ctx.goal = "Bitte mit Quelle zusammenfassen"
         outputs = self.orch.run_steps(self.ctx, steps)
         self.assertEqual(outputs[0]["result"]["goal"], "Bitte mit Quelle zusammenfassen")

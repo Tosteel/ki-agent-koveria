@@ -185,18 +185,18 @@ def rewrite_summarize_to_compose(steps: List[Dict[str, Any]]) -> List[Dict[str, 
     out: List[Dict[str, Any]] = []
     for st in steps:
         tool = (st.get("tool") or "").strip()
-        if tool == "llm_summarize":
-            out.append({"tool": "llm_compose", "args": dict(st.get("args") or {})})
+        if tool == "llm_text_summarize":
+            out.append({"tool": "llm_text_compose", "args": dict(st.get("args") or {})})
         else:
             out.append(st)
     return out
 
 
-def inject_llm_summary_before_pdf(steps: List[Dict[str, Any]], goal: str) -> List[Dict[str, Any]]:
+def inject_llm_text_before_pdf(steps: List[Dict[str, Any]], goal: str) -> List[Dict[str, Any]]:
     steps = rewrite_summarize_to_compose(steps)
     if not wants_summary(goal):
         return steps
-    if any((s.get("tool") or "").strip() == "llm_compose" for s in steps):
+    if any((s.get("tool") or "").strip() == "llm_text_compose" for s in steps):
         return steps
 
     out: List[Dict[str, Any]] = []
@@ -206,7 +206,7 @@ def inject_llm_summary_before_pdf(steps: List[Dict[str, Any]], goal: str) -> Lis
             source_text = args.get("text") or "{last.text}"
             out.append(
                 {
-                    "tool": "llm_compose",
+                    "tool": "llm_text_compose",
                     "args": {
                         "text": source_text,
                         "goal": goal,
@@ -235,11 +235,11 @@ def compact_tool_outputs(tool_outputs: List[Dict[str, Any]]) -> List[Dict[str, A
         if isinstance(payload, dict):
             payload = dict(payload)
             tool = str(item.get("tool") or "").strip()
-            if tool == "query_rag" and isinstance(payload.get("hits"), list):
+            if tool == "rag_knowledgebase" and isinstance(payload.get("hits"), list):
                 payload.pop("text", None)
-            if tool == "llm_summarize" and isinstance(payload.get("summary"), str):
+            if tool == "llm_text_summarize" and isinstance(payload.get("summary"), str):
                 payload.pop("text", None)
-            if tool == "llm_compose" and isinstance(payload.get("composed_text"), str):
+            if tool == "llm_text_compose" and isinstance(payload.get("composed_text"), str):
                 payload.pop("text", None)
         if o.get("ok"):
             item["payload"] = payload
@@ -266,7 +266,7 @@ def sanitize_execution_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]
             output_path = str(args_out.get("output_path") or "").strip()
             if not output_path.lower().endswith(".pptx"):
                 args_out["output_path"] = "result.pptx"
-        elif tool == "llm_smalltalk":
+        elif tool == "llm_text_chat":
             raw_chars = args_out.get("max_chars")
             try:
                 max_chars = int(raw_chars)
@@ -326,14 +326,14 @@ def outputs_for_final_answer(tool_outputs: List[Dict[str, Any]]) -> List[Dict[st
 
         p = dict(payload)
         tool = item["tool"]
-        if tool in {"rag_knowledgebase", "query_rag"}:
+        if tool == "rag_knowledgebase":
             p.pop("hits", None)
             if isinstance(payload.get("hits"), list):
                 p["hit_count"] = len(payload["hits"])
-        elif tool == "llm_summarize":
+        elif tool == "llm_text_summarize":
             p.pop("usage", None)
             p.pop("model", None)
-        elif tool == "llm_compose":
+        elif tool == "llm_text_compose":
             p.pop("usage", None)
             p.pop("model", None)
 
@@ -358,8 +358,88 @@ def extract_execution_answer(tool_outputs: List[Dict[str, Any]]) -> str:
     return "Ausführung abgeschlossen."
 
 
+def _extract_goal_message_and_context(goal: str) -> tuple[str, str]:
+    text = str(goal or "").strip()
+    if not text:
+        return "", ""
+
+    lower = text.lower()
+    if lower.startswith("goal:"):
+        body = text[len("goal:") :].lstrip()
+        parts = re.split(r"\n\s*goal_context\s*:\s*", body, maxsplit=1, flags=re.IGNORECASE)
+        message = str(parts[0] if parts else body).strip()
+        context = str(parts[1] if len(parts) > 1 else "").strip()
+        return message, context
+
+    if lower.startswith("aktuelle anfrage:"):
+        body = text[len("aktuelle anfrage:") :].lstrip()
+        parts = re.split(
+            r"\n\s*dialogverlauf\s*\(.*?\)\s*:\s*",
+            body,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )
+        message = str(parts[0] if parts else body).strip()
+        context = str(parts[1] if len(parts) > 1 else "").strip()
+        return message, context
+
+    return text, ""
+
+
+def _compact_goal_context_points(context_text: str, *, max_points: int = 6) -> str:
+    lines = [str(x).strip() for x in str(context_text or "").splitlines() if str(x).strip()]
+    if not lines:
+        return ""
+
+    preferred: List[str] = []
+    for line in lines:
+        low = line.lower()
+        if line.startswith("Nutzer:"):
+            preferred.append(line)
+            continue
+        if "ziel" in low or "aufgabe" in low or "tool" in low or "fähigkeit" in low:
+            preferred.append(line)
+            continue
+        if "pdf" in low or "mail" in low or "web" in low or "rag" in low:
+            preferred.append(line)
+
+    selected: List[str] = []
+    for line in preferred + lines[-max_points:]:
+        if line not in selected:
+            selected.append(line)
+        if len(selected) >= max_points:
+            break
+
+    return "\n".join(selected).strip()
+
+
+def _one_line_summary(text: str, *, max_len: int = 220) -> str:
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not cleaned:
+        return ""
+    if len(cleaned) <= max_len:
+        return cleaned
+    return cleaned[: max_len - 1].rstrip() + "…"
+
+
+def _build_normalized_goal_structured(*, goal_summary: str, goal_message: str, goal_context: str) -> str:
+    summary = _one_line_summary(goal_summary) or _one_line_summary(goal_message) or "-"
+    message = str(goal_message or "").strip() or "-"
+    context = str(goal_context or "").strip() or "-"
+    return (
+        "goal_summary:\n"
+        f"{summary}\n\n"
+        "goal_message:\n"
+        f"{message}\n\n"
+        "goal_context:\n"
+        f"{context}"
+    )
+
+
 def run_clarification_gate(llm: Any, goal: str) -> Dict[str, Any]:
     g = (goal or "").strip().lower()
+    goal_message, raw_goal_context = _extract_goal_message_and_context(goal)
+    goal_context = _compact_goal_context_points(raw_goal_context)
     search_like_markers = [
         "suche",
         "such",
@@ -372,32 +452,71 @@ def run_clarification_gate(llm: Any, goal: str) -> Dict[str, Any]:
         "websuche",
         "internet",
     ]
-    if any(m in g for m in search_like_markers):
-        return {"status": "ready", "normalized_goal": goal, "missing_fields": [], "questions": []}
-    # If an explicit file path/file type is present, keep goal verbatim (avoid lossy normalization).
+    force_ready = any(m in g for m in search_like_markers)
+    # If an explicit file path/file type is present, keep ready-state (avoid lossy blocking).
     if ".pdf" in g or "uploads/" in g or "work/" in g:
-        return {"status": "ready", "normalized_goal": goal, "missing_fields": [], "questions": []}
+        force_ready = True
 
     if not hasattr(llm, "enabled") or not llm.enabled():
-        return {"status": "ready", "normalized_goal": goal, "missing_fields": [], "questions": []}
+        return {
+            "status": "ready",
+            "normalized_goal": _build_normalized_goal_structured(
+                goal_summary=goal_message or goal,
+                goal_message=goal_message or goal,
+                goal_context=goal_context,
+            ),
+            "missing_fields": [],
+            "questions": [],
+        }
     if not hasattr(llm, "clarify_goal"):
-        return {"status": "ready", "normalized_goal": goal, "missing_fields": [], "questions": []}
+        return {
+            "status": "ready",
+            "normalized_goal": _build_normalized_goal_structured(
+                goal_summary=goal_message or goal,
+                goal_message=goal_message or goal,
+                goal_context=goal_context,
+            ),
+            "missing_fields": [],
+            "questions": [],
+        }
 
     try:
         out = llm.clarify_goal(goal=goal)
     except Exception:
-        return {"status": "ready", "normalized_goal": goal, "missing_fields": [], "questions": []}
+        return {
+            "status": "ready",
+            "normalized_goal": _build_normalized_goal_structured(
+                goal_summary=goal_message or goal,
+                goal_message=goal_message or goal,
+                goal_context=goal_context,
+            ),
+            "missing_fields": [],
+            "questions": [],
+        }
 
     status = out.get("status")
     if status not in {"ready", "needs_info"}:
         status = "ready"
-    normalized_goal = str(out.get("normalized_goal") or goal)
-    goal_has_context = "goal_context:" in str(goal or "").lower() or "dialogverlauf" in str(goal or "").lower()
-    normalized_has_context = (
-        "goal_context:" in normalized_goal.lower() or "dialogverlauf" in normalized_goal.lower()
+    if force_ready:
+        status = "ready"
+        out["missing_fields"] = []
+        out["questions"] = []
+
+    llm_goal_summary = str(out.get("goal_summary") or "").strip()
+    llm_summary_raw = str(out.get("normalized_goal") or "").strip()
+    llm_summary, _ = _extract_goal_message_and_context(llm_summary_raw)
+    if not llm_summary:
+        llm_summary = llm_summary_raw
+    if not llm_summary:
+        llm_summary = goal_message or str(goal or "")
+    if llm_goal_summary:
+        llm_summary = llm_goal_summary
+
+    normalized_goal = _build_normalized_goal_structured(
+        goal_summary=llm_summary,
+        goal_message=goal_message or str(goal or ""),
+        goal_context=goal_context,
     )
-    if goal_has_context and not normalized_has_context:
-        normalized_goal = str(goal)
     return {
         "status": status,
         "normalized_goal": normalized_goal,
@@ -455,6 +574,32 @@ def _split_goal_and_context_for_guard(goal: str) -> tuple[str, str]:
         current_goal = (parts[0] if parts else body).strip()
         context = (parts[1] if len(parts) > 1 else "").strip()
         return current_goal, context
+
+    if "goal_summary:" in lower and "goal_message:" in lower:
+        goal_summary = ""
+        goal_message = ""
+        goal_context = ""
+
+        m_summary = re.search(
+            r"goal_summary\s*:\s*(.*?)(?:\n\s*goal_message\s*:|\Z)",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if m_summary:
+            goal_summary = str(m_summary.group(1) or "").strip()
+        m_message = re.search(
+            r"goal_message\s*:\s*(.*?)(?:\n\s*goal_context\s*:|\Z)",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if m_message:
+            goal_message = str(m_message.group(1) or "").strip()
+        m_context = re.search(r"goal_context\s*:\s*(.*)\Z", text, flags=re.IGNORECASE | re.DOTALL)
+        if m_context:
+            goal_context = str(m_context.group(1) or "").strip()
+
+        primary = goal_summary or goal_message
+        return primary, goal_context
 
     if lower.startswith("aktuelle anfrage:"):
         body = text[len("aktuelle anfrage:") :].lstrip()
@@ -596,9 +741,36 @@ def _registry_fields_for_tool(registry: ToolRegistry, tool_name: str) -> set[str
 def _filter_llm_guard_with_registry(
     *,
     registry: ToolRegistry,
+    steps: List[Dict[str, Any]],
     missing: List[str],
     reasons: List[str],
 ) -> tuple[List[str], List[str]]:
+    allowed_prefixes = (
+        "missing_tool:",
+        "missing_arg:",
+        "unknown_arg:",
+        "bad_reference:",
+        "missing_step:",
+    )
+    step_tools = {
+        str(step.get("tool") or "").strip()
+        for step in steps
+        if isinstance(step, dict) and str(step.get("tool") or "").strip()
+    }
+
+    def _arg_missing_for_any_step(tool: str, arg: str) -> bool:
+        found_tool_step = False
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            if str(step.get("tool") or "").strip() != tool:
+                continue
+            found_tool_step = True
+            args = step.get("args") if isinstance(step.get("args"), dict) else {}
+            if _required_value_missing(args.get(arg)):
+                return True
+        return not found_tool_step
+
     kept_missing: List[str] = []
     dropped_refs: List[str] = []
     dropped_args: List[str] = []
@@ -607,11 +779,14 @@ def _filter_llm_guard_with_registry(
         tok = str(token).strip()
         if not tok:
             continue
+        if not any(tok.startswith(prefix) for prefix in allowed_prefixes):
+            dropped_refs.append(tok)
+            continue
         parsed_missing_arg = _split_tool_arg_token(tok, prefix="missing_arg:")
         if parsed_missing_arg:
             tool, arg = parsed_missing_arg
             fields = _registry_fields_for_tool(registry, tool)
-            if fields and arg in fields:
+            if fields and arg in fields and _arg_missing_for_any_step(tool, arg):
                 kept_missing.append(tok)
             else:
                 dropped_refs.append(f"{tool}.{arg}")
@@ -630,7 +805,7 @@ def _filter_llm_guard_with_registry(
 
         if tok.startswith("missing_tool:"):
             tool = tok.split(":", 1)[1].strip()
-            if tool and registry.get_tool(tool) is None:
+            if tool and registry.get_tool(tool) is not None and tool not in step_tools:
                 kept_missing.append(tok)
             else:
                 dropped_refs.append(tool)
@@ -792,7 +967,12 @@ def run_planner_guard(
             pass
 
     if registry is not None:
-        missing, reasons = _filter_llm_guard_with_registry(registry=registry, missing=missing, reasons=reasons)
+        missing, reasons = _filter_llm_guard_with_registry(
+            registry=registry,
+            steps=steps,
+            missing=missing,
+            reasons=reasons,
+        )
         reg_missing, reg_reasons = _registry_guard_checks(registry, steps)
         if reg_missing:
             status = "replan"

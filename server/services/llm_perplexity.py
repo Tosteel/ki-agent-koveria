@@ -243,13 +243,14 @@ class LlmPerplexity:
     def clarify_goal(self, *, goal: str) -> Dict[str, Any]:
         schema_hint = {
             "status": "ready|needs_info",
+            "goal_summary": "string",
             "normalized_goal": "string",
             "missing_fields": ["string"],
             "questions": ["string"],
         }
         user = (
             f"Anfrage: {goal}\n"
-            "Return JSON only with keys: status, normalized_goal, missing_fields, questions.\n"
+            "Return JSON only with keys: status, goal_summary, normalized_goal, missing_fields, questions.\n"
             f"Schema hint: {json.dumps(schema_hint, ensure_ascii=False)}"
         )
 
@@ -270,6 +271,7 @@ class LlmPerplexity:
             status = "ready"
         return {
             "status": status,
+            "goal_summary": str(parsed.get("goal_summary") or ""),
             "normalized_goal": str(parsed.get("normalized_goal") or goal),
             "missing_fields": list(parsed.get("missing_fields") or []),
             "questions": list(parsed.get("questions") or []),

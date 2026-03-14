@@ -40,7 +40,7 @@ class AdaptiveOrchestratorTests(unittest.TestCase):
 
     def _base_registry(self) -> ToolRegistry:
         reg = ToolRegistry()
-        reg.register("llm_compose", lambda _ctx, args: {"text": str(args.get("text") or "")}, request_model=ComposeArgs)
+        reg.register("llm_text_compose", lambda _ctx, args: {"text": str(args.get("text") or "")}, request_model=ComposeArgs)
         reg.register(
             "send_mail",
             lambda _ctx, args: {
@@ -71,7 +71,7 @@ class AdaptiveOrchestratorTests(unittest.TestCase):
 
         steps = [
             {"tool": "rag_knowledgebase", "args": {"query": "Friedrich Merz"}},
-            {"tool": "llm_compose", "args": {"text": "{last.text}"}},
+            {"tool": "llm_text_compose", "args": {"text": "{last.text}"}},
             {"tool": "send_mail", "args": {"to": ["x@example.com"], "subject": "Info", "body": "{last.text}"}},
         ]
         out = orch.run_steps(self.ctx, steps)
@@ -94,7 +94,7 @@ class AdaptiveOrchestratorTests(unittest.TestCase):
 
         steps = [
             {"tool": "rag_knowledgebase", "args": {"query": "Friedrich Merz"}},
-            {"tool": "llm_compose", "args": {"text": "{last.text}"}},
+            {"tool": "llm_text_compose", "args": {"text": "{last.text}"}},
         ]
         out = orch.run_steps(self.ctx, steps)
         self.assertEqual(str(out[0].get("status")), "empty")
@@ -178,21 +178,21 @@ class AdaptiveOrchestratorTests(unittest.TestCase):
 
         reg = self._base_registry()
         reg.register(
-            "view_website",
+            "web_search_page",
             lambda _ctx, _args: {"url": "http://example.com", "query": "x", "matches": [], "text": ""},
             request_model=ViewArgs,
         )
         reg.register(
-            "browse_website",
+            "web_crawl_site",
             lambda _ctx, _args: {"url": "http://example.com", "query": "x", "matches": [{"href": "/a"}], "text": "Treffer"},
             request_model=ViewArgs,
         )
         orch = Orchestrator(reg)
 
-        steps = [{"tool": "view_website", "args": {"url": "http://example.com", "query": "x"}}]
+        steps = [{"tool": "web_search_page", "args": {"url": "http://example.com", "query": "x"}}]
         out = orch.run_steps(self.ctx, steps)
         tools = [str(x.get("tool") or "") for x in out]
-        self.assertIn("browse_website", tools)
+        self.assertIn("web_crawl_site", tools)
         self.assertTrue(bool(out[-1].get("ok")))
 
     def test_promotes_unresolved_steps_result_refs_only_after_fallback(self):
@@ -220,7 +220,7 @@ class AdaptiveOrchestratorTests(unittest.TestCase):
         reg.register("websearch_table", web_fail, request_model=WebArgs)
         reg.register("search_multitable", multi_fail, request_model=WebArgs)
         reg.register("langsearch", lang_ok, request_model=LangArgs)
-        reg.register("llm_compose", lambda _ctx, args: {"text": str(args.get("text") or "")}, request_model=ComposeArgs)
+        reg.register("llm_text_compose", lambda _ctx, args: {"text": str(args.get("text") or "")}, request_model=ComposeArgs)
         reg.register(
             "pdf_export",
             lambda _ctx, args: {"output_path": str(args.get("output_path") or ""), "text": str(args.get("text") or "")},
@@ -230,12 +230,12 @@ class AdaptiveOrchestratorTests(unittest.TestCase):
 
         steps = [
             {"tool": "websearch_table", "args": {"user_prompt": "Olaf Scholz"}},
-            {"tool": "llm_compose", "args": {"text": "{steps[0].result}"}},
+            {"tool": "llm_text_compose", "args": {"text": "{steps[0].result}"}},
             {"tool": "pdf_export", "args": {"output_path": "olaf_scholz.pdf", "text": "{steps[1].result}"}},
         ]
         out = orch.run_steps(self.ctx, steps)
 
-        compose_entries = [x for x in out if str(x.get("tool") or "") == "llm_compose"]
+        compose_entries = [x for x in out if str(x.get("tool") or "") == "llm_text_compose"]
         pdf_entries = [x for x in out if str(x.get("tool") or "") == "pdf_export"]
         self.assertTrue(compose_entries and bool(compose_entries[-1].get("ok")))
         self.assertTrue(pdf_entries and bool(pdf_entries[-1].get("ok")))

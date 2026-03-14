@@ -241,7 +241,56 @@ def _build_text_block(
     return "\n".join(lines).strip()
 
 
-def view_website(
+def _img_src_from_tag(img_tag: Any, *, base_url: str) -> str:
+    candidates = [
+        str(img_tag.get("src") or "").strip(),
+        str(img_tag.get("data-src") or "").strip(),
+        str(img_tag.get("data-original") or "").strip(),
+        str(img_tag.get("data-lazy-src") or "").strip(),
+    ]
+    for src in candidates:
+        if not src:
+            continue
+        if src.startswith("data:"):
+            continue
+        return urljoin(base_url, src)
+    srcset = str(img_tag.get("srcset") or "").strip()
+    if srcset:
+        first = srcset.split(",")[0].strip().split(" ")[0].strip()
+        if first:
+            return urljoin(base_url, first)
+    return ""
+
+
+def _extract_full_body_text(soup: BeautifulSoup, *, selector: str, base_url: str, include_image_urls: bool) -> str:
+    root = None
+    if selector and selector.strip():
+        root = soup.select_one(selector.strip())
+    if root is None:
+        root = soup.body or soup
+
+    for tag in root.find_all(["script", "style", "noscript", "template"]):
+        tag.decompose()
+
+    parts: List[str] = []
+    for node in root.descendants:
+        name = str(getattr(node, "name", "") or "").lower()
+        if include_image_urls and name == "img":
+            img_url = _img_src_from_tag(node, base_url=base_url)
+            if img_url:
+                parts.append(f"(img: {img_url})")
+            continue
+        if isinstance(node, str):
+            txt = _normalized_text(str(node))
+            if txt:
+                parts.append(txt)
+
+    text = "\n".join(parts)
+    text = re.sub(r"\n{2,}", "\n", text)
+    return text.strip()
+
+
+def web_search_page(
     *,
     url: str,
     query: str,
@@ -249,6 +298,8 @@ def view_website(
     max_matches: int = 8,
     context_chars: int = 180,
     timeout_ms: int = 15000,
+    include_full_text: bool = True,
+    full_text_max_chars: int = 300000,
 ) -> Dict[str, Any]:
     timeout_s = max(2, timeout_ms // 1000)
     try:
@@ -275,6 +326,17 @@ def view_website(
         query=query,
         matches=matches,
     )
+    if include_full_text:
+        full_text = _extract_full_body_text(
+            soup,
+            selector=selector,
+            base_url=str(resp.url),
+            include_image_urls=True,
+        )
+        if full_text_max_chars > 0 and len(full_text) > full_text_max_chars:
+            full_text = full_text[:full_text_max_chars]
+        if full_text:
+            text = f"{text}\n\nFULL_TEXT:\n{full_text}"
     return {
         "url": url,
         "final_url": str(resp.url),
@@ -284,6 +346,47 @@ def view_website(
         "matches": matches,
         "visited_urls": [str(resp.url)],
         "text": text,
+    }
+
+
+def web_fetch_page(
+    *,
+    url: str,
+    selector: str = "body",
+    timeout_ms: int = 15000,
+    max_chars: int = 300000,
+    include_image_urls: bool = True,
+) -> Dict[str, Any]:
+    timeout_s = max(2, timeout_ms // 1000)
+    try:
+        resp = requests.get(url, timeout=timeout_s, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Website loading failed: {exc}") from exc
+
+    html = resp.text or ""
+    soup = BeautifulSoup(html, "html.parser")
+    title = _normalized_text(soup.title.get_text()) if soup.title else ""
+    text = _extract_full_body_text(
+        soup,
+        selector=selector,
+        base_url=str(resp.url),
+        include_image_urls=include_image_urls,
+    )
+    if max_chars > 0 and len(text) > max_chars:
+        text = text[:max_chars]
+    if max_chars > 0 and len(html) > max_chars:
+        html = html[:max_chars]
+
+    return {
+        "url": url,
+        "final_url": str(resp.url),
+        "title": title,
+        "selector": selector or "body",
+        "content_type": str(resp.headers.get("Content-Type") or ""),
+        "status_code": int(resp.status_code),
+        "text": text,
+        "html": html,
     }
 
 
@@ -376,7 +479,7 @@ def _load_page_with_playwright(page: Any, url: str, timeout_ms: int) -> None:
     page.wait_for_timeout(350)
 
 
-def browse_website(
+def web_crawl_site(
     *,
     url: str,
     query: str,
@@ -506,7 +609,7 @@ def browse_website(
     }
 
 
-def browse_whitelist(
+def web_crawl_site_whitelist(
     *,
     url: str,
     query: str,
@@ -544,7 +647,7 @@ def browse_whitelist(
 
     browse_error: HTTPException | None = None
     try:
-        browse_result = browse_website(
+        browse_result = web_crawl_site(
             url=url,
             query=query,
             selector=selector,
@@ -561,7 +664,7 @@ def browse_whitelist(
         browse_error = exc
 
     try:
-        return view_website(
+        return web_search_page(
             url=url,
             query=query,
             selector=selector,

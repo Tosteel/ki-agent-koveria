@@ -509,10 +509,10 @@ class Orchestrator:
             # Auto-fallback based on the tool's own capabilities if no explicit fallback policy exists.
             capability_targets = list(current_capabilities)
 
-        if tool == "view_website" and "browse_website" not in candidates:
-            candidates.append("browse_website")
-        elif tool == "browse_website" and "view_website" not in candidates:
-            candidates.append("view_website")
+        if tool == "web_search_page" and "web_crawl_site" not in candidates:
+            candidates.append("web_crawl_site")
+        elif tool == "web_crawl_site" and "web_search_page" not in candidates:
+            candidates.append("web_search_page")
 
         for candidate in fallback_candidates_for_capabilities(capability_targets):
             if candidate not in candidates:
@@ -549,9 +549,9 @@ class Orchestrator:
             return {"user_prompt": prompt} if prompt else None
         if candidate == "langsearch":
             return {"query": prompt} if prompt else None
-        if candidate in {"rag_knowledgebase", "query_rag"}:
+        if candidate == "rag_knowledgebase":
             return {"query": prompt} if prompt else None
-        if candidate in {"view_website", "browse_website"}:
+        if candidate in {"web_search_page", "web_crawl_site", "web_crawl_site_whitelist"}:
             url = str(source_args.get("url") or "").strip()
             if not url:
                 return None

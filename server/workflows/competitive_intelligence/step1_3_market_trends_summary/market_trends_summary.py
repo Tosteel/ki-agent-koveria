@@ -122,7 +122,7 @@ def _fallback_summary(statements: List[str]) -> str:
     return _clean_text(ranked[0])
 
 
-def _llm_summary(*, provider: str, statements: List[str], warnings: List[str]) -> str:
+def _llm_text_summarize(*, provider: str, statements: List[str], warnings: List[str]) -> str:
     if not statements:
         return ""
     p = str(provider or "ionos").strip().lower()
@@ -245,7 +245,7 @@ def _build_heuristic_summaries(
                 urls.append(u)
         out.append(
             Step13TrendSummaryItem(
-                summary=_llm_summary(provider=provider, statements=statements, warnings=warnings),
+                summary=_llm_text_summarize(provider=provider, statements=statements, warnings=warnings),
                 source_urls=urls,
                 source_count=len(urls),
                 evidence_points=statements[: req.max_evidence_per_item],
