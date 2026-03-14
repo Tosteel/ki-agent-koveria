@@ -598,8 +598,10 @@ def _split_goal_and_context_for_guard(goal: str) -> tuple[str, str]:
         if m_context:
             goal_context = str(m_context.group(1) or "").strip()
 
+        # For structured normalized goals, guard evaluation should be driven by
+        # the distilled intent in goal_summary to avoid context drift.
         primary = goal_summary or goal_message
-        return primary, goal_context
+        return primary, ""
 
     if lower.startswith("aktuelle anfrage:"):
         body = text[len("aktuelle anfrage:") :].lstrip()
