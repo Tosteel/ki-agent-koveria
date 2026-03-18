@@ -16,7 +16,7 @@ Output: `step1_workshop_analysis.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step1_workshop_analysis.json",
         "content": "{steps[0].payload}",
@@ -46,7 +46,7 @@ Output: `step2_company_profile.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step2_company_profile.json",
         "content": "{steps[0].payload}",
@@ -75,7 +75,7 @@ Output: `step3_gap_analysis.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step3_gap_analysis.json",
         "content": "{steps[0].payload}",
@@ -105,7 +105,7 @@ Output: `step4_startup_candidates_raw.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step4_startup_candidates_raw.json",
         "content": "{steps[0].payload}",
@@ -132,7 +132,7 @@ Output: `step4_1_startup_structured.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step4_1_startup_structured.json",
         "content": "{steps[0].payload}",
@@ -174,7 +174,7 @@ Output: `step5_startup_ranked_list.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step5_startup_ranked_list.json",
         "content": "{steps[0].payload}",
@@ -203,7 +203,7 @@ Output: `step6_startup_deep_profiles_raw.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step6_startup_deep_profiles_raw.json",
         "content": "{steps[0].payload}",
@@ -232,7 +232,7 @@ Output: `step7_startup_profiles.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step7_startup_profiles.json",
         "content": "{steps[0].payload}",
@@ -264,7 +264,7 @@ Output: `step8_final_report.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step8_final_report.json",
         "content": "{steps[0].payload}",

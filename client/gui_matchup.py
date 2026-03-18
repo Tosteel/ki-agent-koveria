@@ -162,7 +162,7 @@ def _build_steps(
             },
         },
         {
-            "tool": "send_mail",
+            "tool": "mail_send",
             "args": {
                 "to": [recipient_email],
                 "subject": subject,

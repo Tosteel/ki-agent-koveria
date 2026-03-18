@@ -25,7 +25,7 @@ Zweck:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step1.1_market_trends_raw.json",
         "content": "{{steps[0].payload.market_trends_raw}}",
@@ -62,7 +62,7 @@ Zweck:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step1.2_market_trends_structured.json",
         "content": "{{steps[0].payload.market_trends_structured}}",
@@ -96,7 +96,7 @@ Zweck:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step1.3_market_trends_summary.json",
         "content": "{{steps[0].payload.market_trends_summary}}",
@@ -135,7 +135,7 @@ Zweck:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step2.2_competitor_profile_raw.json",
         "content": "{{steps[0].payload.competitor_profile_raw}}",
@@ -167,7 +167,7 @@ Zweck:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step2.3_competitor_profile_structured.json",
         "content": "{{steps[0].payload.competitor_profile_structured}}",
@@ -199,7 +199,7 @@ Zweck:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step2.4_competitor_trends.json",
         "content": "{{steps[0].payload.competitor_trends}}",
@@ -232,7 +232,7 @@ Zweck:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step3.1_matrix.json",
         "content": "{{steps[0].payload.matrix}}",
@@ -262,7 +262,7 @@ Zweck:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step3_competitor_matrix.json",
         "content": "{{steps[0].payload.competitor_matrix}}",
@@ -293,7 +293,7 @@ Zweck:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step4_insights.json",
         "content": "{{steps[0].payload.insights}}",
@@ -325,7 +325,7 @@ Zweck:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step4.1_insights.json",
         "content": "{{steps[0].payload.insights}}",
@@ -356,7 +356,7 @@ Zweck:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step5_recommendations.json",
         "content": "{{steps[0].payload.recommendations}}",
@@ -388,7 +388,7 @@ Zweck:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step5.1_recommendations.json",
         "content": "{{steps[0].payload.recommendations}}",
@@ -421,7 +421,7 @@ Zweck:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step6_report.md",
         "content": "{{steps[0].payload.report}}",
@@ -465,7 +465,7 @@ Zweck:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step6.1_final_report.json",
         "content": "{{steps[0].payload.final_report}}",
@@ -494,7 +494,7 @@ Zweck:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step7_report.pdf",
         "content": "{{steps[0].payload.pdf_base64}}",

@@ -99,17 +99,17 @@ TOOL_POLICY_OVERRIDES: Dict[str, Dict[str, Any]] = {
         "capabilities": ["text_compose"],
         "quality_signals": {"min_hits": 0, "require_sources": False, "min_text_length": 40},
     },
-    "send_mail": {
+    "mail_send": {
         "capabilities": ["communication:email_send"],
         "side_effect_level": "high",
         "quality_signals": {"min_hits": 0, "require_sources": False, "min_text_length": 40},
     },
-    "answer_mail": {
+    "mail_answer": {
         "capabilities": ["communication:email_send"],
         "side_effect_level": "high",
         "quality_signals": {"min_hits": 0, "require_sources": False, "min_text_length": 20},
     },
-    "write_file": {
+    "file_write": {
         "capabilities": ["artifact_write"],
         "side_effect_level": "high",
     },

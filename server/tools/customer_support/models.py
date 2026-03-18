@@ -31,7 +31,7 @@ class CreateReviewTicketRequest(BaseModel):
     title: str = Field(..., min_length=3, description="Kurzer Ticket-Titel.")
     user_message: str = Field(default="", description="Originale Nutzeranfrage.")
     draft_reply: str = Field(default="", description="Aktueller Antwortentwurf.")
-    score: float = Field(default=0.0, ge=0.0, le=1.0, description="Score aus score_reply (0..1).")
+    score: float = Field(default=0.0, ge=0.0, le=1.0, description="Score aus customer_support_reply_score (0..1).")
     reasons: List[str] = Field(default_factory=list, description="Gruende fuer Review/Handover.")
     priority: str = Field(default="medium", description="low|medium|high|urgent")
     metadata: Dict[str, str] = Field(default_factory=dict, description="Optionale Zusatzinfos als Key/Value.")

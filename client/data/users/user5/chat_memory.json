@@ -33,7 +33,7 @@
             "1. tool=web_search_page args={\"url\":\"https://www.tagesschau.de/\",\"query\":\"US-Präsident\"}",
             "2. tool=llm_text_compose args={\"text\":\"{last.text}\"}",
             "3. tool=pdf_export args={\"output_path\":\"ergebnis.pdf\",\"text\":\"{last.text}\"}",
-            "4. tool=send_mail args={\"to\":[\"tobias_stahl@outlook.de\"],\"subject\":\"Ergebnisse der Suche nach US-Präsident\",\"body\":\"Hier sind die Ergebnisse der Suche nach US-Präsident auf www.tagesschau.de\",\"attachments\":[\"ergebnis.pdf\"]}"
+            "4. tool=mail_send args={\"to\":[\"tobias_stahl@outlook.de\"],\"subject\":\"Ergebnisse der Suche nach US-Präsident\",\"body\":\"Hier sind die Ergebnisse der Suche nach US-Präsident auf www.tagesschau.de\",\"attachments\":[\"ergebnis.pdf\"]}"
           ],
           "options": [],
           "timestamp": "2026-03-10T09:45:05.276Z"
@@ -70,7 +70,7 @@
           "downloadUrl": "",
           "downloadLabel": "",
           "plannedSteps": [
-            "1. tool=list_skills args={}"
+            "1. tool=skills_list args={}"
           ],
           "options": [],
           "timestamp": "2026-03-10T09:21:26.983Z"
@@ -92,7 +92,7 @@
           "plannedSteps": [
             "1. tool=rag_knowledgebase args={\"query\":\"Friedrich Merz\"}",
             "2. tool=llm_text_compose args={\"text\":\"{last.text}\"}",
-            "3. tool=send_mail args={\"to\":[\"tobias_Stahl@outlook.de\"],\"subject\":\"Informationen über Friedrich Merz\",\"body\":\"{last.text}\"}"
+            "3. tool=mail_send args={\"to\":[\"tobias_Stahl@outlook.de\"],\"subject\":\"Informationen über Friedrich Merz\",\"body\":\"{last.text}\"}"
           ],
           "options": [],
           "timestamp": "2026-03-10T09:23:10.615Z"
@@ -115,7 +115,7 @@
             "1. tool=web_search_page args={\"url\":\"https://www.tagesschau.de/\",\"query\":\"Friedrich Merz\"}",
             "2. tool=llm_text_compose args={\"text\":\"{last.text}\"}",
             "3. tool=pdf_export args={\"output_path\":\"friedrich_merz_info.pdf\",\"text\":\"{last.text}\"}",
-            "4. tool=send_mail args={\"to\":[\"tobias_stahl@outlook.de\"],\"subject\":\"Informationen über Friedrich Merz\",\"body\":\"Bitte finden Sie im Anhang die Informationen über Friedrich Merz.\",\"attachments\":[\"friedrich_merz_info.pdf\"]}"
+            "4. tool=mail_send args={\"to\":[\"tobias_stahl@outlook.de\"],\"subject\":\"Informationen über Friedrich Merz\",\"body\":\"Bitte finden Sie im Anhang die Informationen über Friedrich Merz.\",\"attachments\":[\"friedrich_merz_info.pdf\"]}"
           ],
           "options": [],
           "timestamp": "2026-03-10T09:42:28.179Z"
@@ -138,7 +138,7 @@
             "1. tool=web_search_page args={\"url\":\"https://www.tagesschau.de/\",\"query\":\"US-Präsident\"}",
             "2. tool=llm_text_compose args={\"text\":\"{last.text}\"}",
             "3. tool=pdf_export args={\"output_path\":\"us_präsident_info.pdf\",\"text\":\"{last.text}\"}",
-            "4. tool=send_mail args={\"to\":[\"tobias_stahl@outlook.de\"],\"subject\":\"Informationen über US-Präsident\",\"body\":\"Hier sind die Ergebnisse der Suche nach Informationen über den US-Präsidenten auf der Website www.tagesschau.de.\",\"attachments\":[\"us_präsident_info.pdf\"]}"
+            "4. tool=mail_send args={\"to\":[\"tobias_stahl@outlook.de\"],\"subject\":\"Informationen über US-Präsident\",\"body\":\"Hier sind die Ergebnisse der Suche nach Informationen über den US-Präsidenten auf der Website www.tagesschau.de.\",\"attachments\":[\"us_präsident_info.pdf\"]}"
           ],
           "options": [],
           "timestamp": "2026-03-10T09:43:49.188Z"
@@ -161,7 +161,7 @@
             "1. tool=web_search_page args={\"url\":\"https://www.tagesschau.de/\",\"query\":\"US-Präsident\"}",
             "2. tool=llm_text_compose args={\"text\":\"{last.text}\"}",
             "3. tool=pdf_export args={\"output_path\":\"us_präsident_info.pdf\",\"text\":\"{last.text}\"}",
-            "4. tool=send_mail args={\"to\":[\"tobias_stahl@outlook.de\"],\"subject\":\"Informationen über US-Präsident\",\"body\":\"Bitte finden Sie im Anhang die Ergebnisse der Suche nach Informationen über den US-Präsidenten auf der Website www.tagesschau.de.\",\"attachments\":[\"us_präsident_info.pdf\"]}"
+            "4. tool=mail_send args={\"to\":[\"tobias_stahl@outlook.de\"],\"subject\":\"Informationen über US-Präsident\",\"body\":\"Bitte finden Sie im Anhang die Ergebnisse der Suche nach Informationen über den US-Präsidenten auf der Website www.tagesschau.de.\",\"attachments\":[\"us_präsident_info.pdf\"]}"
           ],
           "options": [],
           "timestamp": "2026-03-10T09:44:21.529Z"
@@ -198,7 +198,7 @@
           "downloadUrl": "",
           "downloadLabel": "",
           "plannedSteps": [
-            "1. tool=list_skills args={}"
+            "1. tool=skills_list args={}"
           ],
           "options": [],
           "timestamp": "2026-03-10T09:17:22.754Z"
@@ -218,7 +218,7 @@
           "downloadUrl": "",
           "downloadLabel": "",
           "plannedSteps": [
-            "1. tool=list_skills args={}"
+            "1. tool=skills_list args={}"
           ],
           "options": [],
           "timestamp": "2026-03-10T09:20:40.390Z"

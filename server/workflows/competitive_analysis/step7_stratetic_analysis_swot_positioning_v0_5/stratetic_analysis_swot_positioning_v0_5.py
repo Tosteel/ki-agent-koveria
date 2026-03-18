@@ -53,7 +53,7 @@ def _load_feature_matrix_gap(
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Invalid JSON in path: {feature_matrix_gap_path}") from exc
 
-    # tolerate wrappers from write_file payloads
+    # tolerate wrappers from file_write payloads
     if "feature_matrix_gap" in payload and isinstance(payload.get("feature_matrix_gap"), dict):
         payload = payload["feature_matrix_gap"]
 

@@ -1,2 +1,2 @@
-from .skills import list_skills
+from .skills import skills_list
 

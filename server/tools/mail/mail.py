@@ -532,7 +532,7 @@ def _classify_mail_with_llm(text: str) -> Dict[str, object]:
     }
 
 
-def classify_mail(
+def mail_classify(
     *,
     text: str = "",
     subject: str = "",
@@ -617,7 +617,7 @@ def _mark_answered_flag(*, mail_id: str, mailbox: str) -> bool:
     return True
 
 
-def send_mail(
+def mail_send(
     *,
     to: List[str],
     subject: str,
@@ -696,7 +696,7 @@ def send_mail(
     }
 
 
-def answer_mail(
+def mail_answer(
     *,
     mail_id: str,
     body: str,
@@ -804,7 +804,7 @@ def answer_mail(
     }
 
 
-def fetch_inbox_mails(
+def mail_fetch_inbox(
     *,
     limit: int = 10,
     mailbox: str = "INBOX",
@@ -814,7 +814,7 @@ def fetch_inbox_mails(
     return _fetch_mails_by_query(limit=limit, mailbox=mailbox, query=query)
 
 
-def fetch_unanswered_mails(
+def mail_fetch_unanswered(
     *,
     limit: int = 10,
     mailbox: str = "INBOX",
@@ -822,7 +822,7 @@ def fetch_unanswered_mails(
     return _fetch_mails_by_query(limit=limit, mailbox=mailbox, query="UNANSWERED")
 
 
-def read_mail(
+def mail_read(
     *,
     mail_id: str,
     mailbox: str = "INBOX",
@@ -844,7 +844,7 @@ def read_mail(
     )
 
 
-def read_mail_thread(
+def mail_read_thread(
     *,
     mail_id: str,
     mailbox: str = "INBOX",
@@ -860,7 +860,7 @@ def read_mail_thread(
     max_messages = max(1, min(int(max_messages), 100))
     max_chars = max(500, min(int(max_chars), 200000))
 
-    root = read_mail(
+    root = mail_read(
         mail_id=mail_id_clean,
         mailbox=mailbox_name,
         include_html=include_html,
@@ -909,7 +909,7 @@ def read_mail_thread(
     messages: List[Dict[str, object]] = []
     for uid in thread_ids[:max_messages]:
         try:
-            msg_payload = read_mail(
+            msg_payload = mail_read(
                 mail_id=uid,
                 mailbox=mailbox_name,
                 include_html=include_html,
@@ -941,7 +941,7 @@ def read_mail_thread(
     }
 
 
-def read_mail_attachments(
+def mail_read_attachments(
     *,
     mail_id: str,
     mailbox: str = "INBOX",

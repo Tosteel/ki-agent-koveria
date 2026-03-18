@@ -1,1 +1,1 @@
-from .ebay import search_ebay
+from .ebay import ebay_search

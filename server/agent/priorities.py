@@ -19,31 +19,31 @@ TOOL_PRIORITIES: List[Dict[str, object]] = [
     {
         "task_de": "Produktsuche",
         "task_en": "product search",
-        "primary": "search_ebay",
+        "primary": "ebay_search",
         "fallbacks": [],
     },
     {
         "task_de": "Mail senden (neue E-Mail)",
         "task_en": "send email (new message)",
-        "primary": "send_mail",
+        "primary": "mail_send",
         "fallbacks": [],
     },
     {
         "task_de": "Mail beantworten (bestehende Inbox-Mail)",
         "task_en": "reply to existing inbox email",
-        "primary": "answer_mail",
+        "primary": "mail_answer",
         "fallbacks": [],
     },
     {
         "task_de": "Inbox abrufen",
         "task_en": "fetch inbox",
-        "primary": "fetch_inbox_mails",
+        "primary": "mail_fetch_inbox",
         "fallbacks": [],
     },
     {
         "task_de": "Unbeantwortete Mails abrufen",
         "task_en": "fetch unanswered mails",
-        "primary": "fetch_unanswered_mails",
+        "primary": "mail_fetch_unanswered",
         "fallbacks": [],
     },
 ]

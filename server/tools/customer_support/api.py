@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from server.core.settings import Settings
 from server.deps import get_current_user, settings as dep_settings
 
-from .customer_support import create_review_ticket, policy_check, score_reply, update_review_ticket
+from .customer_support import customer_support_review_ticket_create, customer_support_policy_check, customer_support_reply_score, customer_support_review_ticket_update
 from .models import (
     CreateReviewTicketRequest,
     CreateReviewTicketResponse,
@@ -28,7 +28,7 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         s: Settings = Depends(dep_settings),
     ) -> ScoreReplyResponse:
         ensure_user_dirs(s, user_id)
-        result = score_reply(
+        result = customer_support_reply_score(
             user_message=req.user_message,
             draft_reply=req.draft_reply,
             knowledge_evidence=req.knowledge_evidence,
@@ -43,7 +43,7 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         s: Settings = Depends(dep_settings),
     ) -> CreateReviewTicketResponse:
         ensure_user_dirs(s, user_id)
-        result = create_review_ticket(
+        result = customer_support_review_ticket_create(
             user_dir=s.user_dir(user_id),
             title=req.title,
             user_message=req.user_message,
@@ -62,7 +62,7 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         s: Settings = Depends(dep_settings),
     ) -> UpdateReviewTicketResponse:
         ensure_user_dirs(s, user_id)
-        result = update_review_ticket(
+        result = customer_support_review_ticket_update(
             user_dir=s.user_dir(user_id),
             ticket_id=req.ticket_id,
             status=req.status,
@@ -81,7 +81,7 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         s: Settings = Depends(dep_settings),
     ) -> PolicyCheckResponse:
         ensure_user_dirs(s, user_id)
-        result = policy_check(
+        result = customer_support_policy_check(
             text=req.text,
             policy_profile=req.policy_profile,
             strict_mode=req.strict_mode,

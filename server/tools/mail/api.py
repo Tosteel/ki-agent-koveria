@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from server.core.settings import Settings
 from server.deps import get_current_user, settings as dep_settings
 
-from .mail import classify_mail, read_mail, read_mail_attachments, read_mail_thread, send_mail
+from .mail import mail_classify, mail_read, mail_read_attachments, mail_read_thread, mail_send
 from .models import (
     MailClassifyRequest,
     MailClassifyResponse,
@@ -30,7 +30,7 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         s: Settings = Depends(dep_settings),
     ) -> MailSendResponse:
         ensure_user_dirs(s, user_id)
-        result = send_mail(
+        result = mail_send(
             to=req.to,
             subject=req.subject,
             body=req.body,
@@ -51,7 +51,7 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         s: Settings = Depends(dep_settings),
     ) -> MailReadResponse:
         ensure_user_dirs(s, user_id)
-        result = read_mail(
+        result = mail_read(
             mail_id=req.mail_id,
             mailbox=req.mailbox,
             include_html=req.include_html,
@@ -66,7 +66,7 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         s: Settings = Depends(dep_settings),
     ) -> MailReadThreadResponse:
         ensure_user_dirs(s, user_id)
-        result = read_mail_thread(
+        result = mail_read_thread(
             mail_id=req.mail_id,
             mailbox=req.mailbox,
             max_messages=req.max_messages,
@@ -82,7 +82,7 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         s: Settings = Depends(dep_settings),
     ) -> MailReadAttachmentsResponse:
         ensure_user_dirs(s, user_id)
-        result = read_mail_attachments(
+        result = mail_read_attachments(
             mail_id=req.mail_id,
             mailbox=req.mailbox,
             include_content=req.include_content,
@@ -98,7 +98,7 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         s: Settings = Depends(dep_settings),
     ) -> MailClassifyResponse:
         ensure_user_dirs(s, user_id)
-        result = classify_mail(
+        result = mail_classify(
             text=req.text,
             subject=req.subject,
             body_text=req.body_text,

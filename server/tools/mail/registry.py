@@ -5,14 +5,14 @@ from typing import Any, Dict
 from server.agent.tool_registry import ToolContext, ToolRegistry
 
 from .mail import (
-    answer_mail,
-    classify_mail,
-    fetch_inbox_mails,
-    fetch_unanswered_mails,
-    read_mail,
-    read_mail_attachments,
-    read_mail_thread,
-    send_mail,
+    mail_answer,
+    mail_classify,
+    mail_fetch_inbox,
+    mail_fetch_unanswered,
+    mail_read,
+    mail_read_attachments,
+    mail_read_thread,
+    mail_send,
 )
 from .models import (
     MailAnswerRequest,
@@ -36,7 +36,7 @@ from .models import (
 def register(registry: ToolRegistry) -> None:
     def tool_send_mail(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = MailSendRequest(**args)
-        result = send_mail(
+        result = mail_send(
             to=req.to,
             subject=req.subject,
             body=req.body,
@@ -52,7 +52,7 @@ def register(registry: ToolRegistry) -> None:
 
     def tool_fetch_inbox_mails(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = MailInboxFetchRequest(**args)
-        result = fetch_inbox_mails(
+        result = mail_fetch_inbox(
             limit=req.limit,
             mailbox=req.mailbox,
             unread_only=req.unread_only,
@@ -61,7 +61,7 @@ def register(registry: ToolRegistry) -> None:
 
     def tool_fetch_unanswered_mails(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = MailUnansweredFetchRequest(**args)
-        result = fetch_unanswered_mails(
+        result = mail_fetch_unanswered(
             limit=req.limit,
             mailbox=req.mailbox,
         )
@@ -69,7 +69,7 @@ def register(registry: ToolRegistry) -> None:
 
     def tool_answer_mail(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = MailAnswerRequest(**args)
-        result = answer_mail(
+        result = mail_answer(
             mail_id=req.mail_id,
             body=req.body,
             mailbox=req.mailbox,
@@ -81,7 +81,7 @@ def register(registry: ToolRegistry) -> None:
 
     def tool_read_mail(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = MailReadRequest(**args)
-        result = read_mail(
+        result = mail_read(
             mail_id=req.mail_id,
             mailbox=req.mailbox,
             include_html=req.include_html,
@@ -91,7 +91,7 @@ def register(registry: ToolRegistry) -> None:
 
     def tool_read_mail_thread(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = MailReadThreadRequest(**args)
-        result = read_mail_thread(
+        result = mail_read_thread(
             mail_id=req.mail_id,
             mailbox=req.mailbox,
             max_messages=req.max_messages,
@@ -102,7 +102,7 @@ def register(registry: ToolRegistry) -> None:
 
     def tool_read_mail_attachments(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = MailReadAttachmentsRequest(**args)
-        result = read_mail_attachments(
+        result = mail_read_attachments(
             mail_id=req.mail_id,
             mailbox=req.mailbox,
             include_content=req.include_content,
@@ -113,7 +113,7 @@ def register(registry: ToolRegistry) -> None:
 
     def tool_classify_mail(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = MailClassifyRequest(**args)
-        result = classify_mail(
+        result = mail_classify(
             text=req.text,
             subject=req.subject,
             body_text=req.body_text,
@@ -122,49 +122,49 @@ def register(registry: ToolRegistry) -> None:
         return MailClassifyResponse(**result).model_dump()
 
     registry.register(
-        "send_mail",
+        "mail_send",
         tool_send_mail,
         request_model=MailSendRequest,
         response_model=MailSendResponse,
     )
     registry.register(
-        "fetch_inbox_mails",
+        "mail_fetch_inbox",
         tool_fetch_inbox_mails,
         request_model=MailInboxFetchRequest,
         response_model=MailInboxFetchResponse,
     )
     registry.register(
-        "fetch_unanswered_mails",
+        "mail_fetch_unanswered",
         tool_fetch_unanswered_mails,
         request_model=MailUnansweredFetchRequest,
         response_model=MailInboxFetchResponse,
     )
     registry.register(
-        "answer_mail",
+        "mail_answer",
         tool_answer_mail,
         request_model=MailAnswerRequest,
         response_model=MailAnswerResponse,
     )
     registry.register(
-        "read_mail",
+        "mail_read",
         tool_read_mail,
         request_model=MailReadRequest,
         response_model=MailReadResponse,
     )
     registry.register(
-        "read_mail_thread",
+        "mail_read_thread",
         tool_read_mail_thread,
         request_model=MailReadThreadRequest,
         response_model=MailReadThreadResponse,
     )
     registry.register(
-        "read_mail_attachments",
+        "mail_read_attachments",
         tool_read_mail_attachments,
         request_model=MailReadAttachmentsRequest,
         response_model=MailReadAttachmentsResponse,
     )
     registry.register(
-        "classify_mail",
+        "mail_classify",
         tool_classify_mail,
         request_model=MailClassifyRequest,
         response_model=MailClassifyResponse,

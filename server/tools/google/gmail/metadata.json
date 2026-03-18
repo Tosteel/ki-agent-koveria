@@ -1,0 +1,67 @@
+{
+  "name": "Google Gmail",
+  "version": "1.0",
+  "description": "Gmail lesen, beantworten und senden ueber Google API.",
+  "owner": "team",
+  "provider": "google",
+  "tools": {
+    "gmail_send_mail": {
+      "name": "Gmail senden",
+      "input": "to, subject, body, optional cc/bcc/reply_to",
+      "output": "sent, message_id, thread_id",
+      "capabilities": ["communication:email_send"],
+      "side_effect_level": "high",
+      "quality_signals": {
+        "min_text_length": 20
+      },
+      "allows_goal_injection": false
+    },
+    "gmail_answer_mail": {
+      "name": "Gmail antworten",
+      "input": "mail_id, body, optional subject/reply_to_all",
+      "output": "sent, message_id, thread_id",
+      "capabilities": ["communication:email_send"],
+      "side_effect_level": "high",
+      "quality_signals": {
+        "min_text_length": 20
+      },
+      "allows_goal_injection": false
+    },
+    "gmail_fetch_inbox_mails": {
+      "name": "Gmail Inbox lesen",
+      "input": "optional mailbox, limit, unread_only",
+      "output": "mail-Objekte",
+      "capabilities": ["inbox_read"],
+      "side_effect_level": "none"
+    },
+    "gmail_fetch_unanswered_mails": {
+      "name": "Gmail unbeantwortete Mails lesen",
+      "input": "optional mailbox, limit",
+      "output": "mail-Objekte",
+      "capabilities": ["inbox_read"],
+      "side_effect_level": "none"
+    },
+    "gmail_read_mail": {
+      "name": "Gmail Einzelmail lesen",
+      "input": "mail_id, optional mailbox/include_html/max_chars",
+      "output": "Vollstaendige Maildaten",
+      "capabilities": ["inbox_read", "mail_content_read"],
+      "side_effect_level": "none",
+      "quality_signals": {
+        "min_text_length": 40
+      },
+      "allows_goal_injection": false
+    },
+    "gmail_read_mail_thread": {
+      "name": "Gmail Thread lesen",
+      "input": "mail_id, optional mailbox/max_messages/include_html/max_chars",
+      "output": "Thread-Nachrichten mit Text/Metadaten",
+      "capabilities": ["inbox_read", "mail_content_read", "thread_read"],
+      "side_effect_level": "none",
+      "quality_signals": {
+        "min_text_length": 40
+      },
+      "allows_goal_injection": false
+    }
+  }
+}

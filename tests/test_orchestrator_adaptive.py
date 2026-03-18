@@ -42,7 +42,7 @@ class AdaptiveOrchestratorTests(unittest.TestCase):
         reg = ToolRegistry()
         reg.register("llm_text_compose", lambda _ctx, args: {"text": str(args.get("text") or "")}, request_model=ComposeArgs)
         reg.register(
-            "send_mail",
+            "mail_send",
             lambda _ctx, args: {
                 "sent": True,
                 "to": list(args.get("to") or []),
@@ -72,12 +72,12 @@ class AdaptiveOrchestratorTests(unittest.TestCase):
         steps = [
             {"tool": "rag_knowledgebase", "args": {"query": "Friedrich Merz"}},
             {"tool": "llm_text_compose", "args": {"text": "{last.text}"}},
-            {"tool": "send_mail", "args": {"to": ["x@example.com"], "subject": "Info", "body": "{last.text}"}},
+            {"tool": "mail_send", "args": {"to": ["x@example.com"], "subject": "Info", "body": "{last.text}"}},
         ]
         out = orch.run_steps(self.ctx, steps)
         tools = [str(x.get("tool") or "") for x in out]
         self.assertIn("websearch_table", tools)
-        self.assertEqual(tools[-1], "send_mail")
+        self.assertEqual(tools[-1], "mail_send")
         self.assertTrue(bool(out[-1].get("ok")))
         self.assertEqual(str(out[0].get("status")), "transient_error")
         self.assertTrue(bool(out[0].get("handled")))
@@ -147,7 +147,7 @@ class AdaptiveOrchestratorTests(unittest.TestCase):
 
         steps = [
             {
-                "tool": "send_mail",
+                "tool": "mail_send",
                 "args": {
                     "to": ["x@example.com"],
                     "subject": "Info",

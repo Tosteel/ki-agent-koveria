@@ -71,7 +71,7 @@ def _extract_search_items(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 
-def search_ebay(*, query: str, limit: int = 10, sort_order: str = "BestMatch") -> Dict[str, Any]:
+def ebay_search(*, query: str, limit: int = 10, sort_order: str = "BestMatch") -> Dict[str, Any]:
     app_id = os.getenv("EBAY_APP_ID", "").strip()
     if not app_id:
         raise HTTPException(status_code=500, detail="EBAY_APP_ID is missing")

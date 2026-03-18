@@ -277,7 +277,7 @@ def sanitize_execution_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]
             if max_chars > 1200:
                 max_chars = 1200
             args_out["max_chars"] = max_chars
-        elif tool == "send_mail":
+        elif tool == "mail_send":
             # Planner-friendly aliases -> canonical API fields
             if "to" not in args_out and "recipient" in args_out:
                 rec = args_out.get("recipient")
@@ -712,8 +712,8 @@ def _llm_planner_guard(
         + f"Geplante Schritte:\n{json.dumps(compact_steps, ensure_ascii=False)}\n\n"
         "Prüfkriterien:\n"
         "- Beurteile Zielerfüllung PRIMÄR anhand des aktuellen Ziels; nutze Zusatzkontext nur zur Referenzauflösung.\n"
-        "- Wenn Ziel E-Mail-Versand verlangt, muss send_mail oder answer_mail enthalten sein.\n"
-        "- Wenn Ziel eine PDF lesen/analysieren/zusammenfassen will, muss read_pdf enthalten sein (nicht read_file).\n"
+        "- Wenn Ziel E-Mail-Versand verlangt, muss mail_send oder mail_answer enthalten sein.\n"
+        "- Wenn Ziel eine PDF lesen/analysieren/zusammenfassen will, muss read_pdf enthalten sein (nicht file_read).\n"
         "- Wenn Ziel eine neue PDF erstellen/exportieren will, muss pdf_export enthalten sein.\n"
         "- Wenn Ziel Präsentation/PPT verlangt, muss ppt_export enthalten sein.\n"
         "- Referenzen wie {steps[i].text} müssen zu existierenden Steps und sinnvollen Output-Feldern passen.\n"
@@ -723,12 +723,12 @@ def _llm_planner_guard(
         "- status=ready nur wenn keine harten Lücken bestehen.\n"
         "- status=replan nur mit KONKRETEN missing/reasons.\n"
         "- missing enthält maschinenlesbare Tokens, z.B.:\n"
-        "  missing_tool:send_mail\n"
+        "  missing_tool:mail_send\n"
         "  missing_tool:read_pdf\n"
         "  missing_tool:pdf_export\n"
         "  bad_reference:steps[1].summary\n"
-        "  missing_arg:send_mail.to\n"
-        "  missing_arg:answer_mail.mail_id\n"
+        "  missing_arg:mail_send.to\n"
+        "  missing_arg:mail_answer.mail_id\n"
         "  missing_arg:read_pdf.path\n"
         "- reasons beschreibt pro missing präzise den Befund inkl. Step-Nummer/Tool."
     )
@@ -1049,9 +1049,9 @@ def run_planner_guard(
                 continue
             tool = str(step.get("tool") or "").strip()
             args = step.get("args") if isinstance(step.get("args"), dict) else {}
-            if tool == "read_file":
+            if tool == "file_read":
                 missing.append("missing_tool:read_pdf")
-                reasons.append(f"Step {i}: Für PDF-Inhalt muss read_pdf statt read_file verwendet werden.")
+                reasons.append(f"Step {i}: Für PDF-Inhalt muss read_pdf statt file_read verwendet werden.")
             if tool == "read_pdf":
                 has_read_pdf = True
                 p = str(args.get("path") or "").strip()

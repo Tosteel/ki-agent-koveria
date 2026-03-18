@@ -1,0 +1,40 @@
+{
+  "name": "Assistent Profile",
+  "version": "1.0",
+  "description": "Nutzerprofil fuer allgemeine Assistenten-Anweisungen und Regeln.",
+  "owner": "team",
+  "tools": {
+    "assistent_profile_create": {
+      "name": "Assistent-Profil anlegen",
+      "input": "assistent_profile_name, optional codename/instructions/rules",
+      "output": "profil inkl. pfad",
+      "capabilities": ["assistant_profile_write"],
+      "side_effect_level": "medium",
+      "allows_goal_injection": false
+    },
+    "assistent_profile_get": {
+      "name": "Assistent-Profil laden",
+      "input": "assistent_profile_name",
+      "output": "profilinhalt",
+      "capabilities": ["assistant_profile_read"],
+      "side_effect_level": "none",
+      "allows_goal_injection": false
+    },
+    "assistent_profile_update": {
+      "name": "Assistent-Profil erweitern",
+      "input": "assistent_profile_name, optional codename/instructions_add/rules_patch/raw_patch",
+      "output": "aktualisiertes profil",
+      "capabilities": ["assistant_profile_write"],
+      "side_effect_level": "medium",
+      "allows_goal_injection": false
+    },
+    "assistent_profile_check": {
+      "name": "Aktion gegen Assistent-Profil prüfen",
+      "input": "assistent_profile_name, action, optional context_text/context",
+      "output": "allowed + reasons/matched_rules",
+      "capabilities": ["assistant_profile_check"],
+      "side_effect_level": "none",
+      "allows_goal_injection": false
+    }
+  }
+}

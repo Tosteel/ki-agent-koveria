@@ -52,7 +52,7 @@ def _word_count(text: str) -> int:
     return len(re.findall(r"[A-Za-z0-9_]+", text or ""))
 
 
-def score_reply(
+def customer_support_reply_score(
     *,
     user_message: str,
     draft_reply: str,
@@ -156,7 +156,7 @@ def score_reply(
     }
 
 
-def create_review_ticket(
+def customer_support_review_ticket_create(
     *,
     user_dir: Path,
     title: str,
@@ -203,7 +203,7 @@ def create_review_ticket(
     }
 
 
-def update_review_ticket(
+def customer_support_review_ticket_update(
     *,
     user_dir: Path,
     ticket_id: str,
@@ -275,7 +275,7 @@ def _redact_sensitive(text: str) -> str:
     return out
 
 
-def policy_check(*, text: str, policy_profile: str = "default", strict_mode: bool = True) -> Dict[str, Any]:
+def customer_support_policy_check(*, text: str, policy_profile: str = "default", strict_mode: bool = True) -> Dict[str, Any]:
     body = (text or "").strip()
     if not body:
         raise HTTPException(status_code=422, detail="text is required")

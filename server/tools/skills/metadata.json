@@ -3,7 +3,7 @@
   "version": "1.0",
   "description": "Listet verfügbare Fähigkeiten/Tools auf.",
   "tools": {
-    "list_skills": {
+    "skills_list": {
       "name": "Skills auflisten",
       "input": "optional include_descriptions (boolean)",
       "output": "count, skills[], text",

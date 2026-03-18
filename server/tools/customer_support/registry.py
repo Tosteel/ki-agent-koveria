@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 from server.agent.tool_registry import ToolContext, ToolRegistry
 
-from .customer_support import create_review_ticket, policy_check, score_reply, update_review_ticket
+from .customer_support import customer_support_review_ticket_create, customer_support_policy_check, customer_support_reply_score, customer_support_review_ticket_update
 from .models import (
     CreateReviewTicketRequest,
     CreateReviewTicketResponse,
@@ -20,7 +20,7 @@ from .models import (
 def register(registry: ToolRegistry) -> None:
     def tool_score_reply(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = ScoreReplyRequest(**args)
-        result = score_reply(
+        result = customer_support_reply_score(
             user_message=req.user_message,
             draft_reply=req.draft_reply,
             knowledge_evidence=req.knowledge_evidence,
@@ -30,7 +30,7 @@ def register(registry: ToolRegistry) -> None:
 
     def tool_create_review_ticket(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = CreateReviewTicketRequest(**args)
-        result = create_review_ticket(
+        result = customer_support_review_ticket_create(
             user_dir=ctx.settings.user_dir(ctx.user_id),
             title=req.title,
             user_message=req.user_message,
@@ -44,7 +44,7 @@ def register(registry: ToolRegistry) -> None:
 
     def tool_update_review_ticket(ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = UpdateReviewTicketRequest(**args)
-        result = update_review_ticket(
+        result = customer_support_review_ticket_update(
             user_dir=ctx.settings.user_dir(ctx.user_id),
             ticket_id=req.ticket_id,
             status=req.status,
@@ -58,7 +58,7 @@ def register(registry: ToolRegistry) -> None:
 
     def tool_policy_check(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = PolicyCheckRequest(**args)
-        result = policy_check(
+        result = customer_support_policy_check(
             text=req.text,
             policy_profile=req.policy_profile,
             strict_mode=req.strict_mode,
@@ -66,25 +66,25 @@ def register(registry: ToolRegistry) -> None:
         return PolicyCheckResponse(**result).model_dump()
 
     registry.register(
-        "score_reply",
+        "customer_support_reply_score",
         tool_score_reply,
         request_model=ScoreReplyRequest,
         response_model=ScoreReplyResponse,
     )
     registry.register(
-        "create_review_ticket",
+        "customer_support_review_ticket_create",
         tool_create_review_ticket,
         request_model=CreateReviewTicketRequest,
         response_model=CreateReviewTicketResponse,
     )
     registry.register(
-        "update_review_ticket",
+        "customer_support_review_ticket_update",
         tool_update_review_ticket,
         request_model=UpdateReviewTicketRequest,
         response_model=UpdateReviewTicketResponse,
     )
     registry.register(
-        "policy_check",
+        "customer_support_policy_check",
         tool_policy_check,
         request_model=PolicyCheckRequest,
         response_model=PolicyCheckResponse,

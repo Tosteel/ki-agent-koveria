@@ -31,7 +31,7 @@ Ziel: Aufgaben nicht nur manuell über „Neue Aufgabe“ starten, sondern auch 
 Pragmatischer Weg in 3 Stufen:
 
 1. Trigger-Quelle anbinden (einfach starten)
-- Polling-Ansatz: alle X Minuten `fetch_unanswered_mails` prüfen.
+- Polling-Ansatz: alle X Minuten `mail_fetch_unanswered` prüfen.
 - Später optional: IMAP-IDLE/Webhook statt Polling.
 
 2. Trigger-Regeln auswerten
@@ -51,7 +51,7 @@ Architektur-Vorschlag:
 Beispielregel:
 - Wenn neue unbeantwortete Mail von `*@kunde.de` und Betreff enthält „Lieferung“:
 - Aufgabe erzeugen: „Mail prüfen und Lieferstatus antworten“.
-- Optional direkt Tool-Kette vorbereiten: `fetch_unanswered_mails -> answer_mail`.
+- Optional direkt Tool-Kette vorbereiten: `mail_fetch_unanswered -> mail_answer`.
 
 ## Idee: Zielarchitektur für 1000+ Nutzer
 

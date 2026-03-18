@@ -3,7 +3,7 @@
   "version": "1.0",
   "description": "Bewertung, Compliance-Check und Human-in-the-loop Tickets fuer Support-Antworten.",
   "tools": {
-    "score_reply": {
+    "customer_support_reply_score": {
       "name": "Antwort bewerten",
       "input": "user_message, draft_reply, optional knowledge_evidence",
       "output": "total_score, verdict, dimensions, reasons, improvements",
@@ -24,7 +24,7 @@
       },
       "allows_goal_injection": false
     },
-    "create_review_ticket": {
+    "customer_support_review_ticket_create": {
       "name": "Review-Ticket erstellen",
       "input": "title, optional user_message/draft_reply/score/reasons/priority",
       "output": "ticket_id, status, created_at",
@@ -44,7 +44,7 @@
       },
       "allows_goal_injection": false
     },
-    "update_review_ticket": {
+    "customer_support_review_ticket_update": {
       "name": "Review-Ticket aktualisieren",
       "input": "ticket_id, optional status/reviewer_note/assignee/draft_reply/score",
       "output": "ticket_id, status, updated_at",
@@ -64,7 +64,7 @@
       },
       "allows_goal_injection": false
     },
-    "policy_check": {
+    "customer_support_policy_check": {
       "name": "Policy-Check",
       "input": "text, optional policy_profile/strict_mode",
       "output": "allowed, risk_level, violations, warnings, redacted_text",

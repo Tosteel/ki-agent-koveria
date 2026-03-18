@@ -166,7 +166,7 @@ def _collect_mail_context(
     base = _tool_call(
         registry=registry,
         ctx=ctx,
-        tool="read_mail",
+        tool="mail_read",
         args={"mail_id": mail_id, "mailbox": mailbox, "max_chars": 20000},
     )
     parts: List[str] = [str(base.get("text") or "").strip()]
@@ -175,7 +175,7 @@ def _collect_mail_context(
         thread = _safe_tool_call(
             registry=registry,
             ctx=ctx,
-            tool="read_mail_thread",
+            tool="mail_read_thread",
             args={"mail_id": mail_id, "mailbox": mailbox, "max_messages": 20, "max_chars": 8000},
         )
         t = str(thread.get("text") or "").strip()
@@ -186,7 +186,7 @@ def _collect_mail_context(
         atts = _safe_tool_call(
             registry=registry,
             ctx=ctx,
-            tool="read_mail_attachments",
+            tool="mail_read_attachments",
             args={
                 "mail_id": mail_id,
                 "mailbox": mailbox,
@@ -236,7 +236,7 @@ def _classify_mail_intent(
     out = _safe_tool_call(
         registry=registry,
         ctx=ctx,
-        tool="classify_mail",
+        tool="mail_classify",
         args={
             "text": str(mail_payload.get("text") or "").strip(),
             "subject": str(mail_payload.get("subject") or "").strip(),
@@ -339,7 +339,7 @@ def _retrieve_context(
                 "url": u,
                 "query": query,
                 "allowed_domains": web_whitelist_domains,
-                "max_pages": 3,
+                "max_pages": 10,
                 "max_matches": 8,
             },
         )
@@ -353,18 +353,37 @@ def _retrieve_context(
         if out.get("_error"):
             trace.append(f"web_crawl_site_whitelist:{u}:error")
 
-        fallback = _safe_tool_call(
+        fallback_crawl = _safe_tool_call(
             registry=registry,
             ctx=ctx,
-            tool="web_search_page",
-            args={"url": u, "query": query},
+            tool="web_crawl_site",
+            args={
+                "url": u,
+                "query": query,
+                "max_pages": 3,
+                "max_matches": 8,
+            },
         )
-        if fallback and not fallback.get("_error"):
-            txt = str(fallback.get("text") or "").strip()
+        if fallback_crawl and not fallback_crawl.get("_error"):
+            txt = str(fallback_crawl.get("text") or "").strip()
             if txt:
                 parts.append(f"WEB({u}):\n{txt}")
-            sources.extend(_extract_sources(fallback))
-            trace.append(f"web_search_page:{u}:ok")
+            sources.extend(_extract_sources(fallback_crawl))
+            trace.append(f"web_crawl_site:{u}:ok")
+            continue
+
+        fallback_fetch = _safe_tool_call(
+            registry=registry,
+            ctx=ctx,
+            tool="web_fetch_page",
+            args={"url": u, "query": query},
+        )
+        if fallback_fetch and not fallback_fetch.get("_error"):
+            txt = str(fallback_fetch.get("text") or "").strip()
+            if txt:
+                parts.append(f"WEB({u}):\n{txt}")
+            sources.extend(_extract_sources(fallback_fetch))
+            trace.append(f"web_fetch_page:{u}:ok")
 
     merged = "\n\n".join(parts).strip()
     if len(merged) < 220 or len(sources) == 0:
@@ -442,7 +461,7 @@ def _score_reply(
     out = _safe_tool_call(
         registry=registry,
         ctx=ctx,
-        tool="score_reply",
+        tool="customer_support_reply_score",
         args={
             "user_message": user_message,
             "draft_reply": draft,
@@ -490,7 +509,7 @@ def _policy_check(
     out = _safe_tool_call(
         registry=registry,
         ctx=ctx,
-        tool="policy_check",
+        tool="customer_support_policy_check",
         args={"text": text, "policy_profile": "default", "strict_mode": strict_mode},
     )
     if out and not out.get("_error"):
@@ -500,7 +519,7 @@ def _policy_check(
         "risk_level": "unknown",
         "violations": [],
         "warnings": ["policy_check_unavailable"],
-        "text": "policy_check unavailable",
+        "text": "customer_support_policy_check unavailable",
     }
 
 
@@ -566,7 +585,7 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: MailAssista
     inbox = _tool_call(
         registry=registry,
         ctx=ctx,
-        tool="fetch_unanswered_mails",
+        tool="mail_fetch_unanswered",
         args={"mailbox": req.mailbox, "limit": req.limit},
     )
     emails = inbox.get("emails") if isinstance(inbox.get("emails"), list) else []
@@ -758,7 +777,7 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: MailAssista
                 _tool_call(
                     registry=registry,
                     ctx=ctx,
-                    tool="answer_mail",
+                    tool="mail_answer",
                     args={"mail_id": mail_id, "mailbox": req.mailbox, "body": draft},
                 )
                 sent_count += 1
@@ -791,11 +810,11 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: MailAssista
         reason_text = " | ".join(x for x in reason_parts if x)
 
         ticket_id = ""
-        if registry.get_tool("create_review_ticket") is not None:
+        if registry.get_tool("customer_support_review_ticket_create") is not None:
             ticket = _safe_tool_call(
                 registry=registry,
                 ctx=ctx,
-                tool="create_review_ticket",
+                tool="customer_support_review_ticket_create",
                 args={
                     "title": f"Mail review: {subject or mail_id}",
                     "user_message": str(mail_payload.get("text") or "").strip(),
@@ -905,11 +924,11 @@ def approve_review(
         review["reason"] = reason
         review["updated_at"] = _now_iso()
         ticket_id = str(review.get("ticket_id") or "").strip()
-        if ticket_id and registry.get_tool("update_review_ticket") is not None:
+        if ticket_id and registry.get_tool("customer_support_review_ticket_update") is not None:
             _safe_tool_call(
                 registry=registry,
                 ctx=ctx,
-                tool="update_review_ticket",
+                tool="customer_support_review_ticket_update",
                 args={"ticket_id": ticket_id, "status": "rejected", "reviewer_note": reason},
             )
         save_state(settings, user_id, state)
@@ -924,7 +943,7 @@ def approve_review(
     if subject:
         args["subject"] = subject
 
-    send_result = _tool_call(registry=registry, ctx=ctx, tool="answer_mail", args=args)
+    send_result = _tool_call(registry=registry, ctx=ctx, tool="mail_answer", args=args)
     review["status"] = "approved"
     review["updated_at"] = _now_iso()
     review["sent"] = bool(send_result.get("sent"))
@@ -932,11 +951,11 @@ def approve_review(
     review["draft_body"] = body
 
     ticket_id = str(review.get("ticket_id") or "").strip()
-    if ticket_id and registry.get_tool("update_review_ticket") is not None:
+    if ticket_id and registry.get_tool("customer_support_review_ticket_update") is not None:
         _safe_tool_call(
             registry=registry,
             ctx=ctx,
-            tool="update_review_ticket",
+            tool="customer_support_review_ticket_update",
             args={"ticket_id": ticket_id, "status": "approved", "reviewer_note": "approved_and_sent"},
         )
 
@@ -974,11 +993,11 @@ def reject_review(
     if ticket_id:
         registry = build_registry(settings=settings, user_id=user_id)
         ctx = ToolContext(user_id=user_id, settings=settings, api_key="", goal="mail_assistant_review_reject")
-        if registry.get_tool("update_review_ticket") is not None:
+        if registry.get_tool("customer_support_review_ticket_update") is not None:
             _safe_tool_call(
                 registry=registry,
                 ctx=ctx,
-                tool="update_review_ticket",
+                tool="customer_support_review_ticket_update",
                 args={"ticket_id": ticket_id, "status": "rejected", "reviewer_note": reason or "rejected"},
             )
 

@@ -8,7 +8,7 @@
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "parsed_doc.json",
         "content": "{steps[0].payload}",
@@ -24,7 +24,7 @@
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "product_profile.json",
         "content": "{steps[2].payload}",
@@ -40,7 +40,7 @@
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "analysis_plan.json",
         "content": "{steps[4].payload}",
@@ -59,7 +59,7 @@
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "competitor_list.json",
         "content": "{steps[6].payload}",
@@ -78,7 +78,7 @@
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "competitor_profiles.json",
         "content": "{steps[8].payload}",
@@ -94,7 +94,7 @@
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "feature_matrix_gap.json",
         "content": "{steps[10].payload}",
@@ -112,7 +112,7 @@
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "strategic_analysis.json",
         "content": "{steps[12].payload}",
@@ -136,7 +136,7 @@
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "final_report.json",
         "content": "{steps[14].payload}",
@@ -144,7 +144,7 @@
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "review_status.json",
         "content": "{\"status\":\"pending_manual_review\",\"step\":\"9\",\"note\":\"Tool9 optional/not implemented\"}",
@@ -162,7 +162,7 @@
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "pdf_publish_result.json",
         "content": "{steps[17].payload}",

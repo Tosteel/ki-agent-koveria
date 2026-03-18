@@ -18,7 +18,7 @@ Output: `step1_parsed_doc.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step1_parsed_doc.json",
         "content": "{{steps[0].payload}}",
@@ -51,7 +51,7 @@ Hinweis:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step2_product_profile.json",
         "content": "{{steps[0].payload}}",
@@ -80,7 +80,7 @@ Output: `step3_analysis_plan_v0_2.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step3_analysis_plan_v0_2.json",
         "content": "{{steps[0].payload}}",
@@ -113,7 +113,7 @@ Output: `step4_competitor_search_results_v0_5.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step4_competitor_search_results_v0_5.json",
         "content": "{{steps[0].payload}}",
@@ -145,7 +145,7 @@ Dieser Schritt sortiert nach `relevance_score` (absteigend), filtert per LLM gen
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step4_1_competitor_product_results_v0_6.json",
         "content": "{{steps[0].payload}}",
@@ -181,7 +181,7 @@ Output: `step5_1_competitor_profile_text_v0_6.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step5_1_competitor_profile_text_v0_6.json",
         "content": "{{steps[0].payload}}",
@@ -216,7 +216,7 @@ Hinweis:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step5_2_competitor_profile_extraction_v0_6.json",
         "content": "{{steps[0].payload}}",
@@ -271,7 +271,7 @@ Restriktionen/Regeln in `feature_matrix_gap_analysis_v0_5`:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step6_feature_matrix_gap_v0_5.json",
         "content": "{{steps[0].payload}}",
@@ -302,7 +302,7 @@ Output: `step7_strategic_analysis_v0_5.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step7_strategic_analysis_v0_5.json",
         "content": "{{steps[0].payload}}",
@@ -347,7 +347,7 @@ Hinweis:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "step8_final_analysis_report_v0_5.json",
         "content": "{{steps[0].payload}}",

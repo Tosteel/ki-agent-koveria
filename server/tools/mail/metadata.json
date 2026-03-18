@@ -1,9 +1,9 @@
 {
-  "name": "Mail",
+  "name": "Mail (IMAP/SMTP)",
   "version": "1.0",
   "description": "Mail senden, beantworten und lesen.",
   "tools": {
-    "send_mail": {
+    "mail_send": {
       "name": "E-Mail senden",
       "input": "to, subject, body, optional attachments/cc/bcc",
       "output": "sent-Status, message_id",
@@ -14,7 +14,7 @@
       },
       "allows_goal_injection": false
     },
-    "answer_mail": {
+    "mail_answer": {
       "name": "E-Mail beantworten",
       "input": "mail_id, body",
       "output": "sent-Status",
@@ -25,21 +25,21 @@
       },
       "allows_goal_injection": false
     },
-    "fetch_inbox_mails": {
+    "mail_fetch_inbox": {
       "name": "Inbox lesen",
       "input": "optional mailbox, limit",
       "output": "mail-Objekte",
       "capabilities": ["inbox_read"],
       "side_effect_level": "none"
     },
-    "fetch_unanswered_mails": {
+    "mail_fetch_unanswered": {
       "name": "Unbeantwortete Mails lesen",
       "input": "optional mailbox, limit",
       "output": "mail-Objekte",
       "capabilities": ["inbox_read"],
       "side_effect_level": "none"
     },
-    "read_mail": {
+    "mail_read": {
       "name": "Einzelne Mail vollständig lesen",
       "input": "mail_id, optional mailbox/include_html/max_chars",
       "output": "Vollständige Maildaten inkl. body_text/body_html",
@@ -50,7 +50,7 @@
       },
       "allows_goal_injection": false
     },
-    "read_mail_thread": {
+    "mail_read_thread": {
       "name": "Mail-Thread lesen",
       "input": "mail_id, optional mailbox/max_messages/include_html/max_chars",
       "output": "Thread-Nachrichten mit Text/Metadaten",
@@ -61,7 +61,7 @@
       },
       "allows_goal_injection": false
     },
-    "read_mail_attachments": {
+    "mail_read_attachments": {
       "name": "Mail-Anhänge lesen",
       "input": "mail_id, optional mailbox/include_content/max_attachment_chars/extract_text_pdf",
       "output": "Anhang-Liste inkl. Metadaten und optionalem Text",
@@ -72,7 +72,7 @@
       },
       "allows_goal_injection": false
     },
-    "classify_mail": {
+    "mail_classify": {
       "name": "Mail-Absicht klassifizieren",
       "input": "text oder subject/body_text, optional from_email",
       "output": "intent (info|beschwerde|angebot|termin|eskalation|newsletter), confidence, reason",

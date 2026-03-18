@@ -39,13 +39,13 @@ def register(registry: ToolRegistry) -> None:
         return FileWriteResponse(path=req.path, bytes_written=n).model_dump()
 
     registry.register(
-        "read_file",
+        "file_read",
         tool_read_file,
         request_model=FileReadRequest,
         response_model=FileReadResponse,
     )
     registry.register(
-        "write_file",
+        "file_write",
         tool_write_file,
         request_model=FileWriteRequest,
         response_model=FileWriteResponse,

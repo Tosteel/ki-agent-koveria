@@ -147,7 +147,7 @@ class Orchestrator:
             needs_replan = status in {"empty", "low_quality", "transient_error", "permanent_error"} and (
                 any(c in {"knowledge_search", "web_search"} for c in caps)
                 or str(policy.get("side_effect_level") or "") == "high"
-                or tool in {"send_mail", "answer_mail"}
+                or tool in {"mail_send", "mail_answer"}
             )
             if needs_replan:
                 reason = str(entry.get("error") or f"{tool}:{status}")
@@ -572,12 +572,12 @@ class Orchestrator:
         if str(policy.get("side_effect_level") or "none") != "high":
             return ""
 
-        if tool in {"send_mail", "answer_mail", "write_file"}:
+        if tool in {"mail_send", "mail_answer", "file_write"}:
             unresolved = self._has_unresolved_placeholder(args)
             if unresolved:
                 return "unresolved_placeholders"
 
-        if tool == "send_mail":
+        if tool == "mail_send":
             body = str(args.get("body") or args.get("text") or "").strip()
             min_text_len = int((policy.get("quality_signals") or {}).get("min_text_length") or 40)
             if len(body) < min_text_len:

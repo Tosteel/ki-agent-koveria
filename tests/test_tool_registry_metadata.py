@@ -82,9 +82,9 @@ class ToolRegistryMetadataTests(unittest.TestCase):
             body: str
 
         reg = ToolRegistry()
-        reg.register("send_mail", lambda _ctx, _args: {"sent": True}, request_model=MailArgs)
-        meta = reg.tool_metadata("send_mail")
-        policy = reg.tool_policy("send_mail")
+        reg.register("mail_send", lambda _ctx, _args: {"sent": True}, request_model=MailArgs)
+        meta = reg.tool_metadata("mail_send")
+        policy = reg.tool_policy("mail_send")
 
         self.assertEqual(str(meta.get("name") or ""), "E-Mail senden")
         self.assertEqual(str(meta.get("side_effect_level") or ""), "high")

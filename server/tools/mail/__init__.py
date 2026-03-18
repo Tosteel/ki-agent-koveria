@@ -1,1 +1,1 @@
-from .mail import classify_mail, read_mail, read_mail_attachments, read_mail_thread, send_mail
+from .mail import mail_classify, mail_read, mail_read_attachments, mail_read_thread, mail_send

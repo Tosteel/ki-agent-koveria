@@ -3,12 +3,12 @@
 ## Zweck
 Der `mail_assistant` verarbeitet unbeantwortete E-Mails automatisch:
 1. Mail lesen (inkl. optional Thread/Anhänge)
-2. Intent klassifizieren (`classify_mail`)
+2. Intent klassifizieren (`mail_classify`)
 3. Kontext aus RAG/Web holen
 4. Antwort entwerfen (`llm_text_compose`)
-5. Qualität bewerten (`score_reply`)
-6. Policy prüfen (`policy_check`)
-7. Auto-Send oder Human-Review (`create_review_ticket`)
+5. Qualität bewerten (`customer_support_reply_score`)
+6. Policy prüfen (`customer_support_policy_check`)
+7. Auto-Send oder Human-Review (`customer_support_review_ticket_create`)
 
 ## API
 - `POST /assistants/mail-assistant/run-once`
@@ -21,9 +21,9 @@ Siehe `models.py` (`MailAssistantRunRequest`):
 - `auto_send_threshold`: Mindestscore für Auto-Send
 - `web_sources`: Start-URLs für Web-Recherche
 - `web_whitelist_domains`: erlaubte Domains für `web_crawl_site_whitelist`
-- `include_thread`: `read_mail_thread` aktiv
-- `include_attachments`: `read_mail_attachments` aktiv
-- `strict_policy`: strenger `policy_check`
+- `include_thread`: `mail_read_thread` aktiv
+- `include_attachments`: `mail_read_attachments` aktiv
+- `strict_policy`: strenger `customer_support_policy_check`
 - `trace_steps`: Terminal-Step-Logs wie bei `agent/ask`
 
 ## Tool-Infos anpassen
@@ -36,7 +36,7 @@ Ebenfalls in `service.py`, z. B.:
 - `rag_top_k` in `_retrieve_context(...)`
 - `max_pages/max_matches` bei `web_crawl_site_whitelist`
 - `max_chars` bei `llm_text_compose`
-- `require_actionable` bei `score_reply`
+- `require_actionable` bei `customer_support_reply_score`
 
 ### 3) Intent-abhängiges Verhalten
 In `service.py`:
@@ -65,4 +65,4 @@ Dort kannst du u. a. `capabilities`, `retry_policy`, `fallback`, `side_effect_le
   - zusätzliche `web_sources` setzen
   - `web_whitelist_domains` sauber pflegen (nur Hostnamen)
 - Review-Prozess schärfen:
-  - Gründe/Ticket-Metadaten in `create_review_ticket` erweitern
+  - Gründe/Ticket-Metadaten in `customer_support_review_ticket_create` erweitern

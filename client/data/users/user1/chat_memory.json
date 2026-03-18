@@ -1,7 +1,65 @@
 {
   "version": 1,
-  "updated_at": "2026-03-14T20:37:20Z",
+  "updated_at": "2026-03-17T14:40:09Z",
   "chats": [
+    {
+      "id": 6,
+      "title": "was kannst du?",
+      "messages": [
+        {
+          "role": "bot",
+          "text": "Hallo! Wie kann ich Ihnen heute helfen?",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-03-17T14:38:45.449Z"
+        },
+        {
+          "role": "user",
+          "text": "was kannst du?",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-03-17T14:38:49.104Z"
+        },
+        {
+          "role": "bot",
+          "text": "Der Assistent verfügt über 25 Fähigkeiten, darunter Textzusammenfassung, Chat-Antworten, Dateien lesen und schreiben, Websuche, E-Mails versenden und Webrecherche. Eine detaillierte Liste aller Fähigkeiten ist verfügbar.",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [
+            "1. tool=skills_list args={}"
+          ],
+          "options": [],
+          "timestamp": "2026-03-17T14:38:54.863Z"
+        },
+        {
+          "role": "user",
+          "text": "wer ist Friedrich Merz?",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [],
+          "options": [],
+          "timestamp": "2026-03-17T14:39:42.552Z"
+        },
+        {
+          "role": "bot",
+          "text": "Friedrich Merz ist ein deutscher Politiker, der am 11. November 1955 in Brilon geboren wurde. Er ist Mitglied der Christlich Demokratischen Union (CDU) und hat eine lange politische Karriere hinter sich, unter anderem als Vorsitzender der CDU/CSU-Bundestagsfraktion und Mitglied im Vorstand der CDU. Nach seinem Ausscheiden aus dem Bundestag war Merz in der Wirtschaft tätig, bevor er 2018 in die Politik zurückkehrte. Im Jahr 2021 wurde er erneut zum Vorsitzenden der CDU-Bundestagsfraktion gewählt und ist seit 2022 Bundeskanzler der Bundesrepublik Deutschland.",
+          "downloadUrl": "",
+          "downloadLabel": "",
+          "plannedSteps": [
+            "1. tool=rag_knowledgebase args={\"query\":\"Friedrich Merz\"}",
+            "2. tool=llm_text_compose args={\"text\":\"{steps[0].text}\"}"
+          ],
+          "options": [],
+          "timestamp": "2026-03-17T14:40:09.100Z"
+        }
+      ],
+      "created_at": "2026-03-17T14:38:45.449Z",
+      "updated_at": "2026-03-17T14:40:09.100Z"
+    },
     {
       "id": 5,
       "title": "wer ist manuel hagel?",
@@ -344,7 +402,7 @@
           "downloadLabel": "",
           "plannedSteps": [
             "1. tool=llm_text_chat args={\"message\":\"Ich verstehe, dass Sie bereits die Zugangsdaten haben. Ich werde nun Ihre Inbox nach neuen Mails durchsuchen.\"}",
-            "2. tool=fetch_inbox_mails args={}"
+            "2. tool=mail_fetch_inbox args={}"
           ],
           "options": [],
           "timestamp": "2026-03-12T10:25:31.071Z"
@@ -371,7 +429,7 @@
         },
         {
           "role": "user",
-          "text": "bitte benutzte read_mail fü die mail_id 15",
+          "text": "bitte benutzte mail_read fü die mail_id 15",
           "downloadUrl": "",
           "downloadLabel": "",
           "plannedSteps": [],
@@ -384,14 +442,14 @@
           "downloadUrl": "",
           "downloadLabel": "",
           "plannedSteps": [
-            "1. tool=read_mail args={\"mail_id\":\"15\"}"
+            "1. tool=mail_read args={\"mail_id\":\"15\"}"
           ],
           "options": [],
           "timestamp": "2026-03-12T10:28:39.866Z"
         },
         {
           "role": "user",
-          "text": "read_mail für mail_ID 10",
+          "text": "mail_read für mail_ID 10",
           "downloadUrl": "",
           "downloadLabel": "",
           "plannedSteps": [],
@@ -404,7 +462,7 @@
           "downloadUrl": "",
           "downloadLabel": "",
           "plannedSteps": [
-            "1. tool=read_mail args={\"mail_id\":\"10\"}"
+            "1. tool=mail_read args={\"mail_id\":\"10\"}"
           ],
           "options": [],
           "timestamp": "2026-03-12T10:29:40.706Z"
@@ -459,7 +517,7 @@
           "downloadUrl": "",
           "downloadLabel": "",
           "plannedSteps": [
-            "1. tool=fetch_inbox_mails args={\"mailbox\":\"inbox\"}"
+            "1. tool=mail_fetch_inbox args={\"mailbox\":\"inbox\"}"
           ],
           "options": [],
           "timestamp": "2026-03-12T10:22:28.294Z"
@@ -479,7 +537,7 @@
           "downloadUrl": "",
           "downloadLabel": "",
           "plannedSteps": [
-            "1. tool=fetch_inbox_mails args={}",
+            "1. tool=mail_fetch_inbox args={}",
             "2. tool=llm_text_chat args={\"message\":\"Die aktuellste Mail ist von {steps[0].emails[0].sender} mit dem Betreff {steps[0].emails[0].subject}. Die Mail lautet: {steps[0].emails[0].text}\"}"
           ],
           "options": [],
@@ -600,5 +658,5 @@
       "updated_at": "2026-03-12T09:28:41.542Z"
     }
   ],
-  "active_chat_id": 5
+  "active_chat_id": 6
 }

@@ -3,7 +3,7 @@
 ## Überblick
 Die Pipeline läuft in 10 Schritten. Für Tests wird jeder Schritt als 2-Step-Aufruf ausgeführt:
 1. Analyse-Tool
-2. `write_file` mit gesamtem Payload (`{steps[0].payload}`)
+2. `file_write` mit gesamtem Payload (`{steps[0].payload}`)
 
 Optional: Nach jedem Schritt kann `competitive_quality_gate` ausgeführt werden (Modus `validate` oder `validate_and_repair`).
 
@@ -21,7 +21,7 @@ Optional: Nach jedem Schritt kann `competitive_quality_gate` ausgeführt werden 
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "product_profile_qg.json",
         "content": "{steps[0].payload}",
@@ -63,7 +63,7 @@ Nur prüfen (`mode=validate`):
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "feature_matrix_gap_qg.json",
         "content": "{steps[0].payload}",
@@ -89,7 +89,7 @@ Prüfen + reparieren (`mode=validate_and_repair`):
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "final_report_qg.json",
         "content": "{steps[0].payload}",
@@ -116,7 +116,7 @@ Output: `parsed_doc.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "parsed_doc.json",
         "content": "{steps[0].payload}",
@@ -144,7 +144,7 @@ Output: `product_profile.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "product_profile.json",
         "content": "{steps[0].payload}",
@@ -174,7 +174,7 @@ Output: `product_profile_qg.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "product_profile_qg.json",
         "content": "{steps[0].payload}",
@@ -204,7 +204,7 @@ Output: `analysis_plan.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "analysis_plan.json",
         "content": "{steps[0].payload}",
@@ -235,7 +235,7 @@ Output: `competitor_list.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "competitor_list.json",
         "content": "{steps[0].payload}",
@@ -271,7 +271,7 @@ Output: `competitor_list_qg.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "competitor_list_qg.json",
         "content": "{steps[0].payload}",
@@ -305,7 +305,7 @@ Output: `competitor_profiles.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "competitor_profiles.json",
         "content": "{steps[0].payload}",
@@ -316,7 +316,7 @@ Output: `competitor_profiles.json`
 }
 ```
 
-Hinweis: `write_file` nur ausführen, wenn `steps[0].ok == true`, sonst wird `competitor_profiles.json` mit leerem/fehlerhaftem Inhalt überschrieben.
+Hinweis: `file_write` nur ausführen, wenn `steps[0].ok == true`, sonst wird `competitor_profiles.json` mit leerem/fehlerhaftem Inhalt überschrieben.
 
 ### Tool5a: Feste Quellenliste verifizieren/aufbauen
 - Ziel: pro Wettbewerber stabile Quellen (`primary` + `fallback`) prüfen und als Registry speichern.
@@ -336,7 +336,7 @@ Hinweis: `write_file` nur ausführen, wenn `steps[0].ok == true`, sonst wird `co
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "competitor_source_registry.json",
         "content": "{steps[0].payload}",
@@ -368,7 +368,7 @@ Beispiel Batch 1 (`offset=0`, `limit=2`):
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "competitor_profiles.json",
         "content": "{steps[0].payload}",
@@ -396,7 +396,7 @@ Merge aller Teile:
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "competitor_profiles.json",
         "content": "{steps[0].payload}",
@@ -430,7 +430,7 @@ Output: `competitor_profiles_qg.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "competitor_profiles_qg.json",
         "content": "{steps[0].payload}",
@@ -441,7 +441,7 @@ Output: `competitor_profiles_qg.json`
 }
 ```
 
-Hinweis: Das Tool gibt wie die anderen Tools ein Payload zurück; `write_file` sollte weiterhin `content: "{steps[0].payload}"` verwenden.
+Hinweis: Das Tool gibt wie die anderen Tools ein Payload zurück; `file_write` sollte weiterhin `content: "{steps[0].payload}"` verwenden.
 
 ## Tool6: Feature-Matrix & Gap-Analyse
 Input: `product_profile_qg.json` (oder `product_profile.json`) + `competitor_profiles_qg.json` (oder `competitor_profiles.json`)
@@ -460,7 +460,7 @@ Output: `comparison_matrix.json`, `gaps_and_usps.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "feature_matrix_gap.json",
         "content": "{steps[0].payload}",
@@ -492,7 +492,7 @@ Output: `feature_matrix_gap_qg.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "feature_matrix_gap_qg.json",
         "content": "{steps[0].payload}",
@@ -522,7 +522,7 @@ Output: `swot.json`, `positioning.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "strategic_analysis.json",
         "content": "{steps[0].payload}",
@@ -558,7 +558,7 @@ Output: `final_report.json`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "final_report.json",
         "content": "{steps[0].payload}",
@@ -595,7 +595,7 @@ Output: `competition_analysis_report.pdf`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "pdf_publish_result.json",
         "content": "{steps[0].payload}",
@@ -608,7 +608,7 @@ Output: `competition_analysis_report.pdf`
 
 ## End-to-End Stepkette (1-10, eine Sequenz)
 Die folgende Kette ist ein einzelner Request im `steps`-Format von Schritt 1 bis 10.  
-Nach jedem Schritt wird per `write_file` persistiert.
+Nach jedem Schritt wird per `file_write` persistiert.
 
 Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert; hier wird ein Review-Placeholder geschrieben.
 
@@ -623,7 +623,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "parsed_doc.json",
         "content": "{steps[0].payload}",
@@ -639,7 +639,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "product_profile.json",
         "content": "{steps[2].payload}",
@@ -657,7 +657,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "product_profile_qg.json",
         "content": "{steps[4].payload}",
@@ -673,7 +673,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "analysis_plan.json",
         "content": "{steps[6].payload}",
@@ -692,7 +692,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "competitor_list.json",
         "content": "{steps[8].payload}",
@@ -716,7 +716,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "competitor_list_qg.json",
         "content": "{steps[10].payload}",
@@ -735,7 +735,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "competitor_profiles.json",
         "content": "{steps[12].payload}",
@@ -757,7 +757,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "competitor_profiles_qg.json",
         "content": "{steps[14].payload}",
@@ -773,7 +773,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "feature_matrix_gap.json",
         "content": "{steps[16].payload}",
@@ -793,7 +793,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "feature_matrix_gap_qg.json",
         "content": "{steps[18].payload}",
@@ -811,7 +811,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "strategic_analysis.json",
         "content": "{steps[20].payload}",
@@ -835,7 +835,7 @@ Hinweis zu Schritt 9: Das Review-Tool ist optional/nicht dediziert implementiert
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "final_report.json",
         "content": "{steps[22].payload}",

@@ -3,14 +3,14 @@
   "version": "1.0",
   "description": "Dateien lesen und schreiben.",
   "tools": {
-    "read_file": {
+    "file_read": {
       "name": "Datei lesen",
       "input": "path",
       "output": "text/content",
       "capabilities": ["artifact_read"],
       "side_effect_level": "none"
     },
-    "write_file": {
+    "file_write": {
       "name": "Datei schreiben",
       "input": "path, text/content",
       "output": "output_path",

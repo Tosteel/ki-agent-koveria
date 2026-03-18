@@ -6,8 +6,8 @@ from server.agent.policies import BASIC_TOOLS
 
 
 _TOOL_DESCRIPTIONS: Dict[str, str] = {
-    "read_file": "Dateien lesen.",
-    "write_file": "Dateien schreiben.",
+    "file_read": "Dateien lesen.",
+    "file_write": "Dateien schreiben.",
     "rag_knowledgebase": "Wissensbasis durchsuchen (RAG).",
     "llm_text_chat": "Kurze, lockere Chat-Antworten.",
     "llm_text_summarize": "Text zusammenfassen.",
@@ -20,12 +20,12 @@ _TOOL_DESCRIPTIONS: Dict[str, str] = {
     "websearch_videoanalizer": "Analysiert Web-/Video-Treffer anhand eines Prompts und ergänzt Spalten (Alias).",
     "langsearch": "Websuche mit LangSearch (Open/Free).",
     "google_search": "Websuche über Google Custom Search.",
-    #"search_ebay": "Produktsuche auf eBay.",
+    #"ebay_search": "Produktsuche auf eBay.",
     "web_fetch_page": "Seiteninhalt einer einzelnen URL extrahieren.",
     "web_search_page": "Inhalte auf einer einzelnen Website-Seite suchen.",
     "web_crawl_site": "Website mit Navigation/Klicks über Unterseiten durchsuchen.",
     "web_crawl_site_whitelist": "Website-Crawl mit Domain-Whitelist.",
-    "send_mail": "E-Mails versenden (optional mit Anhang).",
+    "mail_send": "E-Mails versenden (optional mit Anhang).",
     "competitor_search_v0_4": "Wettbewerber über Playwright+BeautifulSoup suchen und per LLM auf direkte Konkurrenz prüfen.",
     "offerflow_step_1_intake": "OfferFlow Step 1: Intake und Normalisierung.",
     "offerflow_step_2_qualification": "OfferFlow Step 2: Qualifizierung (Go/No-Go).",
@@ -37,7 +37,7 @@ _TOOL_DESCRIPTIONS: Dict[str, str] = {
 }
 
 
-def list_skills(*, include_descriptions: bool = True) -> Dict[str, Any]:
+def skills_list(*, include_descriptions: bool = True) -> Dict[str, Any]:
     skill_names: List[str] = sorted(BASIC_TOOLS)
     skills: List[Dict[str, str]] = []
     for name in skill_names:

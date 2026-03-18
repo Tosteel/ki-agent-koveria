@@ -94,7 +94,7 @@ Output: `<stepX_output.json>`
       }
     },
     {
-      "tool": "write_file",
+      "tool": "file_write",
       "args": {
         "path": "<stepX_output.json>",
         "content": "{{steps[0].payload}}",
