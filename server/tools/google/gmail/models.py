@@ -125,4 +125,3 @@ class GmailReadThreadResponse(BaseModel):
     count: int = 0
     messages: List[GmailThreadItem] = Field(default_factory=list)
     text: str = ""
-

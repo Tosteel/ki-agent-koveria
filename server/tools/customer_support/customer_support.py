@@ -264,15 +264,37 @@ def customer_support_review_ticket_update(
 
 
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
-_PHONE_RE = re.compile(r"(?:(?:\+|00)\d{1,3}[\s\-]?)?(?:\d[\s\-]?){7,}\d")
+_PHONE_RE = re.compile(r"\b(?:\+|00)?\d[\d\s\-/()]{7,}\d\b")
 _IBAN_RE = re.compile(r"\b[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}\b")
+_DATE_TOKEN_RE = re.compile(r"\b(?:\d{1,2}[./]\d{1,2}[./]\d{2,4}|\d{4}-\d{2}-\d{2})\b")
+_TIME_TOKEN_RE = re.compile(r"\b([01]?\d|2[0-3])[:.][0-5]\d\b")
 
 
 def _redact_sensitive(text: str) -> str:
     out = _EMAIL_RE.sub("[redacted-email]", text)
-    out = _PHONE_RE.sub("[redacted-phone]", out)
+    for match in list(_PHONE_RE.finditer(out)):
+        token = match.group(0)
+        if _DATE_TOKEN_RE.search(token) or _TIME_TOKEN_RE.search(token):
+            continue
+        out = out.replace(token, "[redacted-phone]")
     out = _IBAN_RE.sub("[redacted-iban]", out)
     return out
+
+
+def _contains_plausible_phone(text: str) -> bool:
+    for match in _PHONE_RE.finditer(text or ""):
+        token = match.group(0)
+        # Avoid false positives from dates/timestamps.
+        if _DATE_TOKEN_RE.search(token) or _TIME_TOKEN_RE.search(token):
+            continue
+        digits = sum(ch.isdigit() for ch in token)
+        if digits < 8:
+            continue
+        if all(ch.isdigit() for ch in token):
+            # Plain long number without separators is rarely a phone in this context.
+            continue
+        return True
+    return False
 
 
 def customer_support_policy_check(*, text: str, policy_profile: str = "default", strict_mode: bool = True) -> Dict[str, Any]:
@@ -285,7 +307,7 @@ def customer_support_policy_check(*, text: str, policy_profile: str = "default",
     warnings: List[str] = []
 
     has_email = bool(_EMAIL_RE.search(body))
-    has_phone = bool(_PHONE_RE.search(body))
+    has_phone = _contains_plausible_phone(body)
     has_iban = bool(_IBAN_RE.search(body))
     if has_email or has_phone or has_iban:
         violations.append("PII detected (email/phone/bank data).")
@@ -326,4 +348,3 @@ def customer_support_policy_check(*, text: str, policy_profile: str = "default",
         "redacted_text": redacted,
         "text": f"Policy-Check: allowed={str(allowed).lower()}, risk={risk_level}",
     }
-

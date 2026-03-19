@@ -7,6 +7,7 @@ from server.agent.tool_registry import ToolContext, ToolRegistry
 from .mail import (
     mail_answer,
     mail_classify,
+    mail_compose_clarification,
     mail_fetch_inbox,
     mail_fetch_unanswered,
     mail_read,
@@ -19,6 +20,8 @@ from .models import (
     MailAnswerResponse,
     MailClassifyRequest,
     MailClassifyResponse,
+    MailComposeClarificationRequest,
+    MailComposeClarificationResponse,
     MailInboxFetchRequest,
     MailInboxFetchResponse,
     MailReadAttachmentsRequest,
@@ -121,6 +124,16 @@ def register(registry: ToolRegistry) -> None:
         )
         return MailClassifyResponse(**result).model_dump()
 
+    def tool_compose_clarification_mail(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+        req = MailComposeClarificationRequest(**args)
+        result = mail_compose_clarification(
+            missing_fields=req.missing_fields,
+            known_facts=req.known_facts,
+            salutation=req.salutation,
+            closing=req.closing,
+        )
+        return MailComposeClarificationResponse(**result).model_dump()
+
     registry.register(
         "mail_send",
         tool_send_mail,
@@ -168,4 +181,10 @@ def register(registry: ToolRegistry) -> None:
         tool_classify_mail,
         request_model=MailClassifyRequest,
         response_model=MailClassifyResponse,
+    )
+    registry.register(
+        "mail_compose_clarification",
+        tool_compose_clarification_mail,
+        request_model=MailComposeClarificationRequest,
+        response_model=MailComposeClarificationResponse,
     )

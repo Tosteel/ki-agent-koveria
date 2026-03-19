@@ -208,6 +208,20 @@ class MailClassifyResponse(BaseModel):
     text: str = ""
 
 
+class MailComposeClarificationRequest(BaseModel):
+    missing_fields: List[str] = Field(default_factory=list)
+    known_facts: dict = Field(default_factory=dict)
+    salutation: str = Field(default="Guten Tag")
+    closing: str = Field(default="Mit freundlichen Grüßen")
+
+
+class MailComposeClarificationResponse(BaseModel):
+    body: str = ""
+    questions: List[str] = Field(default_factory=list)
+    missing_fields: List[str] = Field(default_factory=list)
+    text: str = ""
+
+
 __all__ = [
     "MailSendRequest",
     "MailSendResponse",
@@ -224,4 +238,6 @@ __all__ = [
     "MailReadAttachmentsResponse",
     "MailClassifyRequest",
     "MailClassifyResponse",
+    "MailComposeClarificationRequest",
+    "MailComposeClarificationResponse",
 ]

@@ -208,7 +208,13 @@ def assistent_profile_check(
                     break
 
     cal_rules = rules.get("calendar") if isinstance(rules.get("calendar"), dict) else {}
-    if isinstance(cal_rules, dict) and action_name in {"calendar_create_event", "calendar_check_availability", "calendar_propose_slots"}:
+    if isinstance(cal_rules, dict) and action_name in {
+        "calendar_create_event",
+        "calendar_hold_event",
+        "calender_hold_event",
+        "calendar_check_availability",
+        "calendar_propose_slots",
+    }:
         max_hour = cal_rules.get("latest_meeting_end_hour")
         if isinstance(max_hour, int):
             end_iso = str(ctx.get("end_iso") or "")
@@ -231,4 +237,3 @@ def assistent_profile_check(
         "matched_rules": matched,
         "text": f"Profile check: {'allowed' if allowed else 'blocked'}",
     }
-

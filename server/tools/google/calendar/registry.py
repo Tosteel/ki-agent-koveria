@@ -4,12 +4,14 @@ from typing import Any, Dict
 
 from server.agent.tool_registry import ToolContext, ToolRegistry
 
-from .calendar import calendar_check_availability, calendar_create_event, calendar_propose_slots
+from .calendar import calendar_check_availability, calendar_create_event, calendar_hold_event, calendar_propose_slots
 from .models import (
     CalendarCheckAvailabilityRequest,
     CalendarCheckAvailabilityResponse,
     CalendarCreateEventRequest,
     CalendarCreateEventResponse,
+    CalendarHoldEventRequest,
+    CalendarHoldEventResponse,
     CalendarProposeSlotsRequest,
     CalendarProposeSlotsResponse,
 )
@@ -54,6 +56,22 @@ def register(registry: ToolRegistry) -> None:
         )
         return CalendarProposeSlotsResponse(**result).model_dump()
 
+    def tool_calendar_hold_event(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+        req = CalendarHoldEventRequest(**args)
+        result = calendar_hold_event(
+            summary=req.summary,
+            start_iso=req.start_iso,
+            end_iso=req.end_iso,
+            description=req.description,
+            location=req.location,
+            attendees=req.attendees,
+            calendar_id=req.calendar_id,
+            timezone_name=req.timezone,
+            hold_minutes=req.hold_minutes,
+            send_updates=req.send_updates,
+        )
+        return CalendarHoldEventResponse(**result).model_dump()
+
     registry.register(
         "calendar_check_availability",
         tool_calendar_check_availability,
@@ -72,4 +90,16 @@ def register(registry: ToolRegistry) -> None:
         request_model=CalendarProposeSlotsRequest,
         response_model=CalendarProposeSlotsResponse,
     )
-
+    registry.register(
+        "calendar_hold_event",
+        tool_calendar_hold_event,
+        request_model=CalendarHoldEventRequest,
+        response_model=CalendarHoldEventResponse,
+    )
+    # Alias with requested spelling.
+    registry.register(
+        "calender_hold_event",
+        tool_calendar_hold_event,
+        request_model=CalendarHoldEventRequest,
+        response_model=CalendarHoldEventResponse,
+    )

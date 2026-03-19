@@ -1,0 +1,510 @@
+from __future__ import annotations
+
+import json
+import re
+from datetime import datetime
+from typing import Any, Dict, List
+
+from fastapi import HTTPException
+from server.services.llm_ionos import IonosLLM
+
+
+def _to_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _normalize_text(value: str) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def _focus_booking_text(text: str) -> str:
+    raw = str(text or "")
+    if not raw:
+        return ""
+
+    focused = raw
+    for marker in ("\nTHREAD:", "\nATTACHMENTS:", "\nKundenkontext:", "\nRecherchierter Kontext:"):
+        if marker in focused:
+            focused = focused.split(marker, 1)[0]
+
+    lines: List[str] = []
+    for line in focused.splitlines():
+        s = line.strip()
+        l = s.lower()
+        if not s:
+            lines.append("")
+            continue
+        if s.startswith("________________________________"):
+            break
+        if s.startswith(">"):
+            continue
+        if re.match(r"^am\s.+\sschrieb\s", l):
+            break
+        if l.startswith(
+            (
+                "mailbox:",
+                "mail id:",
+                "from:",
+                "subject:",
+                "date:",
+                "sent:",
+                "to:",
+                "cc:",
+                "message-id:",
+                "message id:",
+                "in-reply-to:",
+                "references:",
+                "thread for mail_id",
+                "messages:",
+            )
+        ):
+            continue
+        if re.match(r"^\[\d+\]\s", s):
+            continue
+        if l.startswith(("from=", "date=")) or " date=" in l:
+            continue
+        lines.append(s)
+
+    out = "\n".join(lines).strip()
+    return out or raw
+
+
+def _extract_date(text: str) -> str:
+    raw = str(text or "")
+    m_iso = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", raw)
+    if m_iso:
+        return m_iso.group(1)
+
+    m_de = re.search(r"\b(\d{1,2})\.(\d{1,2})\.(20\d{2})\b", raw)
+    if m_de:
+        d = int(m_de.group(1))
+        mo = int(m_de.group(2))
+        y = int(m_de.group(3))
+        return f"{y:04d}-{mo:02d}-{d:02d}"
+
+    return ""
+
+
+def _extract_time(text: str) -> str:
+    raw = str(text or "")
+    m2 = re.search(r"\b(?:ab|start|beginn)\s*([01]?\d|2[0-3])\s*uhr\b", raw.lower())
+    if m2:
+        h = int(m2.group(1))
+        return f"{h:02d}:00"
+
+    m3 = re.search(
+        r"\b(?:ab|start|beginn|beginnend|von)\s*([01]?\d|2[0-3])[:.]([0-5]\d)\b",
+        raw.lower(),
+    )
+    if m3:
+        h = int(m3.group(1))
+        mi = int(m3.group(2))
+        return f"{h:02d}:{mi:02d}"
+
+    # Allow dotted time notation only with explicit "Uhr" marker, e.g. "20.30 Uhr".
+    m4 = re.search(r"\b([01]?\d|2[0-3])\.([0-5]\d)\s*uhr\b", raw.lower())
+    if m4:
+        h = int(m4.group(1))
+        mi = int(m4.group(2))
+        return f"{h:02d}:{mi:02d}"
+
+    # Fallback: generic time with ":" only (not ".") to avoid interpreting dates like 04.04 as 04:04.
+    # Also ignore typical mail headers like "Date:"/"Sent:" lines.
+    body_lines = []
+    for line in raw.splitlines():
+        l = line.strip().lower()
+        if l.startswith(("date:", "sent:", "from:", "subject:", "to:", "cc:", "bcc:", "mailbox:", "mail id:")):
+            continue
+        if l.startswith(("date=", "from=", "thread for mail_id", "messages:")) or " date=" in l:
+            continue
+        body_lines.append(line)
+    body = "\n".join(body_lines)
+    m = re.search(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", body)
+    if m:
+        h = int(m.group(1))
+        mi = int(m.group(2))
+        return f"{h:02d}:{mi:02d}"
+    return ""
+
+
+def _extract_duration_hours(text: str) -> float | None:
+    raw = str(text or "")
+    m = re.search(r"\b(\d{1,2})(?:[,.](\d))?\s*(?:stunden|stunde|h)\b", raw.lower())
+    if m:
+        base = int(m.group(1))
+        dec = m.group(2)
+        if dec is not None:
+            return float(f"{base}.{dec}")
+        return float(base)
+    return None
+
+
+def _extract_time_window(text: str) -> tuple[str, float | None]:
+    raw = str(text or "").lower()
+    m = re.search(
+        r"\b(?:von|ab)?\s*([01]?\d|2[0-3])(?:[:.]([0-5]\d))?\s*(?:uhr)?\s*"
+        r"(?:bis|to|-|–|—)\s*([01]?\d|2[0-3])(?:[:.]([0-5]\d))?\s*(?:uhr)?\b",
+        raw,
+    )
+    if not m:
+        return "", None
+    sh = int(m.group(1))
+    sm = int(m.group(2) or 0)
+    eh = int(m.group(3))
+    em = int(m.group(4) or 0)
+    start_minutes = sh * 60 + sm
+    end_minutes = eh * 60 + em
+    if end_minutes <= start_minutes:
+        end_minutes += 24 * 60
+    duration_hours = (end_minutes - start_minutes) / 60.0
+    if duration_hours <= 0:
+        return "", None
+    return f"{sh:02d}:{sm:02d}", round(duration_hours, 2)
+
+
+def _extract_location(text: str) -> str:
+    raw = str(text or "")
+    patterns = [
+        # Explicit location markers, with some typo tolerance ("veranstaltungsport").
+        r"\b(?:ort|location|veranstaltungsort|veranstaltungsport)\s*(?:ist|=|:|-)\s*([^\n\r]+?)(?=[.;!?]|\n|$)",
+        r"\b(?:der\s+)?(?:veranstaltungsort|veranstaltungsport)\s+([^\n\r.,;!?]{2,100})",
+        r"\b(?:in|bei)\s+(\d{5}\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-\s]{1,80}?)(?=[,.;!?]|\n|$)",
+        r"\b(?:in|bei)\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-\s]{2,80}?)(?=[,.;!?]|\n|$)",
+    ]
+    for p in patterns:
+        m = re.search(p, raw, flags=re.IGNORECASE)
+        if m:
+            loc = _normalize_text(m.group(1))
+            loc = loc.strip(" ,.;:")
+            if len(loc) >= 4:
+                return loc
+    return ""
+
+
+def _extract_client_name(text: str) -> str:
+    raw = str(text or "")
+    lines = [x.strip() for x in raw.splitlines() if x.strip()]
+    for line in reversed(lines[-8:]):
+        if len(line) > 2 and any(token in line.lower() for token in ("dr.", "herr", "frau", "mustermann")):
+            return _normalize_text(line)
+    return ""
+
+
+def _extract_occasion(text: str) -> str:
+    raw = str(text or "").lower()
+    mapping = {
+        "hochzeit": "Hochzeit",
+        "geburtstag": "Geburtstag",
+        "firmen": "Firmenevent",
+        "messe": "Messe",
+        "party": "Party",
+        "feier": "Feier",
+        "jubil": "Jubiläum",
+    }
+    for key, value in mapping.items():
+        if key in raw:
+            return value
+    return ""
+
+
+def _parse_json_obj(text: str) -> Dict[str, object]:
+    raw = str(text or "").strip()
+    if not raw:
+        return {}
+    try:
+        obj = json.loads(raw)
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        pass
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            obj = json.loads(raw[start : end + 1])
+            return obj if isinstance(obj, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _extract_price_confirmation(text: str) -> Dict[str, object]:
+    client = IonosLLM()
+    if not client.enabled():
+        return {
+            "confirmed": False,
+            "confidence": 0.0,
+            "reason": "llm_unavailable",
+            "fallback_used": True,
+            "model": "",
+        }
+
+    schema = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "booking_price_confirmation",
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "confirmed": {"type": "boolean"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "reason": {"type": "string"},
+                },
+                "required": ["confirmed", "confidence", "reason"],
+            },
+            "strict": True,
+        },
+    }
+    completion = client.chat_completions(
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Du entscheidest, ob der Kunde den zuvor kommunizierten Preis verbindlich bestätigt.\n"
+                    "Gib confirmed=true nur bei klarer, expliziter Zustimmung zur Preis-/Angebotsannahme.\n"
+                    "Bei Unklarheit oder fehlender Preiszusage: confirmed=false.\n"
+                    "Antworte ausschließlich als JSON laut Schema."
+                ),
+            },
+            {"role": "user", "content": f"Nachricht:\n{text}"},
+        ],
+        response_format=schema,
+        temperature=0.0,
+        top_p=0.1,
+        max_tokens=120,
+    )
+    parsed = _parse_json_obj(client.extract_text(completion))
+    if not parsed:
+        return {
+            "confirmed": False,
+            "confidence": 0.0,
+            "reason": "llm_parse_failed",
+            "fallback_used": True,
+            "model": getattr(client.cfg, "model", ""),
+        }
+    return {
+        "confirmed": bool(parsed.get("confirmed")),
+        "confidence": max(0.0, min(1.0, float(parsed.get("confidence") or 0.0))),
+        "reason": str(parsed.get("reason") or "").strip(),
+        "fallback_used": False,
+        "model": getattr(client.cfg, "model", ""),
+    }
+
+
+def booking_extract_facts(*, text: str, timezone_name: str = "Europe/Berlin") -> Dict[str, Any]:
+    merged = str(text or "").strip()
+    if not merged:
+        raise HTTPException(status_code=422, detail="text is required")
+
+    focused = _focus_booking_text(merged)
+
+    event_date = _extract_date(focused) or _extract_date(merged)
+    range_start, range_duration = _extract_time_window(focused)
+    start_time = range_start or _extract_time(focused)
+    duration_hours = range_duration if range_duration is not None else _extract_duration_hours(focused)
+    location = _extract_location(focused)
+    occasion = _extract_occasion(focused)
+    client_name = _extract_client_name(focused)
+    price_eval = _extract_price_confirmation(focused)
+    price_confidence = float(price_eval.get("confidence") or 0.0)
+    # Conservative gating to avoid false positives on short/ambiguous replies.
+    price_confirmed = bool(price_eval.get("confirmed")) and price_confidence >= 0.75
+
+    facts: Dict[str, Any] = {
+        "event_date": event_date,
+        "start_time": start_time,
+        "duration_hours": duration_hours,
+        "location": location,
+        "occasion": occasion,
+        "client_name": client_name,
+        "price_confirmed": price_confirmed,
+        "price_confirmed_confidence": price_confidence,
+        "price_confirmed_reason": str(price_eval.get("reason") or "").strip(),
+        "price_confirmed_model": str(price_eval.get("model") or "").strip(),
+        "timezone": str(timezone_name or "Europe/Berlin"),
+    }
+
+    missing_candidates = [
+        key
+        for key in ("event_date", "start_time", "duration_hours", "location", "occasion", "client_name", "price_confirmed")
+        if not facts.get(key)
+    ]
+    known = 7 - len(missing_candidates)
+    confidence = max(0.0, min(1.0, known / 7.0))
+    return {
+        "facts": facts,
+        "confidence": confidence,
+        "missing_candidates": missing_candidates,
+        "text": f"Booking-Facts extrahiert (confidence={confidence:.2f})",
+    }
+
+
+def booking_validate_completeness(*, facts: Dict[str, Any], required_fields: List[str] | None = None) -> Dict[str, Any]:
+    ff = dict(facts or {})
+    required = [
+        str(x).strip()
+        for x in (required_fields or [
+            "event_date",
+            "start_time",
+            "duration_hours",
+            "location",
+            "occasion",
+            "client_name",
+            "price_confirmed",
+        ])
+        if str(x).strip()
+    ]
+
+    missing: List[str] = []
+    present: List[str] = []
+    for name in required:
+        val = ff.get(name)
+        if name == "price_confirmed":
+            if bool(val) is True:
+                present.append(name)
+            else:
+                missing.append(name)
+            continue
+        if val is None:
+            missing.append(name)
+            continue
+        if isinstance(val, str) and not val.strip():
+            missing.append(name)
+            continue
+        present.append(name)
+
+    complete = len(missing) == 0
+    return {
+        "complete": complete,
+        "missing_fields": missing,
+        "present_fields": present,
+        "text": "Alle Pflichtfelder vorhanden." if complete else f"Es fehlen Angaben: {', '.join(missing)}",
+    }
+
+
+def _is_weekend(date_iso: str) -> bool | None:
+    raw = str(date_iso or "").strip()
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw)
+    except Exception:
+        try:
+            dt = datetime.strptime(raw, "%Y-%m-%d")
+        except Exception:
+            return None
+    return dt.weekday() >= 5
+
+
+def _hour_from_time(time_value: Any) -> int | None:
+    raw = str(time_value or "").strip()
+    if not raw:
+        return None
+    m = re.match(r"^([01]?\d|2[0-3])[:.]([0-5]\d)$", raw)
+    if not m:
+        return None
+    return int(m.group(1))
+
+
+def booking_decision_engine(
+    *,
+    facts: Dict[str, Any],
+    profile_rules: Dict[str, Any] | None = None,
+    completeness: Dict[str, Any] | None = None,
+    distance: Dict[str, Any] | None = None,
+    quote: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    ff = dict(facts or {})
+    rules = dict(profile_rules or {})
+    comp = dict(completeness or {})
+    dist = dict(distance or {})
+    q = dict(quote or {})
+
+    reasons: List[str] = []
+    flags: Dict[str, Any] = {}
+
+    if not bool(comp.get("complete")):
+        missing = [str(x).strip() for x in (comp.get("missing_fields") or []) if str(x).strip()]
+        reasons.append("Pflichtangaben unvollständig.")
+        if missing:
+            reasons.append("Fehlend: " + ", ".join(missing))
+        return {
+            "decision": "need_clarification",
+            "reasons": reasons,
+            "flags": {"missing_fields": missing},
+            "text": "Entscheidung: need_clarification",
+        }
+
+    if not bool(ff.get("price_confirmed")):
+        reasons.append("Preis ist noch nicht explizit bestätigt.")
+        return {
+            "decision": "need_clarification",
+            "reasons": reasons,
+            "flags": {},
+            "text": "Entscheidung: need_clarification",
+        }
+
+    weekend_only = bool(rules.get("weekend_only", True))
+    is_weekend = _is_weekend(str(ff.get("event_date") or ""))
+    if weekend_only and is_weekend is False:
+        reasons.append("Buchungen sind nur am Wochenende möglich.")
+        return {
+            "decision": "auto_decline",
+            "reasons": reasons,
+            "flags": {"weekend_only": True},
+            "text": "Entscheidung: auto_decline",
+        }
+
+    duration = _to_float(ff.get("duration_hours"), 0.0)
+    max_duration = _to_float(rules.get("max_duration_hours"), 8.0)
+    if duration > max_duration:
+        reasons.append(f"Anfrage überschreitet Maximaldauer ({duration:.1f}h > {max_duration:.1f}h).")
+        return {
+            "decision": "human_review",
+            "reasons": reasons,
+            "flags": {"duration_exceeded": True},
+            "text": "Entscheidung: human_review",
+        }
+
+    distance_km = _to_float(dist.get("distance_km"), -1.0)
+    max_distance = _to_float(rules.get("max_distance_km"), 200.0)
+    if distance_km >= 0 and distance_km > max_distance:
+        reasons.append(f"Entfernung zu groß ({distance_km:.1f} km > {max_distance:.1f} km).")
+        return {
+            "decision": "auto_decline",
+            "reasons": reasons,
+            "flags": {"distance_exceeded": True},
+            "text": "Entscheidung: auto_decline",
+        }
+
+    overnight_distance = _to_float(rules.get("overnight_distance_km"), 60.0)
+    overnight_after_hour = int(_to_float(rules.get("overnight_after_hour"), 22.0))
+    start_hour = _hour_from_time(ff.get("start_time"))
+    end_hour = None
+    if start_hour is not None and duration > 0:
+        end_hour = int((start_hour + duration) % 24)
+
+    needs_overnight = bool(distance_km > overnight_distance and end_hour is not None and end_hour >= overnight_after_hour)
+    flags["needs_overnight"] = needs_overnight
+    if needs_overnight:
+        overnight_included = bool(q.get("overnight_included", False))
+        overnight_confirmed = bool(ff.get("overnight_confirmed", False))
+        if not overnight_included or not overnight_confirmed:
+            reasons.append("Übernachtungspauschale nötig, aber noch nicht bestätigt.")
+            return {
+                "decision": "need_clarification",
+                "reasons": reasons,
+                "flags": flags,
+                "text": "Entscheidung: need_clarification",
+            }
+
+    reasons.append("Alle Regeln erfüllt, Anfrage kann angenommen werden.")
+    return {
+        "decision": "auto_accept",
+        "reasons": reasons,
+        "flags": flags,
+        "text": "Entscheidung: auto_accept",
+    }

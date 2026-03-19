@@ -1,0 +1,11 @@
+{
+  "name": "Booking Assistant",
+  "version": "1.0",
+  "description": "Booking- und Kalender-Assistent für Event-Anfragen über Gmail/Google Calendar mit Profilregeln und Human-Review.",
+  "endpoints": {
+    "run_once": "/assistants/booking-assistant/run-once",
+    "reviews": "/assistants/booking-assistant/reviews",
+    "approve": "/assistants/booking-assistant/reviews/{review_id}/approve",
+    "reject": "/assistants/booking-assistant/reviews/{review_id}/reject"
+  }
+}

@@ -82,6 +82,17 @@
         "min_text_length": 10
       },
       "allows_goal_injection": false
+    },
+    "mail_compose_clarification": {
+      "name": "Klärungs-Mail formulieren",
+      "input": "missing_fields, optional known_facts/salutation/closing",
+      "output": "body, questions, missing_fields",
+      "capabilities": ["mail_clarification_compose"],
+      "side_effect_level": "none",
+      "quality_signals": {
+        "min_text_length": 40
+      },
+      "allows_goal_injection": false
     }
   }
 }

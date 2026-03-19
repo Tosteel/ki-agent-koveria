@@ -128,4 +128,3 @@ def register(registry: ToolRegistry) -> None:
         request_model=GmailReadThreadRequest,
         response_model=GmailReadThreadResponse,
     )
-

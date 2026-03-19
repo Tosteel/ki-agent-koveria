@@ -37,6 +37,30 @@
       },
       "allows_goal_injection": false
     },
+    "calendar_hold_event": {
+      "name": "Kalender-Hold erstellen",
+      "input": "summary, start_iso, end_iso, optional attendees/location/description",
+      "output": "hold_created, hold_expires_at, event_id, html_link",
+      "capabilities": ["calendar_event_write", "calendar_hold_write"],
+      "side_effect_level": "high",
+      "retry_policy": {
+        "max_retries": 0,
+        "backoff_ms": 0,
+        "retry_on": []
+      },
+      "quality_signals": {
+        "min_text_length": 20
+      },
+      "allows_goal_injection": false
+    },
+    "calender_hold_event": {
+      "name": "Kalender-Hold erstellen (Alias)",
+      "input": "summary, start_iso, end_iso, optional attendees/location/description",
+      "output": "hold_created, hold_expires_at, event_id, html_link",
+      "capabilities": ["calendar_event_write", "calendar_hold_write"],
+      "side_effect_level": "high",
+      "allows_goal_injection": false
+    },
     "calendar_propose_slots": {
       "name": "Freie Slots vorschlagen",
       "input": "start_iso, end_iso, duration_minutes, optional max_slots/step_minutes",

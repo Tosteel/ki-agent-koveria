@@ -1,0 +1,51 @@
+{
+  "name": "Booking Tools",
+  "version": "1.0",
+  "description": "Booking-spezifische Extraktion, Vollständigkeitsprüfung und Entscheidungslogik.",
+  "owner": "team",
+  "tools": {
+    "booking_extract_facts": {
+      "name": "Booking-Fakten extrahieren",
+      "input": "text, optional timezone",
+      "output": "strukturierte facts + confidence",
+      "capabilities": ["booking_fact_extraction"],
+      "side_effect_level": "none",
+      "quality_signals": {
+        "min_text_length": 20
+      },
+      "allows_goal_injection": false
+    },
+    "booking_validate_completeness": {
+      "name": "Booking-Vollständigkeit prüfen",
+      "input": "facts, optional required_fields",
+      "output": "complete, missing_fields",
+      "capabilities": ["booking_validation"],
+      "side_effect_level": "none",
+      "allows_goal_injection": false
+    },
+    "booking_booking_validate_completness": {
+      "name": "Booking-Vollständigkeit prüfen (Alias)",
+      "input": "facts, optional required_fields",
+      "output": "complete, missing_fields",
+      "capabilities": ["booking_validation"],
+      "side_effect_level": "none",
+      "allows_goal_injection": false
+    },
+    "booking_decision_engine": {
+      "name": "Booking-Entscheidung",
+      "input": "facts, profile_rules, completeness, distance, quote",
+      "output": "decision auto_accept|auto_decline|human_review|need_clarification",
+      "capabilities": ["booking_decision"],
+      "side_effect_level": "none",
+      "allows_goal_injection": false
+    },
+    "booking_descision_enginge": {
+      "name": "Booking-Entscheidung (Alias)",
+      "input": "facts, profile_rules, completeness, distance, quote",
+      "output": "decision auto_accept|auto_decline|human_review|need_clarification",
+      "capabilities": ["booking_decision"],
+      "side_effect_level": "none",
+      "allows_goal_injection": false
+    }
+  }
+}

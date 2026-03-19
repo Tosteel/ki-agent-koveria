@@ -5,12 +5,14 @@ from fastapi import APIRouter, Depends
 from server.core.settings import Settings
 from server.deps import get_current_user, settings as dep_settings
 
-from .calendar import calendar_check_availability, calendar_create_event, calendar_propose_slots
+from .calendar import calendar_check_availability, calendar_create_event, calendar_hold_event, calendar_propose_slots
 from .models import (
     CalendarCheckAvailabilityRequest,
     CalendarCheckAvailabilityResponse,
     CalendarCreateEventRequest,
     CalendarCreateEventResponse,
+    CalendarHoldEventRequest,
+    CalendarHoldEventResponse,
     CalendarProposeSlotsRequest,
     CalendarProposeSlotsResponse,
 )
@@ -54,6 +56,27 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         )
         return CalendarCreateEventResponse(**result)
 
+    @router.post("/tools/google/calendar/hold-event", response_model=CalendarHoldEventResponse)
+    def hold_event_route(
+        req: CalendarHoldEventRequest,
+        user_id: str = Depends(get_current_user),
+        s: Settings = Depends(dep_settings),
+    ) -> CalendarHoldEventResponse:
+        ensure_user_dirs(s, user_id)
+        result = calendar_hold_event(
+            summary=req.summary,
+            start_iso=req.start_iso,
+            end_iso=req.end_iso,
+            description=req.description,
+            location=req.location,
+            attendees=req.attendees,
+            calendar_id=req.calendar_id,
+            timezone_name=req.timezone,
+            hold_minutes=req.hold_minutes,
+            send_updates=req.send_updates,
+        )
+        return CalendarHoldEventResponse(**result)
+
     @router.post("/tools/google/calendar/propose-slots", response_model=CalendarProposeSlotsResponse)
     def propose_slots_route(
         req: CalendarProposeSlotsRequest,
@@ -73,4 +96,3 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         return CalendarProposeSlotsResponse(**result)
 
     return router
-

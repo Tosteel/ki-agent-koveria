@@ -1,0 +1,21 @@
+{
+  "name": "Distance",
+  "version": "1.0",
+  "description": "Distanz- und Fahrzeitabschätzung zwischen zwei Orten.",
+  "owner": "team",
+  "tools": {
+    "distance_check": {
+      "name": "Distanz prüfen",
+      "input": "origin, destination, optional max_distance_km",
+      "output": "distance_km, estimated_duration_minutes, within_limit",
+      "capabilities": ["distance_check"],
+      "side_effect_level": "none",
+      "retry_policy": {
+        "max_retries": 1,
+        "backoff_ms": 250,
+        "retry_on": ["timeout", "connection_error", "rate_limit"]
+      },
+      "allows_goal_injection": false
+    }
+  }
+}

@@ -579,6 +579,65 @@ def mail_classify(
     }
 
 
+def mail_compose_clarification(
+    *,
+    missing_fields: List[str] | None = None,
+    known_facts: Dict[str, object] | None = None,
+    salutation: str = "Guten Tag",
+    closing: str = "Mit freundlichen Grüßen",
+) -> Dict[str, object]:
+    missing = [str(x).strip() for x in (missing_fields or []) if str(x).strip()]
+    facts = dict(known_facts or {})
+
+    prompts = {
+        "event_date": "An welchem Datum soll die Veranstaltung stattfinden?",
+        "start_time": "Um wie viel Uhr soll der Einsatz beginnen?",
+        "duration_hours": "Wie viele Stunden wird der Einsatz voraussichtlich dauern?",
+        "location": "Wo genau findet die Veranstaltung statt (Adresse/Ort)?",
+        "occasion": "Welcher Anlass liegt vor (z. B. Hochzeit, Geburtstag, Firmenevent)?",
+        "client_name": "Auf welchen Namen soll das Angebot ausgestellt werden?",
+        "price_confirmed": "Bestätigen Sie bitte, dass die kommunizierten Preise für Sie in Ordnung sind.",
+        "overnight_confirmed": "Bestätigen Sie bitte die Übernachtungspauschale.",
+        "attendees_count": "Mit wie vielen Gästen planen Sie ungefähr?",
+    }
+
+    questions: List[str] = []
+    for key in missing:
+        questions.append(prompts.get(key, f"Bitte ergänzen Sie folgende Angabe: {key}."))
+    if not questions:
+        questions.append("Könnten Sie bitte die noch offenen Buchungsdetails ergänzen?")
+
+    known_lines: List[str] = []
+    for key in ("event_date", "start_time", "duration_hours", "location", "occasion"):
+        val = facts.get(key)
+        if val in (None, ""):
+            continue
+        known_lines.append(f"- {key}: {val}")
+
+    lines = [str(salutation or "Guten Tag").strip() + ",", ""]
+    lines.append("vielen Dank für Ihre Anfrage. Für eine verbindliche Terminbestätigung fehlen noch folgende Angaben:")
+    lines.append("")
+    for i, q in enumerate(questions, start=1):
+        lines.append(f"{i}. {q}")
+    if known_lines:
+        lines.extend(["", "Bisher bekannte Angaben:", *known_lines])
+    lines.extend(
+        [
+            "",
+            "Sobald diese Punkte geklärt sind, kann ich den Termin prüfen und verbindlich bestätigen.",
+            "",
+            str(closing or "Mit freundlichen Grüßen").strip(),
+        ]
+    )
+    body = "\n".join(lines).strip()
+    return {
+        "body": body,
+        "questions": questions,
+        "missing_fields": missing,
+        "text": body,
+    }
+
+
 def _mark_answered_flag(*, mail_id: str, mailbox: str) -> bool:
     imap_host = os.getenv("IMAP_HOST", "").strip() or os.getenv("SMTP_HOST", "").strip()
     if not imap_host:

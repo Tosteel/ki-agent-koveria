@@ -1,0 +1,16 @@
+{
+  "name": "Pricing",
+  "version": "1.0",
+  "description": "Preisberechnung für Booking-Anfragen.",
+  "owner": "team",
+  "tools": {
+    "pricing_compute_quote": {
+      "name": "Quote berechnen",
+      "input": "facts, pricing_rules, booking_rules, distance_km",
+      "output": "total_eur, breakdown, overnight_included",
+      "capabilities": ["pricing_compute"],
+      "side_effect_level": "none",
+      "allows_goal_injection": false
+    }
+  }
+}

@@ -131,6 +131,21 @@ def _gmail_request(
     return data if isinstance(data, dict) else {}
 
 
+def _mark_message_read(mail_id: str) -> None:
+    mid = str(mail_id or "").strip()
+    if not mid:
+        return
+    try:
+        _gmail_request(
+            method="POST",
+            path=f"/messages/{mid}/modify",
+            json_payload={"removeLabelIds": ["UNREAD"]},
+        )
+    except Exception:
+        # Non-fatal: sending a reply succeeded even if label update fails.
+        return
+
+
 def _headers_map(msg_payload: Dict[str, Any]) -> Dict[str, str]:
     out: Dict[str, str] = {}
     headers = msg_payload.get("headers") if isinstance(msg_payload.get("headers"), list) else []
@@ -536,7 +551,7 @@ def answer_mail(
     raw = _build_raw_message(
         to=recipients,
         subject=final_subject,
-        body=str(body or ""),
+        body=str(body or "").strip(),
         cc=cc,
         is_html=bool(is_html),
         in_reply_to=in_reply_to,
@@ -549,6 +564,7 @@ def answer_mail(
         payload["threadId"] = thread_id
 
     data = _gmail_request(method="POST", path="/messages/send", json_payload=payload)
+    _mark_message_read(mail_id)
     return {
         "sent": True,
         "message_id": str(data.get("id") or ""),
@@ -556,4 +572,3 @@ def answer_mail(
         "to": recipients,
         "subject": final_subject,
     }
-

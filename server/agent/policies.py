@@ -16,16 +16,29 @@ BASIC_TOOLS = {
     "web_search_page",
     "web_crawl_site",
     "web_crawl_site_whitelist",
+    "distance_check",
+    "pricing_compute_quote",
+    "booking_extract_facts",
+    "booking_validate_completeness",
+    "booking_booking_validate_completness",
+    "booking_decision_engine",
+    "booking_descision_enginge",
     "mail_send",
     "mail_answer",
     "mail_fetch_inbox",
     "mail_fetch_unanswered",
+    "mail_compose_clarification",
     "gmail_send_mail",
     "gmail_answer_mail",
     "gmail_fetch_inbox_mails",
     "gmail_fetch_unanswered_mails",
     "gmail_read_mail",
     "gmail_read_mail_thread",
+    "calendar_check_availability",
+    "calendar_create_event",
+    "calendar_propose_slots",
+    "calendar_hold_event",
+    "calender_hold_event",
     "customer_support_reply_score",
     "customer_support_review_ticket_create",
     "customer_support_review_ticket_update",
@@ -86,4 +99,4 @@ OFFER_FLOW = {
 
 def tools_allowed(tool_name: str) -> bool:
     name = str(tool_name or "").strip()
-    return bool(name in BASIC_TOOLS or COMPETITIVE_ANALYSIS_TOOLS or name.startswith("agent_"))
+    return bool(name in BASIC_TOOLS or name in COMPETITIVE_ANALYSIS_TOOLS or name.startswith("agent_"))

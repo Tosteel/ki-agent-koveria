@@ -235,6 +235,56 @@ def calendar_create_event(
     }
 
 
+def calendar_hold_event(
+    *,
+    summary: str,
+    start_iso: str,
+    end_iso: str,
+    description: str = "",
+    location: str = "",
+    attendees: List[str] | None = None,
+    calendar_id: str = "primary",
+    timezone_name: str = "Europe/Berlin",
+    hold_minutes: int = 90,
+    send_updates: str = "none",
+) -> Dict[str, Any]:
+    start = _parse_iso(start_iso)
+    end = _parse_iso(end_iso)
+    if end <= start:
+        raise HTTPException(status_code=422, detail="end_iso must be after start_iso")
+
+    hold_minutes = max(15, min(int(hold_minutes or 90), 1440))
+    hold_expires_at = _to_iso(start + timedelta(minutes=hold_minutes))
+    hold_summary = f"[HOLD] {str(summary or '').strip()}"
+    hold_description = (
+        f"{str(description or '').strip()}\n\n"
+        f"HOLD expires: {hold_expires_at}\n"
+        "This is a tentative reservation pending final confirmation."
+    ).strip()
+
+    created = calendar_create_event(
+        summary=hold_summary,
+        start_iso=_to_iso(start),
+        end_iso=_to_iso(end),
+        description=hold_description,
+        location=location,
+        attendees=attendees or [],
+        calendar_id=calendar_id,
+        timezone_name=timezone_name,
+        send_updates=send_updates,
+    )
+    return {
+        "hold_created": bool(created.get("created")),
+        "hold_expires_at": hold_expires_at,
+        "event_id": str(created.get("event_id") or ""),
+        "html_link": str(created.get("html_link") or ""),
+        "status": str(created.get("status") or ""),
+        "start_iso": str(created.get("start_iso") or ""),
+        "end_iso": str(created.get("end_iso") or ""),
+        "text": f"Hold {'created' if created.get('created') else 'not created'}: {created.get('event_id') or '-'}",
+    }
+
+
 def _slots_from_busy(
     *,
     window_start: datetime,

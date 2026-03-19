@@ -52,6 +52,30 @@ class CalendarCreateEventResponse(BaseModel):
     text: str = ""
 
 
+class CalendarHoldEventRequest(BaseModel):
+    summary: str = Field(..., min_length=1)
+    start_iso: str = Field(..., min_length=10)
+    end_iso: str = Field(..., min_length=10)
+    description: str = ""
+    location: str = ""
+    attendees: List[str] = Field(default_factory=list)
+    calendar_id: str = Field(default="primary")
+    timezone: str = Field(default="Europe/Berlin")
+    hold_minutes: int = Field(default=90, ge=15, le=1440)
+    send_updates: str = Field(default="none")
+
+
+class CalendarHoldEventResponse(BaseModel):
+    hold_created: bool = False
+    hold_expires_at: str = ""
+    event_id: str = ""
+    html_link: str = ""
+    status: str = ""
+    start_iso: str = ""
+    end_iso: str = ""
+    text: str = ""
+
+
 class CalendarProposeSlotsRequest(BaseModel):
     start_iso: str = Field(..., min_length=10, description="Suchfenster Start als ISO-8601.")
     end_iso: str = Field(..., min_length=10, description="Suchfenster Ende als ISO-8601.")
@@ -73,4 +97,3 @@ class CalendarProposeSlotsResponse(BaseModel):
     duration_minutes: int = 30
     slots: List[CalendarSlot] = Field(default_factory=list)
     text: str = ""
-

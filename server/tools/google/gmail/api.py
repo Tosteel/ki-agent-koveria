@@ -126,4 +126,3 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         return GmailReadThreadResponse(**result)
 
     return router
-
