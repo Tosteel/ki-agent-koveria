@@ -18,7 +18,7 @@ from .models import (
 def register(registry: ToolRegistry) -> None:
     def tool_booking_extract_facts(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = BookingExtractFactsRequest(**args)
-        result = booking_extract_facts(text=req.text, timezone_name=req.timezone)
+        result = booking_extract_facts(text=req.text, timezone_name=req.timezone, required_fields=req.required_fields)
         return BookingExtractFactsResponse(**result).model_dump()
 
     def tool_booking_validate_completeness(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -34,6 +34,7 @@ def register(registry: ToolRegistry) -> None:
             completeness=req.completeness,
             distance=req.distance,
             quote=req.quote,
+            require_price_confirmation=req.require_price_confirmation,
         )
         return BookingDecisionEngineResponse(**result).model_dump()
 

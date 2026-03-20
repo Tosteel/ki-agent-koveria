@@ -6,7 +6,7 @@
   "tools": {
     "booking_extract_facts": {
       "name": "Booking-Fakten extrahieren",
-      "input": "text, optional timezone",
+      "input": "text, optional timezone, optional required_fields",
       "output": "strukturierte facts + confidence",
       "capabilities": ["booking_fact_extraction"],
       "side_effect_level": "none",
@@ -33,7 +33,7 @@
     },
     "booking_decision_engine": {
       "name": "Booking-Entscheidung",
-      "input": "facts, profile_rules, completeness, distance, quote",
+      "input": "facts, profile_rules, completeness, distance, quote, optional require_price_confirmation",
       "output": "decision auto_accept|auto_decline|human_review|need_clarification",
       "capabilities": ["booking_decision"],
       "side_effect_level": "none",
@@ -41,7 +41,7 @@
     },
     "booking_descision_enginge": {
       "name": "Booking-Entscheidung (Alias)",
-      "input": "facts, profile_rules, completeness, distance, quote",
+      "input": "facts, profile_rules, completeness, distance, quote, optional require_price_confirmation",
       "output": "decision auto_accept|auto_decline|human_review|need_clarification",
       "capabilities": ["booking_decision"],
       "side_effect_level": "none",

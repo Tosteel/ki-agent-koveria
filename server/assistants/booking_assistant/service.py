@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
@@ -12,9 +13,11 @@ from server.agent.langchain_runtime import dispatch_tool_chain
 from server.agent.tool_registry import ToolContext, ToolRegistry
 from server.core.settings import Settings
 from server.services.agent_service import build_registry
+from server.services.llm_ionos import IonosLLM
 
 from .models import (
     BookingAssistantApproveRequest,
+    BookingAssistantCounterofferRequest,
     BookingAssistantRejectRequest,
     BookingAssistantReviewActionResponse,
     BookingAssistantReviewItem,
@@ -121,7 +124,7 @@ def _default_profile(name: str, codename: str = "") -> Dict[str, Any]:
         "instructions": [
             "Du bist ein Event-DJ Booking-Assistent.",
             "Bestätige Termine erst, wenn alle Pflichtangaben vollständig sind.",
-            "Kommuniziere Preise transparent und verlange eine Preisbestätigung.",
+            "Kommuniziere Preise transparent und verlange eine Angebotsbestätigung.",
             "Bei Regelverletzungen oder Unsicherheit immer Human Review.",
         ],
         "rules": {
@@ -268,7 +271,8 @@ def _read_mail_context(
             parts.append("THREAD:\n" + t)
         msgs = thread.get("messages") if isinstance(thread.get("messages"), list) else []
         fact_parts: List[str] = []
-        for item in msgs:
+        # Newest-first helps downstream extraction prefer the latest user-provided facts.
+        for item in reversed(msgs):
             if not isinstance(item, dict):
                 continue
             subj = str(item.get("subject") or "").strip()
@@ -411,6 +415,7 @@ def _build_review(
     score: Dict[str, Any],
     sources: List[str],
     reason: str,
+    action_templates: Dict[str, str] | None = None,
     ticket_id: str = "",
 ) -> Dict[str, Any]:
     now = _now_iso()
@@ -431,6 +436,7 @@ def _build_review(
         "sources": list(sources),
         "ticket_id": ticket_id,
         "reason": reason,
+        "action_templates": dict(action_templates or {}),
         "sent": False,
         "send_result": {},
     }
@@ -471,16 +477,271 @@ def _compose_info_reply(
     return str(out.get("text") or "").strip()
 
 
-def _compose_decision_mail(*, decision: str, reasons: List[str], quote_text: str, hold_link: str = "") -> str:
+def _weekday_name_de(date_iso: str) -> str:
+    raw = str(date_iso or "").strip()
+    if not raw:
+        return ""
+    try:
+        dt = datetime.fromisoformat(raw)
+    except Exception:
+        try:
+            dt = datetime.strptime(raw, "%Y-%m-%d")
+        except Exception:
+            return ""
+    names = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+    return names[dt.weekday()]
+
+
+def _next_weekend_dates(date_iso: str, *, count: int = 3) -> List[str]:
+    base: datetime | None = None
+    raw = str(date_iso or "").strip()
+    if raw:
+        try:
+            base = datetime.fromisoformat(raw)
+        except Exception:
+            try:
+                base = datetime.strptime(raw, "%Y-%m-%d")
+            except Exception:
+                base = None
+    if base is None:
+        base = datetime.now()
+
+    out: List[str] = []
+    cursor = base + timedelta(days=1)
+    max_days = 90
+    checked = 0
+    while len(out) < max(1, count) and checked < max_days:
+        if cursor.weekday() >= 5:
+            out.append(cursor.strftime("%Y-%m-%d"))
+        cursor += timedelta(days=1)
+        checked += 1
+    return out
+
+
+def _llm_classify_counteroffer_acceptance(*, latest_body_text: str, thread_text: str) -> Dict[str, Any]:
+    client = IonosLLM()
+    if not client.enabled():
+        return {
+            "accepted": False,
+            "confidence": 0.0,
+            "reason": "llm_unavailable",
+            "model": "",
+        }
+
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "booking_counteroffer_acceptance",
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "accepted": {"type": "boolean"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "reason": {"type": "string"},
+                },
+                "required": ["accepted", "confidence", "reason"],
+            },
+            "strict": True,
+        },
+    }
+
+    prompt = (
+        "Entscheide, ob die LETZTE Kundenantwort einen zuvor gemachten Gegen-Vorschlag "
+        "(Counteroffer) eindeutig annimmt.\n"
+        "- true nur bei klarer Zustimmung zur vorgeschlagenen Anpassung.\n"
+        "- false bei Unklarheit, Rückfragen, neuem Gegenvorschlag oder Themenwechsel.\n\n"
+        f"Letzte Kundenantwort:\n{latest_body_text.strip()}\n\n"
+        f"Thread-Kontext:\n{thread_text[:4000]}"
+    )
+    try:
+        completion = client.chat_completions(
+            messages=[
+                {"role": "system", "content": "Du bist ein präziser Klassifikator. Antworte strikt im JSON-Schema."},
+                {"role": "user", "content": prompt},
+            ],
+            response_format=response_format,
+            max_tokens=140,
+            temperature=0.0,
+            top_p=0.1,
+        )
+        raw = IonosLLM.extract_text(completion)
+        parsed = json.loads(raw) if raw else {}
+        return {
+            "accepted": bool(parsed.get("accepted")),
+            "confidence": max(0.0, min(1.0, float(parsed.get("confidence") or 0.0))),
+            "reason": str(parsed.get("reason") or "").strip(),
+            "model": client.cfg.model,
+        }
+    except Exception as exc:
+        return {
+            "accepted": False,
+            "confidence": 0.0,
+            "reason": f"llm_error:{exc}",
+            "model": client.cfg.model if client.enabled() else "",
+        }
+
+
+def _extract_counteroffer_max_duration(thread_text: str) -> float | None:
+    raw = str(thread_text or "")
+    if not raw:
+        return None
+    # Example: "- Einsatzdauer: max. 8.0 Stunden statt 12.0 Stunden"
+    m = re.search(r"max\.?\s*(\d+(?:[.,]\d+)?)\s*stunden\s*statt", raw, re.IGNORECASE)
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", "."))
+    except Exception:
+        return None
+
+
+def _llm_classify_offer_confirmation(*, latest_body_text: str, thread_text: str) -> Dict[str, Any]:
+    client = IonosLLM()
+    if not client.enabled():
+        return {
+            "offer_present_in_thread": False,
+            "offer_accepted_by_latest_reply": False,
+            "confidence": 0.0,
+            "reason": "llm_unavailable",
+            "model": "",
+        }
+
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "booking_offer_confirmation_gate",
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "offer_present_in_thread": {"type": "boolean"},
+                    "offer_accepted_by_latest_reply": {"type": "boolean"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "reason": {"type": "string"},
+                },
+                "required": [
+                    "offer_present_in_thread",
+                    "offer_accepted_by_latest_reply",
+                    "confidence",
+                    "reason",
+                ],
+            },
+            "strict": True,
+        },
+    }
+
+    prompt = (
+        "Prüfe im Booking-Mailverlauf zwei Punkte:\n"
+        "1) Wurde zuvor im Thread ein konkretes Angebot kommuniziert?\n"
+        "2) Nimmt die LETZTE Kundenantwort dieses Angebot verbindlich an?\n\n"
+        "Wichtig:\n"
+        "- Beurteile die Annahme nur anhand der letzten Kundenantwort, nutze den Rest nur als Kontext.\n"
+        "- Bei Unklarheit oder nur teilweiser Zustimmung -> offer_accepted_by_latest_reply=false.\n\n"
+        f"Letzte Kundenantwort:\n{latest_body_text.strip()}\n\n"
+        f"Thread-Kontext:\n{thread_text[:5000]}"
+    )
+    try:
+        completion = client.chat_completions(
+            messages=[
+                {"role": "system", "content": "Du bist ein präziser Klassifikator. Antworte strikt im JSON-Schema."},
+                {"role": "user", "content": prompt},
+            ],
+            response_format=response_format,
+            max_tokens=180,
+            temperature=0.0,
+            top_p=0.1,
+        )
+        raw = IonosLLM.extract_text(completion)
+        parsed = json.loads(raw) if raw else {}
+        return {
+            "offer_present_in_thread": bool(parsed.get("offer_present_in_thread")),
+            "offer_accepted_by_latest_reply": bool(parsed.get("offer_accepted_by_latest_reply")),
+            "confidence": max(0.0, min(1.0, float(parsed.get("confidence") or 0.0))),
+            "reason": str(parsed.get("reason") or "").strip(),
+            "model": client.cfg.model,
+        }
+    except Exception as exc:
+        return {
+            "offer_present_in_thread": False,
+            "offer_accepted_by_latest_reply": False,
+            "confidence": 0.0,
+            "reason": f"llm_error:{exc}",
+            "model": client.cfg.model if client.enabled() else "",
+        }
+
+
+def _apply_counteroffer_acceptance(
+    *,
+    facts: Dict[str, Any],
+    latest_body_text: str,
+    thread_text: str,
+) -> tuple[Dict[str, Any], bool, str]:
+    out = dict(facts or {})
+    cls = _llm_classify_counteroffer_acceptance(latest_body_text=latest_body_text, thread_text=thread_text)
+    accepted = bool(cls.get("accepted"))
+    confidence = float(cls.get("confidence") or 0.0)
+    if not accepted or confidence < 0.7:
+        return out, False, ""
+    max_duration = _extract_counteroffer_max_duration(thread_text)
+    if max_duration is None or max_duration <= 0:
+        return out, False, ""
+
+    current_duration = 0.0
+    try:
+        current_duration = float(out.get("duration_hours") or 0.0)
+    except Exception:
+        current_duration = 0.0
+
+    changed = False
+    if current_duration <= 0 or current_duration > max_duration:
+        out["duration_hours"] = max_duration
+        changed = True
+    out["counteroffer_accepted"] = True
+    note = (
+        f"counteroffer_acceptance_applied:max_duration={max_duration:.1f};"
+        f"confidence={confidence:.2f};reason={str(cls.get('reason') or '').strip()}"
+    )
+    return out, changed, note
+
+
+def _compose_decision_mail(
+    *,
+    decision: str,
+    reasons: List[str],
+    quote_text: str,
+    hold_link: str = "",
+    event_date: str = "",
+    repeated_same_rule: bool = False,
+) -> str:
     rs = "\n".join(f"- {r}" for r in reasons if r)
     if decision == "auto_decline":
+        weekend_rule = any("wochenende" in str(r).lower() for r in reasons)
+        if weekend_rule:
+            weekday = _weekday_name_de(event_date)
+            suggestions = _next_weekend_dates(event_date, count=3)
+            intro = (
+                "Vielen Dank für Ihre Rückmeldung. Wie bereits erwähnt kann ich den Termin unter diesen Bedingungen nicht zusagen."
+                if repeated_same_rule
+                else "Vielen Dank für Ihre Anfrage. Leider kann ich den Termin auf Basis der aktuellen Rahmenbedingungen nicht zusagen."
+            )
+            lines = [intro, "", "Gründe:", rs]
+            if event_date:
+                weekday_info = f"{event_date} ist ein {weekday}." if weekday else f"{event_date} liegt nicht am Wochenende."
+                lines.extend(["", f"Hinweis: {weekday_info}"])
+            if suggestions:
+                lines.extend(["", "Mögliche Wochenend-Alternativen:"])
+                lines.extend(f"- {d}" for d in suggestions)
+            lines.extend(["", "Wenn Sie möchten, wählen Sie einen der Vorschläge oder nennen Sie einen anderen Wochenendtermin."])
+            return "\n".join(lines).strip()
+
         return (
             "Vielen Dank für Ihre Anfrage. Leider kann ich den Termin auf Basis der aktuellen Rahmenbedingungen nicht zusagen.\n\n"
             f"Gründe:\n{rs}\n\n"
             "Wenn Sie möchten, können wir eine alternative Anfrage mit angepassten Rahmenbedingungen prüfen."
         ).strip()
     if decision == "auto_accept":
-        link_line = f"\nKalender-Hold: {hold_link}" if hold_link else ""
+        link_line = f"\nKalender-Link: {hold_link}" if hold_link else ""
         return (
             "Vielen Dank für Ihre Anfrage. Der Termin wurde im Kalender reserviert.\n\n"
             f"Preisübersicht:\n{quote_text}{link_line}\n\n"
@@ -497,14 +758,138 @@ def _compose_quote_confirmation_mail(*, quote_text: str, reasons: List[str] | No
     reason_block = ""
     if rs:
         reason_block = "Hinweise:\n" + "\n".join(f"- {r}" for r in rs) + "\n\n"
+    offer_block = str(quote_text or "").strip()
+    if offer_block:
+        offer_text = "Hier ist das konkrete Angebot:\n" + offer_block + "\n\n"
+        confirm_text = (
+            "Bitte bestätigen Sie das Angebot kurz schriftlich. "
+            "Erst danach reserviere ich den Termin verbindlich im Kalender."
+        )
+    else:
+        offer_text = "Das konkrete Angebot wird gerade vorbereitet.\n\n"
+        confirm_text = (
+            "Sobald das Angebot vorliegt, erhalten Sie es zur Bestätigung."
+        )
     return (
         "Vielen Dank, alle wichtigen Veranstaltungsdaten liegen vor.\n\n"
         f"{reason_block}"
-        "Hier ist das konkrete Angebot:\n"
-        f"{quote_text}\n\n"
-        "Bitte bestätigen Sie den Preis kurz schriftlich. "
-        "Erst danach reserviere ich den Termin verbindlich im Kalender."
+        f"{offer_text}"
+        f"{confirm_text}"
     ).strip()
+
+
+def _build_review_action_templates(
+    *,
+    booking_decision: str,
+    draft_body: str,
+    facts: Dict[str, Any],
+    booking_rules: Dict[str, Any],
+    quote_text: str,
+) -> Dict[str, str]:
+    event_date = str(facts.get("event_date") or "").strip()
+    start_time = str(facts.get("start_time") or "").strip()
+    location = str(facts.get("location") or "").strip()
+    occasion = str(facts.get("occasion") or "Event").strip()
+    client_name = str(facts.get("client_name") or "").strip()
+    price_confirmed = bool(facts.get("price_confirmed"))
+    max_duration = float(booking_rules.get("max_duration_hours") or 8.0)
+    facts_duration = float(facts.get("duration_hours") or 0.0)
+    detail_parts: List[str] = []
+    if event_date:
+        detail_parts.append(event_date)
+    if start_time:
+        detail_parts.append(start_time)
+    if location:
+        detail_parts.append(location)
+    base_event_line = ", ".join(detail_parts).strip(", ")
+
+    salutation = "Guten Tag"
+    if client_name:
+        salutation = f"Guten Tag {client_name}"
+
+    approve_lines = [f"{salutation},", "", "vielen Dank für Ihre Anfrage."]
+    if base_event_line:
+        approve_lines.append(f"Ich kann Ihnen den Termin ({base_event_line}) grundsätzlich zusagen.")
+    else:
+        approve_lines.append("Ich kann Ihnen den angefragten Termin grundsätzlich zusagen.")
+    if facts_duration > 0:
+        approve_lines.append(f"Der Einsatz ist mit {facts_duration:.1f} Stunden eingeplant.")
+    if quote_text.strip():
+        approve_lines.extend(["", "Vereinbarte Preisübersicht:", quote_text.strip()])
+    if quote_text.strip() and price_confirmed:
+        approve_lines.extend(
+            [
+                "",
+                "Die Buchung ist damit verbindlich bestätigt. Ich freue mich auf die Veranstaltung.",
+            ]
+        )
+    elif quote_text.strip() and not price_confirmed:
+        approve_lines.extend(
+            [
+                "",
+                "Bitte bestätigen Sie das Angebot kurz schriftlich. "
+                "Direkt danach bestätige ich den Termin verbindlich.",
+            ]
+        )
+    else:
+        approve_lines.extend(
+            [
+                "",
+                "Als nächsten Schritt erhalten Sie das konkrete Angebot. "
+                "Nach Ihrer Angebotsbestätigung bestätige ich den Termin verbindlich.",
+            ]
+        )
+    approve = "\n".join(approve_lines).strip()
+
+    reject = (
+        "Vielen Dank für Ihre Anfrage.\n\n"
+        "Nach Prüfung kann ich den Auftrag unter den aktuell angefragten Rahmenbedingungen "
+        "leider nicht verbindlich bestätigen.\n\n"
+        "Wenn Sie möchten, sende ich Ihnen gern einen Alternativvorschlag."
+    ).strip()
+
+    counteroffer_lines = [
+        "Vielen Dank für Ihre Anfrage.",
+        "",
+        "Ich kann Ihnen folgenden angepassten Vorschlag anbieten:",
+    ]
+    if base_event_line:
+        counteroffer_lines.append(f"- Terminrahmen: {base_event_line}")
+    if facts_duration > max_duration:
+        counteroffer_lines.append(f"- Einsatzdauer: max. {max_duration:.1f} Stunden statt {facts_duration:.1f} Stunden")
+    if quote_text.strip():
+        counteroffer_lines.extend(["", "Preisübersicht (bei angepasster Anfrage):", quote_text.strip()])
+    counteroffer_lines.extend(
+        [
+            "",
+            "Wenn der Vorschlag für Sie passt, bestätigen Sie ihn bitte kurz schriftlich.",
+        ]
+    )
+    counteroffer = "\n".join(counteroffer_lines).strip()
+
+    if booking_decision == "auto_decline":
+        approve = "\n".join(
+            [
+                f"{salutation},",
+                "",
+                "vielen Dank für Ihre Anfrage.",
+                "Ich bestätige den Auftrag ausnahmsweise trotz Abweichung von den Standardregeln.",
+                "",
+                "Bitte betrachten Sie diese Zusage als individuelle Freigabe.",
+            ]
+        ).strip()
+    elif booking_decision == "need_clarification":
+        reject = (
+            "Vielen Dank für Ihre Anfrage.\n\n"
+            "Ohne die fehlenden Angaben kann ich den Auftrag leider nicht bestätigen."
+        ).strip()
+
+    return {
+        "approve": approve,
+        "reject": reject,
+        "counteroffer": counteroffer,
+        "default": draft_body.strip(),
+    }
 
 
 def _combine_start_end_iso(facts: Dict[str, Any]) -> tuple[str, str]:
@@ -522,6 +907,45 @@ def _combine_start_end_iso(facts: Dict[str, Any]) -> tuple[str, str]:
         duration = 4.0
     end_dt = start_dt + timedelta(hours=duration)
     return start_dt.isoformat(), end_dt.isoformat()
+
+
+def _is_weekend_date(date_iso: str) -> bool | None:
+    raw = str(date_iso or "").strip()
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw)
+    except Exception:
+        try:
+            dt = datetime.strptime(raw, "%Y-%m-%d")
+        except Exception:
+            return None
+    return dt.weekday() >= 5
+
+
+def _early_booking_rule_decision(*, facts: Dict[str, Any], booking_rules: Dict[str, Any]) -> tuple[str, List[str]]:
+    reasons: List[str] = []
+    weekend_only = bool(booking_rules.get("weekend_only", True))
+    date_iso = str(facts.get("event_date") or "").strip()
+    if weekend_only and date_iso:
+        is_weekend = _is_weekend_date(date_iso)
+        if is_weekend is False:
+            reasons.append("Buchungen sind nur am Wochenende möglich.")
+            return "auto_decline", reasons
+
+    try:
+        duration = float(facts.get("duration_hours") or 0.0)
+    except Exception:
+        duration = 0.0
+    try:
+        max_duration = float(booking_rules.get("max_duration_hours") or 8.0)
+    except Exception:
+        max_duration = 8.0
+    if duration > 0 and duration > max_duration:
+        reasons.append(f"Anfrage überschreitet Maximaldauer ({duration:.1f}h > {max_duration:.1f}h).")
+        return "human_review", reasons
+
+    return "", reasons
 
 
 def _find_existing_hold(
@@ -589,6 +1013,70 @@ def _remember_hold(
     if len(holds) > max_items:
         holds = holds[-max_items:]
     state["holds"] = holds
+
+
+def _get_thread_booking_context(*, state: Dict[str, Any], thread_id: str) -> Dict[str, Any]:
+    if not thread_id:
+        return {}
+    items = state.get("thread_booking_contexts")
+    if not isinstance(items, list):
+        return {}
+    for entry in reversed(items):
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("thread_id") or "").strip() != thread_id:
+            continue
+        facts = entry.get("facts")
+        if isinstance(facts, dict):
+            return dict(facts)
+    return {}
+
+
+def _remember_thread_booking_context(
+    *,
+    state: Dict[str, Any],
+    thread_id: str,
+    facts: Dict[str, Any],
+    max_items: int = 500,
+) -> None:
+    if not thread_id:
+        return
+    keys = ("event_date", "start_time", "duration_hours", "location", "occasion", "client_name", "price_confirmed")
+    compact: Dict[str, Any] = {}
+    for key in keys:
+        value = facts.get(key)
+        if value in (None, "", 0, 0.0, False):
+            continue
+        compact[key] = value
+    if not compact:
+        return
+
+    items = state.get("thread_booking_contexts")
+    if not isinstance(items, list):
+        items = []
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("thread_id") or "").strip() != thread_id:
+            continue
+        existing = entry.get("facts") if isinstance(entry.get("facts"), dict) else {}
+        merged = dict(existing)
+        merged.update(compact)
+        entry["facts"] = merged
+        entry["updated_at"] = _now_iso()
+        state["thread_booking_contexts"] = items
+        return
+
+    items.append(
+        {
+            "thread_id": thread_id,
+            "facts": compact,
+            "updated_at": _now_iso(),
+        }
+    )
+    if len(items) > max_items:
+        items = items[-max_items:]
+    state["thread_booking_contexts"] = items
 
 
 def _precheck_calendar(
@@ -777,6 +1265,12 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
         draft = ""
         booking_decision = ""
         sources: List[str] = []
+        reasons: List[str] = []
+        action_templates: Dict[str, str] = {}
+        quote_text = ""
+        facts_for_review: Dict[str, Any] = {}
+        repeated_weekend_rule = False
+        priced_offer_in_thread = False
 
         if intent == "info":
             context = _retrieve_web_context(
@@ -811,22 +1305,81 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
                 registry=registry,
                 ctx=ctx,
                 tool="booking_extract_facts",
-                args={"text": extraction_text},
+                args={"text": extraction_text, "required_fields": required_fields},
             )
             facts = facts_out.get("facts") if isinstance(facts_out.get("facts"), dict) else {}
+            facts_for_review = dict(facts)
+            cached_thread_facts = _get_thread_booking_context(state=state, thread_id=mail_thread_id)
+            if cached_thread_facts:
+                for key in ("event_date", "start_time", "duration_hours", "location", "occasion", "client_name"):
+                    if facts.get(key) in (None, "", 0, 0.0) and cached_thread_facts.get(key) not in (None, "", 0, 0.0):
+                        facts[key] = cached_thread_facts.get(key)
+                facts["price_confirmed"] = bool(facts.get("price_confirmed")) or bool(cached_thread_facts.get("price_confirmed"))
             thread_facts_text = str(mail_payload.get("thread_facts_text") or "").strip()
             if thread_facts_text:
                 thread_out = _safe_tool_call(
                     registry=registry,
                     ctx=ctx,
                     tool="booking_extract_facts",
-                    args={"text": thread_facts_text},
+                    args={"text": thread_facts_text, "required_fields": required_fields},
                 )
                 thread_facts = thread_out.get("facts") if isinstance(thread_out.get("facts"), dict) else {}
                 for key in ("event_date", "start_time", "duration_hours", "location", "occasion", "client_name"):
                     if facts.get(key) in (None, "", 0, 0.0) and thread_facts.get(key) not in (None, "", 0, 0.0):
                         facts[key] = thread_facts.get(key)
                 facts["price_confirmed"] = bool(facts.get("price_confirmed")) or bool(thread_facts.get("price_confirmed"))
+                repeated_weekend_rule = "buchungen sind nur am wochenende möglich" in thread_facts_text.lower()
+            else:
+                repeated_weekend_rule = "buchungen sind nur am wochenende möglich" in str(mail_payload.get("text") or "").lower()
+            offer_gate = _llm_classify_offer_confirmation(
+                latest_body_text=str(mail_payload.get("body_text") or ""),
+                thread_text=str(mail_payload.get("text") or ""),
+            )
+            offer_gate_conf = float(offer_gate.get("confidence") or 0.0)
+            priced_offer_in_thread = bool(offer_gate.get("offer_present_in_thread")) and offer_gate_conf >= 0.6
+            offer_accepted_latest = bool(offer_gate.get("offer_accepted_by_latest_reply")) and offer_gate_conf >= 0.7
+            if offer_accepted_latest:
+                facts["price_confirmed"] = True
+                _trace_log(
+                    "OFFER ACCEPTANCE GATE",
+                    [
+                        f"mail_id={mail_id}",
+                        f"offer_present={priced_offer_in_thread}",
+                        f"accepted={offer_accepted_latest}",
+                        f"confidence={offer_gate_conf:.2f}",
+                        f"reason={offer_gate.get('reason')}",
+                    ],
+                )
+            adjusted_facts, counteroffer_changed, counteroffer_note = _apply_counteroffer_acceptance(
+                facts=facts,
+                latest_body_text=str(mail_payload.get("body_text") or ""),
+                thread_text=str(mail_payload.get("text") or ""),
+            )
+            if counteroffer_changed:
+                facts = adjusted_facts
+                _trace_log(
+                    "COUNTEROFFER ACCEPTED",
+                    [
+                        f"mail_id={mail_id}",
+                        counteroffer_note or "counteroffer_acceptance_applied",
+                        f"duration_hours={facts.get('duration_hours')}",
+                    ],
+                )
+            if bool(facts.get("price_confirmed")) and not (priced_offer_in_thread and offer_accepted_latest):
+                facts["price_confirmed"] = False
+                _trace_log(
+                    "PRICE CONFIRMATION GATE",
+                    [
+                        f"mail_id={mail_id}",
+                        "price_confirmed_ignored_without_llm_offer_acceptance=true",
+                        f"offer_present={priced_offer_in_thread}",
+                        f"accepted={offer_accepted_latest}",
+                        f"confidence={offer_gate_conf:.2f}",
+                        f"reason={offer_gate.get('reason')}",
+                    ],
+                )
+            facts_for_review = dict(facts)
+            _remember_thread_booking_context(state=state, thread_id=mail_thread_id, facts=facts)
             precheck = _precheck_calendar(registry=registry, ctx=ctx, facts=facts)
             if precheck.get("checked"):
                 _trace_log(
@@ -848,8 +1401,26 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
                 args={"facts": facts, "required_fields": detail_required_fields},
             )
             missing = comp.get("missing_fields") if isinstance(comp.get("missing_fields"), list) else []
+            early_decision, early_reasons = _early_booking_rule_decision(facts=facts, booking_rules=booking_rules)
 
-            if not bool(comp.get("complete")):
+            if early_decision in {"auto_decline", "human_review"}:
+                booking_decision = early_decision
+                reasons = [str(x).strip() for x in early_reasons if str(x).strip()]
+                if booking_decision == "auto_decline":
+                    draft = _compose_decision_mail(
+                        decision=booking_decision,
+                        reasons=reasons,
+                        quote_text="",
+                        event_date=str(facts.get("event_date") or "").strip(),
+                        repeated_same_rule=repeated_weekend_rule,
+                    )
+                else:
+                    draft = (
+                        "Vielen Dank für Ihre Anfrage. "
+                        "Ich habe Ihr Anliegen intern zur persönlichen Prüfung weitergegeben "
+                        "und melde mich zeitnah mit einer verbindlichen Rückmeldung."
+                    ).strip()
+            elif not bool(comp.get("complete")):
                 clar = _safe_tool_call(
                     registry=registry,
                     ctx=ctx,
@@ -906,14 +1477,52 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
                             "distance_km": distance_km,
                         },
                     )
+                    quote_text = str(quote.get("text") or "").strip()
 
+                    # Phase 0: Harte Regeln vor jeder Kundennachricht prüfen.
+                    # So landen kritische Fälle direkt im Human-Review, bevor ein Angebot rausgeht.
+                    pre_dec = _safe_tool_call(
+                        registry=registry,
+                        ctx=ctx,
+                        tool="booking_decision_engine",
+                        args={
+                            "facts": facts,
+                            "profile_rules": booking_rules,
+                            "completeness": comp,
+                            "distance": dist,
+                            "quote": quote,
+                            "require_price_confirmation": False,
+                        },
+                    )
+                    pre_decision = str(pre_dec.get("decision") or "human_review").strip().lower()
+                    reasons = [str(x).strip() for x in (pre_dec.get("reasons") or []) if str(x).strip()]
+
+                    if pre_decision in {"human_review", "auto_decline"}:
+                        booking_decision = pre_decision
+                        if booking_decision == "auto_decline":
+                            draft = _compose_decision_mail(
+                                decision=booking_decision,
+                                reasons=reasons,
+                                quote_text=str(quote.get("text") or ""),
+                                event_date=str(facts.get("event_date") or "").strip(),
+                                repeated_same_rule=repeated_weekend_rule,
+                            )
+                        else:
+                            draft = (
+                                "Vielen Dank für Ihre Anfrage. "
+                                "Ich habe Ihr Anliegen intern zur persönlichen Prüfung weitergegeben "
+                                "und melde mich zeitnah mit einer verbindlichen Rückmeldung."
+                            ).strip()
                     # Phase 1: Sobald Event-Details vollständig sind, Preis senden.
-                    # Phase 2: Erst nach Preisbestätigung reservieren/akzeptieren.
-                    if not bool(facts.get("price_confirmed")):
+                    # Phase 2: Erst nach Angebotsbestätigung reservieren/akzeptieren.
+                    elif not bool(facts.get("price_confirmed")):
                         booking_decision = "need_clarification"
+                        reason = "Angebotsbestätigung ausstehend."
+                        if not priced_offer_in_thread:
+                            reason = "Angebot wurde noch nicht bestätigt."
                         draft = _compose_quote_confirmation_mail(
-                            quote_text=str(quote.get("text") or ""),
-                            reasons=["Preisbestätigung ausstehend."],
+                            quote_text=quote_text,
+                            reasons=[reason],
                         )
                     else:
                         dec = _safe_tool_call(
@@ -926,6 +1535,7 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
                                 "completeness": comp,
                                 "distance": dist,
                                 "quote": quote,
+                                "require_price_confirmation": True,
                             },
                         )
                         booking_decision = str(dec.get("decision") or "human_review").strip().lower()
@@ -942,7 +1552,32 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
                                 end_iso=end_iso,
                             )
                             if existing_hold is not None:
-                                hold_link = str(existing_hold.get("html_link") or "").strip()
+                                existing_event_id = str(existing_hold.get("event_id") or "").strip()
+                                if existing_event_id:
+                                    updated = _safe_tool_call(
+                                        registry=registry,
+                                        ctx=ctx,
+                                        tool="calendar_update_event",
+                                        args={
+                                            "event_id": existing_event_id,
+                                            "calendar_id": "primary",
+                                            "summary": f"DJ Booking: {str(facts.get('occasion') or 'Event')}",
+                                            "description": "Verbindlich bestätigte Buchung aus Booking Assistant",
+                                            "location": str(facts.get("location") or ""),
+                                        },
+                                    )
+                                    hold_link = str(updated.get("html_link") or "").strip() or str(existing_hold.get("html_link") or "").strip()
+                                    _remember_hold(
+                                        state=state,
+                                        thread_id=mail_thread_id,
+                                        mail_id=mail_id,
+                                        start_iso=start_iso,
+                                        end_iso=end_iso,
+                                        event_id=str(updated.get("event_id") or existing_event_id).strip(),
+                                        html_link=hold_link,
+                                    )
+                                else:
+                                    hold_link = str(existing_hold.get("html_link") or "").strip()
                             else:
                                 avail = _safe_tool_call(
                                     registry=registry,
@@ -951,28 +1586,28 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
                                     args={"start_iso": start_iso, "end_iso": end_iso, "calendar_id": "primary"},
                                 )
                                 if bool(avail.get("is_available")):
-                                    hold = _safe_tool_call(
+                                    created = _safe_tool_call(
                                         registry=registry,
                                         ctx=ctx,
-                                        tool="calender_hold_event",
+                                        tool="calendar_create_event",
                                         args={
                                             "summary": f"DJ Booking: {str(facts.get('occasion') or 'Event')}",
                                             "start_iso": start_iso,
                                             "end_iso": end_iso,
                                             "location": str(facts.get("location") or ""),
-                                            "description": "Vorläufige Reservierung aus Booking Assistant",
+                                            "description": "Verbindlich bestätigte Buchung aus Booking Assistant",
                                             "attendees": [from_email] if from_email else [],
                                             "calendar_id": "primary",
                                         },
                                     )
-                                    hold_link = str(hold.get("html_link") or "").strip()
+                                    hold_link = str(created.get("html_link") or "").strip()
                                     _remember_hold(
                                         state=state,
                                         thread_id=mail_thread_id,
                                         mail_id=mail_id,
                                         start_iso=start_iso,
                                         end_iso=end_iso,
-                                        event_id=str(hold.get("event_id") or "").strip(),
+                                        event_id=str(created.get("event_id") or "").strip(),
                                         html_link=hold_link,
                                     )
                                 else:
@@ -981,15 +1616,25 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
                         draft = _compose_decision_mail(
                             decision=booking_decision,
                             reasons=reasons,
-                            quote_text=str(quote.get("text") or ""),
+                            quote_text=quote_text,
                             hold_link=hold_link,
                         )
                     elif booking_decision == "auto_decline":
                         draft = _compose_decision_mail(
                             decision=booking_decision,
                             reasons=reasons,
-                            quote_text=str(quote.get("text") or ""),
+                            quote_text=quote_text,
+                            event_date=str(facts.get("event_date") or "").strip(),
+                            repeated_same_rule=repeated_weekend_rule,
                         )
+                    elif booking_decision == "human_review":
+                        # Interne Regelgründe nie automatisch an Kunden senden.
+                        if not draft:
+                            draft = (
+                                "Vielen Dank für Ihre Anfrage. "
+                                "Ich habe Ihr Anliegen intern zur persönlichen Prüfung weitergegeben "
+                                "und melde mich zeitnah mit einer verbindlichen Rückmeldung."
+                            ).strip()
                     elif booking_decision == "need_clarification":
                         if not draft:
                             clar = _safe_tool_call(
@@ -1000,19 +1645,45 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
                             )
                             draft = str(clar.get("body") or "").strip()
                     else:
-                        draft = _compose_decision_mail(
-                            decision="need_clarification",
-                            reasons=reasons or ["Bitte intern prüfen."],
-                            quote_text=str(quote.get("text") or ""),
-                        )
+                        booking_decision = "human_review"
+                        draft = (
+                            "Vielen Dank für Ihre Anfrage. "
+                            "Ich habe Ihr Anliegen intern zur persönlichen Prüfung weitergegeben "
+                            "und melde mich zeitnah mit einer verbindlichen Rückmeldung."
+                        ).strip()
 
-        score = _score_reply(
-            registry=registry,
-            ctx=ctx,
-            user_message=str(mail_payload.get("text") or "").strip(),
-            draft=draft,
-            sources=sources,
-        )
+                    action_templates = _build_review_action_templates(
+                        booking_decision=booking_decision,
+                        draft_body=draft,
+                        facts=facts_for_review,
+                        booking_rules=booking_rules,
+                        quote_text=quote_text,
+                    )
+
+        if intent != "info" and booking_decision and not action_templates:
+            action_templates = _build_review_action_templates(
+                booking_decision=booking_decision,
+                draft_body=draft,
+                facts=facts_for_review,
+                booking_rules=booking_rules,
+                quote_text=quote_text,
+            )
+
+        if booking_decision == "human_review":
+            score = {
+                "score_total": 0.85,
+                "verdict": "needs_review",
+                "reason": "human_review_required",
+                "raw": {"bypassed": True},
+            }
+        else:
+            score = _score_reply(
+                registry=registry,
+                ctx=ctx,
+                user_message=str(mail_payload.get("text") or "").strip(),
+                draft=draft,
+                sources=sources,
+            )
         score_total = float(score.get("score_total") or 0.0)
         verdict = str(score.get("verdict") or "needs_review").strip().lower()
 
@@ -1063,9 +1734,14 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
             _trace_log("MAIL SENT", [f"mail_id={mail_id}", f"booking_decision={booking_decision or 'info_reply'}"])
             continue
 
-        reason_parts = [str(score.get("reason") or "needs_human_review")]
+        if force_human:
+            reason_parts = ["human_review_required"]
+        else:
+            reason_parts = [str(score.get("reason") or "needs_human_review")]
         if booking_decision:
             reason_parts.append(f"booking_decision={booking_decision}")
+        if booking_decision == "human_review" and reasons:
+            reason_parts.append("booking_reasons=" + "; ".join(reasons))
         if not policy_allowed:
             reason_parts.append("policy_blocked")
         reason_text = " | ".join(x for x in reason_parts if x)
@@ -1105,6 +1781,13 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
             score=score,
             sources=sources,
             reason=reason_text,
+            action_templates=action_templates
+            or {
+                "approve": draft,
+                "reject": "Vielen Dank für Ihre Anfrage. Nach interner Prüfung kann ich diese Anfrage leider nicht zusagen.",
+                "counteroffer": "Vielen Dank für Ihre Anfrage. Gern prüfe ich eine angepasste Variante. Bitte teilen Sie mir mögliche Alternativen mit.",
+                "default": draft,
+            },
             ticket_id=ticket_id,
         )
         add_review(state, review)
@@ -1159,6 +1842,18 @@ def get_reviews(*, user_id: str, settings: Settings, status: str = "pending") ->
     return BookingAssistantReviewsResponse(ok=True, reviews=reviews)
 
 
+def _review_template_body(review: Dict[str, Any], template_key: str, fallback: str = "") -> str:
+    templates = review.get("action_templates")
+    if isinstance(templates, dict):
+        value = str(templates.get(template_key) or "").strip()
+        if value:
+            return value
+        default_value = str(templates.get("default") or "").strip()
+        if default_value:
+            return default_value
+    return str(fallback or "").strip()
+
+
 def approve_review(
     *,
     user_id: str,
@@ -1174,7 +1869,31 @@ def approve_review(
     if str(review.get("status") or "").strip().lower() != "pending":
         raise HTTPException(status_code=409, detail="Review is not pending")
 
-    body = str(req.edited_body or "").strip() or str(review.get("draft_body") or "").strip()
+    has_manual_body = bool(str(req.edited_body or "").strip())
+    body = str(req.edited_body or "").strip() or _review_template_body(
+        review,
+        "approve",
+        fallback=str(review.get("draft_body") or ""),
+    )
+    if (
+        str(review.get("booking_decision") or "").strip().lower() == "human_review"
+        and body
+        and not has_manual_body
+        and (
+            body.strip() == str(review.get("draft_body") or "").strip()
+            or "finalen Abschluss" in body
+            or "Preisbestätigung" in body
+            or "Angebotsbestätigung" in body
+            or "persönlichen Prüfung weitergegeben" in body
+            or ("verbindlich bestätigt" in body.lower() and "preisübersicht" not in body.lower())
+        )
+    ):
+        body = (
+            "Guten Tag,\n\n"
+            "vielen Dank für Ihre Anfrage. Ich kann Ihnen den angefragten Termin grundsätzlich zusagen.\n\n"
+            "Als nächsten Schritt erhalten Sie das konkrete Angebot. "
+            "Nach Ihrer Angebotsbestätigung bestätige ich den Termin verbindlich."
+        ).strip()
     if not body:
         raise HTTPException(status_code=422, detail="No draft body available for approval")
 
@@ -1200,6 +1919,7 @@ def approve_review(
     review["sent"] = bool(send_result.get("sent"))
     review["send_result"] = send_result
     review["draft_body"] = body
+    review["selected_action"] = "approve"
     save_state(settings, user_id, state)
 
     return BookingAssistantReviewActionResponse(
@@ -1214,6 +1934,7 @@ def reject_review(
     *,
     user_id: str,
     settings: Settings,
+    api_key: str,
     review_id: str,
     req: BookingAssistantRejectRequest,
 ) -> BookingAssistantReviewActionResponse:
@@ -1225,17 +1946,101 @@ def reject_review(
         raise HTTPException(status_code=409, detail="Review is not pending")
 
     reason = str(req.reason or "").strip()
+    body = str(req.edited_body or "").strip() or _review_template_body(
+        review,
+        "reject",
+        fallback="Vielen Dank für Ihre Anfrage. Nach interner Prüfung kann ich den Auftrag leider nicht bestätigen.",
+    )
+    subject = str(req.subject or "").strip()
+    send_to_customer = bool(req.send_to_customer)
+
+    send_result: Dict[str, Any] = {}
+    if send_to_customer:
+        registry = build_registry(settings=settings, user_id=user_id)
+        ctx = ToolContext(user_id=user_id, settings=settings, api_key=api_key, goal="booking_assistant_review_reject")
+        policy = _policy_check(registry=registry, ctx=ctx, text=body, strict_mode=True)
+        if not bool(policy.get("allowed")):
+            raise HTTPException(status_code=422, detail="manual_reject_blocked_by_policy")
+        args: Dict[str, Any] = {
+            "mail_id": str(review.get("mail_id") or ""),
+            "mailbox": str(review.get("mailbox") or "INBOX"),
+            "body": body,
+        }
+        if subject:
+            args["subject"] = subject
+        send_result = _tool_call(registry=registry, ctx=ctx, tool="gmail_answer_mail", args=args)
+
     review["status"] = "rejected"
     review["updated_at"] = _now_iso()
     if reason:
         review["reason"] = reason
-    review["sent"] = False
+    review["sent"] = bool(send_result.get("sent"))
+    review["send_result"] = send_result
+    review["selected_action"] = "reject"
+    review["draft_body"] = body
     save_state(settings, user_id, state)
 
     return BookingAssistantReviewActionResponse(
         ok=True,
         review_id=str(review.get("id") or review_id),
         status=str(review.get("status") or "rejected"),
-        sent=False,
+        sent=bool(review.get("sent")),
+        reason=str(review.get("reason") or ""),
+    )
+
+
+def counteroffer_review(
+    *,
+    user_id: str,
+    settings: Settings,
+    api_key: str,
+    review_id: str,
+    req: BookingAssistantCounterofferRequest,
+) -> BookingAssistantReviewActionResponse:
+    state = load_state(settings, user_id)
+    review = find_review(state, review_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="Review not found")
+    if str(review.get("status") or "").strip().lower() != "pending":
+        raise HTTPException(status_code=409, detail="Review is not pending")
+
+    body = str(req.edited_body or "").strip() or _review_template_body(
+        review,
+        "counteroffer",
+        fallback=str(review.get("draft_body") or ""),
+    )
+    if not body:
+        raise HTTPException(status_code=422, detail="No counteroffer body available")
+
+    registry = build_registry(settings=settings, user_id=user_id)
+    ctx = ToolContext(user_id=user_id, settings=settings, api_key=api_key, goal="booking_assistant_review_counteroffer")
+
+    policy = _policy_check(registry=registry, ctx=ctx, text=body, strict_mode=True)
+    if not bool(policy.get("allowed")):
+        raise HTTPException(status_code=422, detail="manual_counteroffer_blocked_by_policy")
+
+    args: Dict[str, Any] = {
+        "mail_id": str(review.get("mail_id") or ""),
+        "mailbox": str(review.get("mailbox") or "INBOX"),
+        "body": body,
+    }
+    subject = str(req.subject or "").strip()
+    if subject:
+        args["subject"] = subject
+
+    send_result = _tool_call(registry=registry, ctx=ctx, tool="gmail_answer_mail", args=args)
+    review["status"] = "counteroffered"
+    review["updated_at"] = _now_iso()
+    review["sent"] = bool(send_result.get("sent"))
+    review["send_result"] = send_result
+    review["draft_body"] = body
+    review["selected_action"] = "counteroffer"
+    save_state(settings, user_id, state)
+
+    return BookingAssistantReviewActionResponse(
+        ok=True,
+        review_id=str(review.get("id") or review_id),
+        status=str(review.get("status") or "counteroffered"),
+        sent=bool(review.get("sent")),
         reason=str(review.get("reason") or ""),
     )

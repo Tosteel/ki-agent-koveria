@@ -52,6 +52,25 @@ class CalendarCreateEventResponse(BaseModel):
     text: str = ""
 
 
+class CalendarUpdateEventRequest(BaseModel):
+    event_id: str = Field(..., min_length=1)
+    calendar_id: str = Field(default="primary")
+    summary: str = ""
+    description: str = ""
+    location: str = ""
+    send_updates: str = Field(default="none", description="none|all|externalOnly")
+
+
+class CalendarUpdateEventResponse(BaseModel):
+    updated: bool = False
+    event_id: str = ""
+    html_link: str = ""
+    status: str = ""
+    start_iso: str = ""
+    end_iso: str = ""
+    text: str = ""
+
+
 class CalendarHoldEventRequest(BaseModel):
     summary: str = Field(..., min_length=1)
     start_iso: str = Field(..., min_length=10)

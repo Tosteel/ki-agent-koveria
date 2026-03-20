@@ -235,6 +235,56 @@ def calendar_create_event(
     }
 
 
+def calendar_update_event(
+    *,
+    event_id: str,
+    calendar_id: str = "primary",
+    summary: str = "",
+    description: str = "",
+    location: str = "",
+    send_updates: str = "none",
+) -> Dict[str, Any]:
+    eid = str(event_id or "").strip()
+    if not eid:
+        raise HTTPException(status_code=422, detail="event_id is required")
+
+    current = _google_request(method="GET", path=f"/calendars/{calendar_id}/events/{eid}")
+    if not isinstance(current, dict) or not current:
+        raise HTTPException(status_code=404, detail=f"event not found: {eid}")
+
+    summary_clean = str(summary or "").strip() or str(current.get("summary") or "").strip()
+    description_clean = str(description or "").strip() or str(current.get("description") or "").strip()
+    location_clean = str(location or "").strip() or str(current.get("location") or "").strip()
+
+    payload: Dict[str, Any] = {
+        "summary": summary_clean,
+        "description": description_clean,
+        "location": location_clean,
+    }
+    send_updates_clean = str(send_updates or "none").strip()
+    if send_updates_clean not in {"none", "all", "externalOnly"}:
+        send_updates_clean = "none"
+    params = {"sendUpdates": send_updates_clean}
+
+    data = _google_request(
+        method="PATCH",
+        path=f"/calendars/{calendar_id}/events/{eid}",
+        params=params,
+        json_payload=payload,
+    )
+    start_iso = str(((data.get("start") or {}) if isinstance(data.get("start"), dict) else {}).get("dateTime") or "")
+    end_iso = str(((data.get("end") or {}) if isinstance(data.get("end"), dict) else {}).get("dateTime") or "")
+    return {
+        "updated": True,
+        "event_id": str(data.get("id") or eid),
+        "html_link": str(data.get("htmlLink") or ""),
+        "status": str(data.get("status") or ""),
+        "start_iso": start_iso,
+        "end_iso": end_iso,
+        "text": f"Termin aktualisiert: {str(data.get('id') or eid)}",
+    }
+
+
 def calendar_hold_event(
     *,
     summary: str,

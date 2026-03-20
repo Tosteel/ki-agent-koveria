@@ -14,6 +14,7 @@ Der `booking_assistant` verarbeitet unbeantwortete Gmail-Anfragen für Buchungen
 - `GET /assistants/booking-assistant/reviews`
 - `POST /assistants/booking-assistant/reviews/{review_id}/approve`
 - `POST /assistants/booking-assistant/reviews/{review_id}/reject`
+- `POST /assistants/booking-assistant/reviews/{review_id}/counteroffer`
 
 ## Profil-Setup im Dialog
 Über `run-once` kann der Operator das Profil initialisieren und laufend erweitern:
@@ -34,6 +35,14 @@ Der `booking_assistant` verarbeitet unbeantwortete Gmail-Anfragen für Buchungen
 - `auto_decline`: harte Regel verletzt (z. B. Distanz > Limit, kein Wochenende)
 - `human_review`: Grenzfall/Regelüberschreitung (z. B. Dauer > max)
 - `auto_accept`: Regeln erfüllt, Kalender-Hold möglich
+
+## Review-Vorlagen
+Jeder Review-Eintrag enthält `action_templates` mit vordefinierten Texten:
+- `approve`
+- `reject`
+- `counteroffer`
+
+Die Endpunkte `/approve`, `/reject` und `/counteroffer` verwenden standardmäßig die jeweilige Vorlage, sofern kein `edited_body` übergeben wird.
 
 ## Booking-Loop
 - Erst Event-Details vollständig machen.

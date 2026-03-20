@@ -36,6 +36,7 @@ BASIC_TOOLS = {
     "gmail_read_mail_thread",
     "calendar_check_availability",
     "calendar_create_event",
+    "calendar_update_event",
     "calendar_propose_slots",
     "calendar_hold_event",
     "calender_hold_event",

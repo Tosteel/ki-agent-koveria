@@ -63,6 +63,8 @@ class BookingAssistantReviewItem(BaseModel):
     sources: List[str] = Field(default_factory=list)
     ticket_id: str = ""
     reason: str = ""
+    action_templates: Dict[str, str] = Field(default_factory=dict)
+    selected_action: str = ""
     sent: bool = False
     send_result: Dict[str, Any] = Field(default_factory=dict)
 
@@ -79,7 +81,17 @@ class BookingAssistantApproveRequest(BaseModel):
 
 
 class BookingAssistantRejectRequest(BaseModel):
+    provider: str = Field(default="ionos")
+    edited_body: str = ""
+    subject: str = ""
+    send_to_customer: bool = True
     reason: str = ""
+
+
+class BookingAssistantCounterofferRequest(BaseModel):
+    provider: str = Field(default="ionos")
+    edited_body: str = ""
+    subject: str = ""
 
 
 class BookingAssistantReviewActionResponse(BaseModel):

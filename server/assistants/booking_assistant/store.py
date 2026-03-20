@@ -25,6 +25,7 @@ def _default_state() -> Dict[str, Any]:
         "processed_mail_ids": [],
         "reviews": [],
         "holds": [],
+        "thread_booking_contexts": [],
         "updated_at": _now_iso(),
     }
 
@@ -44,12 +45,15 @@ def load_state(settings: Settings, user_id: str) -> Dict[str, Any]:
     processed = raw.get("processed_mail_ids")
     reviews = raw.get("reviews")
     holds = raw.get("holds")
+    thread_booking_contexts = raw.get("thread_booking_contexts")
     if isinstance(processed, list):
         out["processed_mail_ids"] = [str(x).strip() for x in processed if str(x).strip()]
     if isinstance(reviews, list):
         out["reviews"] = [x for x in reviews if isinstance(x, dict)]
     if isinstance(holds, list):
         out["holds"] = [x for x in holds if isinstance(x, dict)]
+    if isinstance(thread_booking_contexts, list):
+        out["thread_booking_contexts"] = [x for x in thread_booking_contexts if isinstance(x, dict)]
     out["updated_at"] = str(raw.get("updated_at") or out["updated_at"])
     return out
 

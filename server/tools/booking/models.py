@@ -11,6 +11,7 @@ DecisionType = Literal["auto_accept", "auto_decline", "human_review", "need_clar
 class BookingExtractFactsRequest(BaseModel):
     text: str = Field(..., min_length=1, description="Mail-/Thread-Text für Fakt-Extraktion.")
     timezone: str = Field(default="Europe/Berlin")
+    required_fields: List[str] = Field(default_factory=list)
 
 
 class BookingExtractFactsResponse(BaseModel):
@@ -38,6 +39,7 @@ class BookingDecisionEngineRequest(BaseModel):
     completeness: Dict[str, Any] = Field(default_factory=dict)
     distance: Dict[str, Any] = Field(default_factory=dict)
     quote: Dict[str, Any] = Field(default_factory=dict)
+    require_price_confirmation: bool = True
 
 
 class BookingDecisionEngineResponse(BaseModel):

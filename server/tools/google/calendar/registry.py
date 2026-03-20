@@ -4,7 +4,13 @@ from typing import Any, Dict
 
 from server.agent.tool_registry import ToolContext, ToolRegistry
 
-from .calendar import calendar_check_availability, calendar_create_event, calendar_hold_event, calendar_propose_slots
+from .calendar import (
+    calendar_check_availability,
+    calendar_create_event,
+    calendar_hold_event,
+    calendar_propose_slots,
+    calendar_update_event,
+)
 from .models import (
     CalendarCheckAvailabilityRequest,
     CalendarCheckAvailabilityResponse,
@@ -14,6 +20,8 @@ from .models import (
     CalendarHoldEventResponse,
     CalendarProposeSlotsRequest,
     CalendarProposeSlotsResponse,
+    CalendarUpdateEventRequest,
+    CalendarUpdateEventResponse,
 )
 
 
@@ -56,6 +64,18 @@ def register(registry: ToolRegistry) -> None:
         )
         return CalendarProposeSlotsResponse(**result).model_dump()
 
+    def tool_calendar_update_event(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+        req = CalendarUpdateEventRequest(**args)
+        result = calendar_update_event(
+            event_id=req.event_id,
+            calendar_id=req.calendar_id,
+            summary=req.summary,
+            description=req.description,
+            location=req.location,
+            send_updates=req.send_updates,
+        )
+        return CalendarUpdateEventResponse(**result).model_dump()
+
     def tool_calendar_hold_event(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
         req = CalendarHoldEventRequest(**args)
         result = calendar_hold_event(
@@ -89,6 +109,12 @@ def register(registry: ToolRegistry) -> None:
         tool_calendar_propose_slots,
         request_model=CalendarProposeSlotsRequest,
         response_model=CalendarProposeSlotsResponse,
+    )
+    registry.register(
+        "calendar_update_event",
+        tool_calendar_update_event,
+        request_model=CalendarUpdateEventRequest,
+        response_model=CalendarUpdateEventResponse,
     )
     registry.register(
         "calendar_hold_event",

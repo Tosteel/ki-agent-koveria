@@ -43,6 +43,8 @@ def _focus_booking_text(text: str) -> str:
             continue
         if re.match(r"^am\s.+\sschrieb\s", l):
             break
+        if " schrieb am " in l:
+            break
         if l.startswith(
             (
                 "mailbox:",
@@ -120,6 +122,8 @@ def _extract_time(text: str) -> str:
             continue
         if l.startswith(("date=", "from=", "thread for mail_id", "messages:")) or " date=" in l:
             continue
+        if " schrieb am " in l:
+            continue
         body_lines.append(line)
     body = "\n".join(body_lines)
     m = re.search(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", body)
@@ -184,13 +188,70 @@ def _extract_location(text: str) -> str:
     return ""
 
 
-def _extract_client_name(text: str) -> str:
-    raw = str(text or "")
-    lines = [x.strip() for x in raw.splitlines() if x.strip()]
-    for line in reversed(lines[-8:]):
-        if len(line) > 2 and any(token in line.lower() for token in ("dr.", "herr", "frau", "mustermann")):
-            return _normalize_text(line)
-    return ""
+def _extract_client_name(text: str) -> Dict[str, object]:
+    client = IonosLLM()
+    if not client.enabled():
+        return {
+            "client_name": "",
+            "confidence": 0.0,
+            "reason": "llm_unavailable",
+            "fallback_used": True,
+            "model": "",
+        }
+
+    schema = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "booking_client_name_extract",
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "client_name": {"type": "string"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "reason": {"type": "string"},
+                },
+                "required": ["client_name", "confidence", "reason"],
+            },
+            "strict": True,
+        },
+    }
+
+    completion = client.chat_completions(
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Extrahiere den Namen des anfragenden Kunden aus einer Booking-Nachricht.\n"
+                    "Gib nur den Personennamen zurück (z. B. 'Dietmar Maier').\n"
+                    "Wenn kein verlässlicher Name enthalten ist, gib einen leeren String zurück.\n"
+                    "Ignoriere quoted Verlaufstexte, Header und Signaturrauschen.\n"
+                    "Antworte ausschließlich als JSON laut Schema."
+                ),
+            },
+            {"role": "user", "content": f"Nachricht:\n{text}"},
+        ],
+        response_format=schema,
+        temperature=0.0,
+        top_p=0.1,
+        max_tokens=120,
+    )
+    parsed = _parse_json_obj(client.extract_text(completion))
+    if not parsed:
+        return {
+            "client_name": "",
+            "confidence": 0.0,
+            "reason": "llm_parse_failed",
+            "fallback_used": True,
+            "model": getattr(client.cfg, "model", ""),
+        }
+    return {
+        "client_name": _normalize_text(str(parsed.get("client_name") or "")),
+        "confidence": max(0.0, min(1.0, float(parsed.get("confidence") or 0.0))),
+        "reason": str(parsed.get("reason") or "").strip(),
+        "fallback_used": False,
+        "model": getattr(client.cfg, "model", ""),
+    }
 
 
 def _extract_occasion(text: str) -> str:
@@ -294,7 +355,112 @@ def _extract_price_confirmation(text: str) -> Dict[str, object]:
     }
 
 
-def booking_extract_facts(*, text: str, timezone_name: str = "Europe/Berlin") -> Dict[str, Any]:
+def _extract_dynamic_required_fields(text: str, required_fields: List[str]) -> Dict[str, object]:
+    targets = [str(x).strip() for x in (required_fields or []) if str(x).strip()]
+    if not targets:
+        return {"values": {}, "meta": {}, "model": "", "fallback_used": True}
+
+    client = IonosLLM()
+    if not client.enabled():
+        return {"values": {}, "meta": {}, "model": "", "fallback_used": True}
+
+    schema = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "booking_dynamic_required_fields",
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "fields": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "name": {"type": "string"},
+                                "value": {"type": ["string", "number", "boolean", "null"]},
+                                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                                "reason": {"type": "string"},
+                            },
+                            "required": ["name", "value", "confidence", "reason"],
+                        },
+                    }
+                },
+                "required": ["fields"],
+            },
+            "strict": True,
+        },
+    }
+    completion = client.chat_completions(
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Extrahiere die angefragten Pflichtfelder aus einer Booking-Nachricht.\n"
+                    "Verwende nur die Felder aus der Liste.\n"
+                    "Wenn ein Feld nicht sicher enthalten ist, setze value auf null.\n"
+                    "Antworte ausschließlich als JSON laut Schema."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Felder: {', '.join(targets)}\n\n"
+                    f"Nachricht:\n{text}"
+                ),
+            },
+        ],
+        response_format=schema,
+        temperature=0.0,
+        top_p=0.1,
+        max_tokens=300,
+    )
+    parsed = _parse_json_obj(client.extract_text(completion))
+    fields = parsed.get("fields") if isinstance(parsed.get("fields"), list) else []
+    values: Dict[str, Any] = {}
+    meta: Dict[str, Dict[str, Any]] = {}
+    target_set = {x.lower(): x for x in targets}
+    for item in fields:
+        if not isinstance(item, dict):
+            continue
+        name_raw = str(item.get("name") or "").strip()
+        if not name_raw:
+            continue
+        k = target_set.get(name_raw.lower())
+        if not k:
+            continue
+        value = item.get("value")
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                value = None
+        if value is None:
+            continue
+        values[k] = value
+        meta[k] = {
+            "confidence": max(0.0, min(1.0, float(item.get("confidence") or 0.0))),
+            "reason": str(item.get("reason") or "").strip(),
+        }
+    return {
+        "values": values,
+        "meta": meta,
+        "model": getattr(client.cfg, "model", ""),
+        "fallback_used": False,
+    }
+
+
+def _is_missing_value(name: str, value: Any) -> bool:
+    if name == "price_confirmed":
+        return bool(value) is not True
+    if value is None:
+        return True
+    if isinstance(value, str) and not value.strip():
+        return True
+    return False
+
+
+def booking_extract_facts(*, text: str, timezone_name: str = "Europe/Berlin", required_fields: List[str] | None = None) -> Dict[str, Any]:
     merged = str(text or "").strip()
     if not merged:
         raise HTTPException(status_code=422, detail="text is required")
@@ -307,7 +473,8 @@ def booking_extract_facts(*, text: str, timezone_name: str = "Europe/Berlin") ->
     duration_hours = range_duration if range_duration is not None else _extract_duration_hours(focused)
     location = _extract_location(focused)
     occasion = _extract_occasion(focused)
-    client_name = _extract_client_name(focused)
+    client_eval = _extract_client_name(focused)
+    client_name = str(client_eval.get("client_name") or "").strip()
     price_eval = _extract_price_confirmation(focused)
     price_confidence = float(price_eval.get("confidence") or 0.0)
     # Conservative gating to avoid false positives on short/ambiguous replies.
@@ -320,6 +487,9 @@ def booking_extract_facts(*, text: str, timezone_name: str = "Europe/Berlin") ->
         "location": location,
         "occasion": occasion,
         "client_name": client_name,
+        "client_name_confidence": float(client_eval.get("confidence") or 0.0),
+        "client_name_reason": str(client_eval.get("reason") or "").strip(),
+        "client_name_model": str(client_eval.get("model") or "").strip(),
         "price_confirmed": price_confirmed,
         "price_confirmed_confidence": price_confidence,
         "price_confirmed_reason": str(price_eval.get("reason") or "").strip(),
@@ -327,13 +497,43 @@ def booking_extract_facts(*, text: str, timezone_name: str = "Europe/Berlin") ->
         "timezone": str(timezone_name or "Europe/Berlin"),
     }
 
-    missing_candidates = [
-        key
-        for key in ("event_date", "start_time", "duration_hours", "location", "occasion", "client_name", "price_confirmed")
-        if not facts.get(key)
+    requested_required = [str(x).strip() for x in (required_fields or []) if str(x).strip()]
+    static_fields = {
+        "event_date",
+        "start_time",
+        "duration_hours",
+        "location",
+        "occasion",
+        "client_name",
+        "price_confirmed",
+        "timezone",
+    }
+    dynamic_targets = [x for x in requested_required if x not in static_fields]
+    dyn = _extract_dynamic_required_fields(focused, dynamic_targets)
+    dyn_values = dyn.get("values") if isinstance(dyn.get("values"), dict) else {}
+    dyn_meta = dyn.get("meta") if isinstance(dyn.get("meta"), dict) else {}
+    for key, val in dyn_values.items():
+        if key not in facts or _is_missing_value(key, facts.get(key)):
+            facts[key] = val
+        info = dyn_meta.get(key) if isinstance(dyn_meta.get(key), dict) else {}
+        if info:
+            facts[f"{key}_confidence"] = float(info.get("confidence") or 0.0)
+            facts[f"{key}_reason"] = str(info.get("reason") or "").strip()
+            facts[f"{key}_model"] = str(dyn.get("model") or "")
+
+    required_eval = requested_required or [
+        "event_date",
+        "start_time",
+        "duration_hours",
+        "location",
+        "occasion",
+        "client_name",
+        "price_confirmed",
     ]
-    known = 7 - len(missing_candidates)
-    confidence = max(0.0, min(1.0, known / 7.0))
+    missing_candidates = [key for key in required_eval if _is_missing_value(key, facts.get(key))]
+    total = max(1, len(required_eval))
+    known = total - len(missing_candidates)
+    confidence = max(0.0, min(1.0, known / total))
     return {
         "facts": facts,
         "confidence": confidence,
@@ -416,6 +616,7 @@ def booking_decision_engine(
     completeness: Dict[str, Any] | None = None,
     distance: Dict[str, Any] | None = None,
     quote: Dict[str, Any] | None = None,
+    require_price_confirmation: bool = True,
 ) -> Dict[str, Any]:
     ff = dict(facts or {})
     rules = dict(profile_rules or {})
@@ -438,7 +639,7 @@ def booking_decision_engine(
             "text": "Entscheidung: need_clarification",
         }
 
-    if not bool(ff.get("price_confirmed")):
+    if require_price_confirmation and not bool(ff.get("price_confirmed")):
         reasons.append("Preis ist noch nicht explizit bestätigt.")
         return {
             "decision": "need_clarification",

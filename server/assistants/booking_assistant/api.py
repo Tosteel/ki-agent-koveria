@@ -8,13 +8,14 @@ from server.deps import get_current_user, settings as dep_settings
 
 from .models import (
     BookingAssistantApproveRequest,
+    BookingAssistantCounterofferRequest,
     BookingAssistantRejectRequest,
     BookingAssistantReviewActionResponse,
     BookingAssistantReviewsResponse,
     BookingAssistantRunRequest,
     BookingAssistantRunResponse,
 )
-from .service import approve_review, get_reviews, reject_review, run_once
+from .service import approve_review, counteroffer_review, get_reviews, reject_review, run_once
 
 security = HTTPBearer(auto_error=False)
 
@@ -66,8 +67,25 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
         req: BookingAssistantRejectRequest,
         user_id: str = Depends(get_current_user),
         s: Settings = Depends(dep_settings),
+        credentials: HTTPAuthorizationCredentials = Depends(security),
     ) -> BookingAssistantReviewActionResponse:
         ensure_user_dirs(s, user_id)
-        return reject_review(user_id=user_id, settings=s, review_id=review_id, req=req)
+        token = credentials.credentials if credentials is not None else ""
+        return reject_review(user_id=user_id, settings=s, api_key=token, review_id=review_id, req=req)
+
+    @router.post(
+        "/assistants/booking-assistant/reviews/{review_id}/counteroffer",
+        response_model=BookingAssistantReviewActionResponse,
+    )
+    def booking_assistant_review_counteroffer(
+        review_id: str,
+        req: BookingAssistantCounterofferRequest,
+        user_id: str = Depends(get_current_user),
+        s: Settings = Depends(dep_settings),
+        credentials: HTTPAuthorizationCredentials = Depends(security),
+    ) -> BookingAssistantReviewActionResponse:
+        ensure_user_dirs(s, user_id)
+        token = credentials.credentials if credentials is not None else ""
+        return counteroffer_review(user_id=user_id, settings=s, api_key=token, review_id=review_id, req=req)
 
     return router

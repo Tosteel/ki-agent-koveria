@@ -5,7 +5,13 @@ from fastapi import APIRouter, Depends
 from server.core.settings import Settings
 from server.deps import get_current_user, settings as dep_settings
 
-from .calendar import calendar_check_availability, calendar_create_event, calendar_hold_event, calendar_propose_slots
+from .calendar import (
+    calendar_check_availability,
+    calendar_create_event,
+    calendar_hold_event,
+    calendar_propose_slots,
+    calendar_update_event,
+)
 from .models import (
     CalendarCheckAvailabilityRequest,
     CalendarCheckAvailabilityResponse,
@@ -15,6 +21,8 @@ from .models import (
     CalendarHoldEventResponse,
     CalendarProposeSlotsRequest,
     CalendarProposeSlotsResponse,
+    CalendarUpdateEventRequest,
+    CalendarUpdateEventResponse,
 )
 
 
@@ -76,6 +84,23 @@ def create_router(*, ensure_user_dirs) -> APIRouter:
             send_updates=req.send_updates,
         )
         return CalendarHoldEventResponse(**result)
+
+    @router.post("/tools/google/calendar/update-event", response_model=CalendarUpdateEventResponse)
+    def update_event_route(
+        req: CalendarUpdateEventRequest,
+        user_id: str = Depends(get_current_user),
+        s: Settings = Depends(dep_settings),
+    ) -> CalendarUpdateEventResponse:
+        ensure_user_dirs(s, user_id)
+        result = calendar_update_event(
+            event_id=req.event_id,
+            calendar_id=req.calendar_id,
+            summary=req.summary,
+            description=req.description,
+            location=req.location,
+            send_updates=req.send_updates,
+        )
+        return CalendarUpdateEventResponse(**result)
 
     @router.post("/tools/google/calendar/propose-slots", response_model=CalendarProposeSlotsResponse)
     def propose_slots_route(
