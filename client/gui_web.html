@@ -807,7 +807,7 @@
             <path d="M12 3.5v1.5M20.5 12h-1.5M12 20.5V19M3.5 12H5"/>
           </svg>
         </button>
-        <button class="mode-btn" id="modeToolsBtn" title="Tools" aria-label="Tools">
+        <button class="mode-btn" id="modeToolsBtn" title="Assistenten" aria-label="Assistenten">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M14 4.5l5.5 5.5-2 2-5.5-5.5z"/>
             <path d="M6 9l9 9"/>
@@ -922,7 +922,6 @@
     const modelProviderEl = document.getElementById('modelProvider');
     const settingsStatus = document.getElementById('settingsStatus');
 
-    const BOT_WELCOME = 'Hallo! Wie kann ich Ihnen heute helfen?';
     const MAX_CONTEXT_MESSAGES = 12;
     const SAVE_DEBOUNCE_MS = 250;
     const PROFILES_STORAGE_KEY = 'koveria.web.profiles.v1';
@@ -939,10 +938,13 @@
     let activeTriggerId = '';
     const agentEntries = [];
     let activeAgentId = null;
+    const assistantEntries = [];
+    let activeAssistantId = '';
     const pendingChats = new Set();
     const pendingTasks = new Set();
     const pendingTriggers = new Set();
     const pendingAgents = new Set();
+    const pendingAssistants = new Set();
     const triggerDialogs = {};
     let sidebarSearchQuery = '';
 
@@ -1322,7 +1324,7 @@
       modeTasksBtn.classList.toggle('active', sidebarMode === 'tasks');
       modeTriggersBtn.classList.toggle('active', sidebarMode === 'triggers');
       if (modeAgentsBtn) modeAgentsBtn.classList.toggle('active', sidebarMode === 'agents');
-      if (modeToolsBtn) modeToolsBtn.classList.toggle('active', sidebarMode === 'tools');
+      if (modeToolsBtn) modeToolsBtn.classList.toggle('active', sidebarMode === 'assistants');
     }
 
     function isMobileView() {
@@ -1457,6 +1459,12 @@
       return text.replace(/\s+/g, ' ');
     }
 
+    function assistantTitle(assistant) {
+      const preferred = String(assistant?.title || '').trim();
+      if (preferred) return preferred.replace(/\s+/g, ' ');
+      return 'Assistent';
+    }
+
     function renderTriggerList() {
       chatListEl.innerHTML = '';
       const q = sidebarSearchQuery.trim().toLowerCase();
@@ -1531,6 +1539,33 @@
       });
     }
 
+    function renderAssistantList() {
+      chatListEl.innerHTML = '';
+      const q = sidebarSearchQuery.trim().toLowerCase();
+      assistantEntries.forEach((assistant) => {
+        const fullTitle = assistantTitle(assistant);
+        const labelText = truncateSidebarLabel(fullTitle);
+        if (q && !labelText.toLowerCase().includes(q)) return;
+        const assistantId = String(assistant?.id || '').trim();
+        if (!assistantId) return;
+        const item = document.createElement('div');
+        item.setAttribute('data-assistant-id', assistantId);
+        item.className = `item${assistantId === String(activeAssistantId || '') ? ' active' : ''}`;
+        const label = document.createElement('span');
+        label.className = 'item-label';
+        label.textContent = labelText;
+        item.appendChild(label);
+        item.addEventListener('click', () => {
+          if (assistantId === String(activeAssistantId || '')) return;
+          activeAssistantId = assistantId;
+          renderAssistantList();
+          renderActiveAssistant();
+          if (isMobileView()) closeSidebar();
+        });
+        chatListEl.appendChild(item);
+      });
+    }
+
     function renderSidebarList() {
       updateSidebarModeButtons();
       if (sidebarMode === 'tasks') {
@@ -1543,6 +1578,10 @@
       }
       if (sidebarMode === 'agents') {
         renderAgentList();
+        return;
+      }
+      if (sidebarMode === 'assistants') {
+        renderAssistantList();
         return;
       }
       renderChatList();
@@ -1770,6 +1809,10 @@
       return agentEntries.find((a) => Number(a?.id) === Number(activeAgentId)) || null;
     }
 
+    function getActiveAssistant() {
+      return assistantEntries.find((a) => String(a?.id || '') === String(activeAssistantId || '')) || null;
+    }
+
     function createAgentOverviewElement(agent) {
       const row = document.createElement('div');
       row.className = 'row';
@@ -1855,6 +1898,65 @@
       return row;
     }
 
+    function createAssistantOverviewElement(assistant) {
+      const row = document.createElement('div');
+      row.className = 'row';
+
+      const avatar = document.createElement('div');
+      avatar.className = 'avatar';
+      const img = document.createElement('img');
+      img.src = '/assets/bot-avatar.png';
+      img.alt = 'bot';
+      avatar.appendChild(img);
+
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      const root = document.createElement('div');
+      root.className = 'agent-overview';
+
+      const meta = document.createElement('div');
+      meta.className = 'agent-meta';
+      meta.textContent = String(assistant?.description || '');
+      root.appendChild(meta);
+
+      const scope = Array.isArray(assistant?.tool_scope) ? assistant.tool_scope : [];
+      const scopeBox = document.createElement('div');
+      scopeBox.className = 'agent-box';
+      const scopeTitle = document.createElement('p');
+      scopeTitle.className = 'agent-box-title';
+      scopeTitle.textContent = 'Tool Scope';
+      scopeBox.appendChild(scopeTitle);
+      if (scope.length) {
+        const list = document.createElement('ol');
+        list.className = 'agent-box-list';
+        scope.forEach((item) => {
+          const li = document.createElement('li');
+          li.textContent = String(item || '');
+          list.appendChild(li);
+        });
+        scopeBox.appendChild(list);
+      } else {
+        const empty = document.createElement('div');
+        empty.className = 'agent-box-empty';
+        empty.textContent = 'Keine Tool-Informationen vorhanden.';
+        scopeBox.appendChild(empty);
+      }
+      root.appendChild(scopeBox);
+
+      const optionsRow = document.createElement('div');
+      optionsRow.className = 'message-options only-time';
+      const timeEl = document.createElement('div');
+      timeEl.className = 'msg-time';
+      timeEl.textContent = formatTimestampDisplay(nowIso());
+      optionsRow.appendChild(timeEl);
+      root.appendChild(optionsRow);
+
+      bubble.appendChild(root);
+      row.appendChild(avatar);
+      row.appendChild(bubble);
+      return row;
+    }
+
     function renderActiveAgent() {
       const agent = getActiveAgent();
       chatTitleEl.textContent = 'Vorlagen';
@@ -1882,6 +1984,32 @@
       refreshComposerState();
     }
 
+    function renderActiveAssistant() {
+      const assistant = getActiveAssistant();
+      chatTitleEl.textContent = 'Assistenten';
+      chatTitleEl.classList.remove('title-editable');
+      messagesEl.innerHTML = '';
+      if (!assistant) {
+        messagesEl.appendChild(createMessageElement('bot', 'Keine Assistenten vorhanden.', { timestamp: nowIso() }));
+        refreshComposerState();
+        return;
+      }
+      chatTitleEl.textContent = assistantTitle(assistant);
+      messagesEl.appendChild(createAssistantOverviewElement(assistant));
+      (Array.isArray(assistant.dialog) ? assistant.dialog : []).forEach((entry) => {
+        messagesEl.appendChild(
+          createMessageElement(entry.role === 'user' ? 'user' : 'bot', String(entry.text || ''), {
+            timestamp: entry.timestamp || nowIso()
+          })
+        );
+      });
+      if (pendingAssistants.has(String(assistant.id || ''))) {
+        messagesEl.appendChild(createMessageElement('bot', '...', { timestamp: nowIso() }));
+      }
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      refreshComposerState();
+    }
+
     function renderActivePane() {
       if (sidebarMode === 'tasks') {
         renderActiveTask();
@@ -1895,6 +2023,10 @@
         renderActiveAgent();
         return;
       }
+      if (sidebarMode === 'assistants') {
+        renderActiveAssistant();
+        return;
+      }
       renderActiveChat();
     }
 
@@ -1902,7 +2034,7 @@
       sidebarMode =
         mode === 'tasks' ? 'tasks' :
         (mode === 'triggers' ? 'triggers' :
-          (mode === 'agents' ? 'agents' : 'chats'));
+          (mode === 'agents' ? 'agents' : (mode === 'assistants' ? 'assistants' : 'chats')));
       newChatBtn.style.display = sidebarMode === 'chats' ? '' : 'none';
       renderSidebarList();
       renderActivePane();
@@ -2070,7 +2202,7 @@
       const chat = {
         id: nextChatId++,
         title: 'Neuer Chat',
-        messages: [{ role: 'bot', text: BOT_WELCOME, downloadUrl: '', downloadLabel: '', timestamp: ts }],
+        messages: [],
         created_at: ts,
         updated_at: ts
       };
@@ -2122,6 +2254,19 @@
         uploadBtn.disabled = true;
         taskBtn.disabled = true;
         inputEl.disabled = isPending || !agent;
+        if (!inputEl.disabled) inputEl.focus();
+        return;
+      }
+      if (sidebarMode === 'assistants') {
+        inputEl.placeholder = 'An den Assistenten schreiben...';
+        const assistant = getActiveAssistant();
+        const assistantId = String(assistant?.id || '');
+        const isPending = !!assistantId && pendingAssistants.has(assistantId);
+        const chatSupported = !!assistant?.chat_supported;
+        sendBtn.disabled = isPending || !assistant || !chatSupported;
+        uploadBtn.disabled = true;
+        taskBtn.disabled = true;
+        inputEl.disabled = isPending || !assistant || !chatSupported;
         if (!inputEl.disabled) inputEl.focus();
         return;
       }
@@ -2223,10 +2368,6 @@
             timestamp: String(m?.timestamp || nowIso())
           }))
           .filter((m) => m.text.length > 0);
-
-        if (!messages.length) {
-          messages.push({ role: 'bot', text: BOT_WELCOME, downloadUrl: '', downloadLabel: '', timestamp: nowIso() });
-        }
 
         chats.push({
           id,
@@ -2428,6 +2569,44 @@
       if (agentEntries.length > 0) {
         const hasDesired = agentEntries.some((a) => Number(a.id) === desiredAgentId);
         activeAgentId = hasDesired ? desiredAgentId : agentEntries[0].id;
+      }
+    }
+
+    async function loadAssistants(preferredAssistantId = '') {
+      const desiredAssistantId = String(preferredAssistantId || activeAssistantId || '').trim();
+      const previousById = {};
+      assistantEntries.forEach((a) => {
+        const id = String(a?.id || '').trim();
+        if (id) previousById[id] = a;
+      });
+      assistantEntries.length = 0;
+      activeAssistantId = '';
+      if (!currentUserId) return;
+      try {
+        const resp = await fetch(`/api/assistants?user_id=${encodeURIComponent(currentUserId)}`);
+        const data = await resp.json();
+        if (!resp.ok) throw new Error('assistants');
+        const rawAssistants = Array.isArray(data?.assistants) ? data.assistants : [];
+        rawAssistants.forEach((a) => {
+          const id = String(a?.id || '').trim();
+          if (!id) return;
+          const prev = previousById[id] && typeof previousById[id] === 'object' ? previousById[id] : {};
+          assistantEntries.push({
+            id,
+            title: String(a?.title || '').trim(),
+            description: String(a?.description || '').trim(),
+            chat_supported: Boolean(a?.chat_supported),
+            default_profile_name: String(a?.default_profile_name || '').trim(),
+            tool_scope: Array.isArray(a?.tool_scope) ? a.tool_scope.map((s) => String(s).trim()).filter(Boolean) : [],
+            dialog: Array.isArray(prev?.dialog) ? prev.dialog : []
+          });
+        });
+      } catch (_err) {
+        // keep empty
+      }
+      if (assistantEntries.length > 0) {
+        const hasDesired = assistantEntries.some((a) => String(a.id || '') === desiredAssistantId);
+        activeAssistantId = hasDesired ? desiredAssistantId : String(assistantEntries[0].id || '');
       }
     }
 
@@ -3002,6 +3181,78 @@
       }
     }
 
+    async function sendAssistantMessage() {
+      const message = inputEl.value.trim();
+      if (!message) return;
+      const assistant = getActiveAssistant();
+      if (!assistant) return;
+      const assistantId = String(assistant.id || '').trim();
+      if (!assistantId || pendingAssistants.has(assistantId)) return;
+      if (!currentUserId) {
+        messagesEl.appendChild(createMessageElement('bot', 'Bitte zuerst API-Key in den Einstellungen speichern.', { timestamp: nowIso() }));
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        return;
+      }
+      if (!assistant.chat_supported) {
+        messagesEl.appendChild(createMessageElement('bot', 'Dieser Assistent unterstützt aktuell keinen Dialogmodus.', { timestamp: nowIso() }));
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        return;
+      }
+
+      if (!Array.isArray(assistant.dialog)) assistant.dialog = [];
+      const history = assistant.dialog
+        .slice(-MAX_CONTEXT_MESSAGES)
+        .map((m) => ({
+          role: m?.role === 'user' ? 'user' : 'bot',
+          text: String(m?.text || '').trim()
+        }))
+        .filter((m) => m.text.length > 0);
+      assistant.dialog.push({ role: 'user', text: message, timestamp: nowIso() });
+      inputEl.value = '';
+      pendingAssistants.add(assistantId);
+      renderActiveAssistant();
+      renderSidebarList();
+
+      try {
+        const resp = await fetch('/api/assistants/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: currentUserId,
+            assistant_id: assistantId,
+            assistant_profile_name: String(assistant.default_profile_name || ''),
+            message,
+            history,
+            trace_steps: false
+          })
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          assistant.dialog.push({
+            role: 'bot',
+            text: `Fehler: ${data.detail || 'Unbekannter Fehler'}`,
+            timestamp: nowIso()
+          });
+          return;
+        }
+        assistant.dialog.push({
+          role: 'bot',
+          text: String(data?.answer || 'Keine Antwort erhalten.'),
+          timestamp: nowIso()
+        });
+      } catch (_err) {
+        assistant.dialog.push({
+          role: 'bot',
+          text: 'Verbindung zur API fehlgeschlagen.',
+          timestamp: nowIso()
+        });
+      } finally {
+        pendingAssistants.delete(assistantId);
+        renderActiveAssistant();
+        renderSidebarList();
+      }
+    }
+
     async function sendTaskMessage() {
       const message = inputEl.value.trim();
       if (!message) return;
@@ -3292,6 +3543,10 @@
         await sendAgentMessage();
         return;
       }
+      if (sidebarMode === 'assistants') {
+        await sendAssistantMessage();
+        return;
+      }
       const message = inputEl.value.trim();
       if (!message) return;
 
@@ -3384,19 +3639,22 @@
       const isTaskMode = sidebarMode === 'tasks';
       const isTriggerMode = sidebarMode === 'triggers';
       const isAgentMode = sidebarMode === 'agents';
+      const isAssistantMode = sidebarMode === 'assistants';
       const task = isTaskMode ? getActiveTask() : null;
       const trigger = isTriggerMode ? getActiveTrigger() : null;
       const agent = isAgentMode ? getActiveAgent() : null;
-      const chat = (!isTaskMode && !isTriggerMode && !isAgentMode) ? getActiveChat() : null;
+      const assistant = isAssistantMode ? getActiveAssistant() : null;
+      const chat = (!isTaskMode && !isTriggerMode && !isAgentMode && !isAssistantMode) ? getActiveChat() : null;
       if (isTaskMode && !task) return;
       if (isTriggerMode && !trigger) return;
       if (isAgentMode && !agent) return;
-      if (!isTaskMode && !isTriggerMode && !isAgentMode && !chat) return;
+      if (isAssistantMode) return;
+      if (!isTaskMode && !isTriggerMode && !isAgentMode && !isAssistantMode && !chat) return;
       const currentTitle = isTaskMode
         ? taskTitle(task)
         : (isTriggerMode
             ? (String(trigger.name || '').trim() || `Trigger ${String(trigger.id || '')}`)
-            : (isAgentMode ? agentTitle(agent) : String(chat.title || 'Neuer Chat')));
+            : (isAgentMode ? agentTitle(agent) : (isAssistantMode ? assistantTitle(assistant) : String(chat.title || 'Neuer Chat'))));
       const input = document.createElement('input');
       input.type = 'text';
       input.value = currentTitle;
@@ -3492,6 +3750,7 @@
       await loadTasksMemory();
       await loadTriggers();
       await loadAgentsMemory();
+      await loadAssistants();
       setSidebarMode('chats');
       if (isMobileView()) closeSidebar();
     });
@@ -3500,6 +3759,7 @@
       await loadTasksMemory();
       await loadTriggers();
       await loadAgentsMemory();
+      await loadAssistants();
       setSidebarMode('tasks');
       if (isMobileView()) closeSidebar();
     });
@@ -3508,19 +3768,23 @@
       await loadTasksMemory();
       await loadTriggers();
       await loadAgentsMemory();
+      await loadAssistants();
       setSidebarMode('triggers');
       if (isMobileView()) closeSidebar();
     });
 
     if (modeToolsBtn) {
-      modeToolsBtn.addEventListener('click', () => {
-        // Platzhalter: Tools-Ansicht folgt.
+      modeToolsBtn.addEventListener('click', async () => {
+        await loadAssistants();
+        setSidebarMode('assistants');
+        if (isMobileView()) closeSidebar();
       });
     }
 
     if (modeAgentsBtn) {
       modeAgentsBtn.addEventListener('click', async () => {
         await loadAgentsMemory();
+        await loadAssistants();
         setSidebarMode('agents');
         if (isMobileView()) closeSidebar();
       });
@@ -3542,6 +3806,7 @@
       await loadTasksMemory();
       await loadTriggers();
       await loadAgentsMemory();
+      await loadAssistants();
       setSidebarMode('chats');
     })();
   </script>

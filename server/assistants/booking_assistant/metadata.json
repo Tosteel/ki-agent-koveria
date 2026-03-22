@@ -5,7 +5,15 @@
   "endpoints": {
     "run_once": "/assistants/booking-assistant/run-once",
     "reviews": "/assistants/booking-assistant/reviews",
+    "pending_apply": "/assistants/booking-assistant/pending/{review_id}/apply"
+  },
+  "deprecated_endpoints": {
     "approve": "/assistants/booking-assistant/reviews/{review_id}/approve",
-    "reject": "/assistants/booking-assistant/reviews/{review_id}/reject"
-  }
+    "reject": "/assistants/booking-assistant/reviews/{review_id}/reject",
+    "counteroffer": "/assistants/booking-assistant/reviews/{review_id}/counteroffer",
+    "status_meeting": "/assistants/booking-assistant/status-meeting",
+    "pending_next": "/assistants/booking-assistant/pending/next",
+    "operator_chat": "/assistants/booking-assistant/operator-chat"
+  },
+  "preferred_dialog_endpoint": "/agent/ask"
 }

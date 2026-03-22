@@ -1,4 +1,12 @@
-BASIC_TOOLS = {
+from __future__ import annotations
+
+import importlib
+import re
+from functools import lru_cache
+from typing import Iterable, Set
+
+
+GLOBAL_BASIC_TOOLS = {
     "file_read",
     "file_write",
     "rag_knowledgebase",
@@ -10,7 +18,6 @@ BASIC_TOOLS = {
     "websearch_table",
     "websearch_videoanalyzer",
     "langsearch",
-    #"google_search",
     "ebay_search",
     "web_fetch_page",
     "web_search_page",
@@ -23,6 +30,8 @@ BASIC_TOOLS = {
     "booking_booking_validate_completness",
     "booking_decision_engine",
     "booking_descision_enginge",
+    "booking_reply_score",
+    "booking_instruction_check",
     "mail_send",
     "mail_answer",
     "mail_fetch_inbox",
@@ -51,53 +60,73 @@ BASIC_TOOLS = {
     "skills_list",
 }
 
-COMPETITIVE_ANALYSIS_TOOLS = {
-
-    #"competitive_parse_document",
-    #"competitive_quality_gate",
-    #"competitive_extract_product_profile",
-    #"competitive_extract_product_profile_v0_2",
-    #"competitive_extract_feature_claim_profile_quality_gate",
-    #"feature_claim_extraction_quality_gate",
-    #"competitive_generate_analysis_plan",
-    #"competitive_generate_analysis_plan_v0_2",
-    #"competitive_identify_competitors",
-    #"competitor_identification_v0_2",
-    #"competitor_search_v0_3",
-    #"competitor_search_v0_4",
-    #"competitor_search_v0_5",
-    #"competitor_product_results_v0_6",
-    #"competitor_products",
-    #"competitor_identification_quality_gate",
-    #"competitive_extract_competitor_profiles",
-    #"competitor_profile_extraction_quality_gate",
-    #"competitor_profile_extraction_v0_5",
-    #"competitor_profile_text_v0_6",
-    #"competitor_profile_extraction_v0_6",
-    #"competitive_merge_competitor_profiles",
-    #"competitive_verify_competitor_source_registry",
-    #"competitive_feature_matrix_gap_analysis",
-    #"feature_matrix_gap_analysis_v0_5",
-    #"competitive_feature_matrix_gap_analysis_quality_gate",
-    #"competitive_strategic_analysis",
-    #"stratetic_analysis_swot_positioning_v0_5",
-    #"final_report_generator_v0_5",
-    #"final_report_generator_v0_6",
-    #"competitive_generate_final_report",
-    #"competitive_publish_pdf_report",
-    #"professional_pdf_publischer_v0_6",
+GLOBAL_COMPETITIVE_ANALYSIS_TOOLS = {
+    # Reserved for future competitive analysis tools.
 }
 
-OFFER_FLOW = {
-    #"offerflow_step_1_intake",
-    #"offerflow_step_2_qualification",
-    #"offerflow_step_3_clarification",
-    #"offerflow_step_4_scope_mapping",
-    #"offerflow_step_5_resource_planning",
-    #"offerflow_step_6_pricing",
-    #"offerflow_step_7_validation",
+# Backward compatibility: legacy imports still use these names.
+BASIC_TOOLS = GLOBAL_BASIC_TOOLS
+COMPETITIVE_ANALYSIS_TOOLS = GLOBAL_COMPETITIVE_ANALYSIS_TOOLS
+OFFER_FLOW: Set[str] = set()
+
+ASSISTANT_POLICY_MODULES = {
+    "booking-assistant": "server.assistants.booking_assistant.policies",
+    "mail-assistant": "server.assistants.mail_assistant.policies",
 }
 
-def tools_allowed(tool_name: str) -> bool:
+
+def _normalize_tools(values: Iterable[object]) -> Set[str]:
+    out: Set[str] = set()
+    for raw in values:
+        item = str(raw or "").strip()
+        if item:
+            out.add(item)
+    return out
+
+
+def _extract_assistant_id(goal: str) -> str:
+    text = str(goal or "")
+    if not text:
+        return ""
+    pattern = re.compile(r"^\s*assistant_id\s*[:=]\s*([a-z0-9_-]+)\s*$", re.IGNORECASE | re.MULTILINE)
+    match = pattern.search(text)
+    if match:
+        return str(match.group(1) or "").strip().lower()
+    return ""
+
+
+@lru_cache(maxsize=16)
+def _load_assistant_tools(assistant_id: str) -> Set[str]:
+    assistant_key = str(assistant_id or "").strip().lower()
+    if not assistant_key:
+        return set()
+
+    module_name = ASSISTANT_POLICY_MODULES.get(assistant_key)
+    if not module_name:
+        # Fallback mapping: server.assistants/<assistant_name>/policies.py
+        module_name = f"server.assistants.{assistant_key.replace('-', '_')}.policies"
+    try:
+        module = importlib.import_module(module_name)
+    except Exception:
+        return set()
+
+    raw = getattr(module, "ALLOWED_TOOLS", None)
+    if isinstance(raw, (set, list, tuple)):
+        return _normalize_tools(raw)
+    return set()
+
+
+def tools_allowed(tool_name: str, goal: str = "") -> bool:
     name = str(tool_name or "").strip()
-    return bool(name in BASIC_TOOLS or name in COMPETITIVE_ANALYSIS_TOOLS or name.startswith("agent_"))
+    if not name:
+        return False
+    if name.startswith("agent_"):
+        return True
+
+    assistant_id = _extract_assistant_id(goal)
+    if assistant_id:
+        scoped_tools = _load_assistant_tools(assistant_id)
+        if scoped_tools:
+            return name in scoped_tools
+
+    return bool(name in GLOBAL_BASIC_TOOLS or name in GLOBAL_COMPETITIVE_ANALYSIS_TOOLS)

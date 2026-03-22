@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import ast
+import importlib
 import mimetypes
 import re
 from datetime import datetime, timezone
@@ -187,6 +188,15 @@ class ChatMemoryChat(BaseModel):
 class ChatMemoryRequest(BaseModel):
     chats: List[ChatMemoryChat] = Field(default_factory=list)
     active_chat_id: Optional[int] = Field(default=None, ge=1)
+    user_id: Optional[str] = ""
+
+
+class AssistantChatRequest(BaseModel):
+    assistant_id: str = Field(..., min_length=1)
+    message: str = Field(..., min_length=1)
+    assistant_profile_name: str = ""
+    trace_steps: bool = False
+    history: Optional[List[ChatHistoryMessage]] = None
     user_id: Optional[str] = ""
 
 
@@ -896,6 +906,65 @@ def _build_history_payload(history: Optional[List[ChatHistoryMessage]]) -> List[
     return items
 
 
+def _assistant_catalog() -> List[Dict[str, Any]]:
+    def _scope(assistant_id: str, fallback: List[str]) -> List[str]:
+        module_name = f"server.assistants.{assistant_id.replace('-', '_')}.policies"
+        try:
+            module = importlib.import_module(module_name)
+            raw = getattr(module, "ALLOWED_TOOLS", None)
+            if isinstance(raw, (set, list, tuple)):
+                return sorted({str(x).strip() for x in raw if str(x).strip()})
+        except Exception:
+            pass
+        return list(fallback)
+
+    return [
+        {
+            "id": "mail-assistant",
+            "title": "Mail-Assistent",
+            "description": "Automatisiert Mail-Antwortprozesse inkl. Reviews.",
+            "chat_supported": True,
+            "tool_scope": _scope("mail-assistant", [
+                "fetch_unanswered_mails",
+                "read_mail",
+                "read_mail_thread",
+                "read_mail_attachments",
+                "mail_classify",
+                "rag_knowledgebase",
+                "web_crawl_site_whitelist",
+                "score_reply",
+                "policy_check",
+                "answer_mail",
+            ]),
+        },
+        {
+            "id": "booking-assistant",
+            "title": "Buchungs-Assistent",
+            "description": "Dialog fuer Buchungs- und Terminanfragen mit Profilregeln.",
+            "chat_supported": True,
+            "default_profile_name": "dj_booking_default",
+            "tool_scope": _scope("booking-assistant", [
+                "booking_extract_facts",
+                "booking_validate_completeness",
+                "booking_decision_engine",
+                "pricing_compute_quote",
+                "distance_check",
+                "calendar_check_availability",
+                "calendar_create_event",
+                "gmail_answer_mail",
+            ]),
+        },
+    ]
+
+
+def _assistant_by_id(assistant_id: str) -> Optional[Dict[str, Any]]:
+    target = str(assistant_id or "").strip().lower()
+    for item in _assistant_catalog():
+        if str(item.get("id") or "").strip().lower() == target:
+            return dict(item)
+    return None
+
+
 @app.get("/")
 def root() -> FileResponse:
     if not HTML_PATH.exists():
@@ -1149,6 +1218,87 @@ def get_agents_memory(user_id: str = Query("")) -> JSONResponse:
     resolved_user_id = _sanitize_user_id(user_id)
     memory = _load_agents_for_user(resolved_user_id)
     return JSONResponse({"user_id": resolved_user_id, **memory})
+
+
+@app.get("/api/assistants")
+def get_assistants(user_id: str = Query("")) -> JSONResponse:
+    resolved_user_id = _sanitize_user_id(user_id) if user_id.strip() else _get_active_user_id()
+    return JSONResponse({"ok": True, "user_id": resolved_user_id, "assistants": _assistant_catalog()})
+
+
+@app.post("/api/assistants/chat")
+def assistant_chat(req: AssistantChatRequest) -> JSONResponse:
+    user_id = _sanitize_user_id(req.user_id) if (req.user_id or "").strip() else _get_active_user_id()
+    settings = _load_settings_for_user(user_id)
+    ask_url = settings.get("ask_ionos_url", "").strip()
+    api_key = settings.get("api_key", "").strip()
+    provider = str(settings.get("provider", "ionos")).strip().lower()
+    if provider not in {"ionos", "openai"}:
+        provider = "ionos"
+
+    assistant = _assistant_by_id(req.assistant_id)
+    if assistant is None:
+        raise HTTPException(status_code=404, detail=f"Assistant not found: {req.assistant_id}")
+
+    assistant_id = str(assistant.get("id") or "").strip()
+    message = str(req.message or "").strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="message must not be empty")
+
+    if not ask_url:
+        raise HTTPException(status_code=422, detail="Ungültige Vorlagen-Ask URL.")
+
+    headers: Dict[str, str] = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    profile_name = (
+        str(req.assistant_profile_name or "").strip()
+        or str(assistant.get("default_profile_name") or "dj_booking_default")
+    )
+    tool_scope = [str(x).strip() for x in (assistant.get("tool_scope") or []) if str(x).strip()]
+    scope_text = ", ".join(tool_scope) if tool_scope else "-"
+
+    goal_lines = [
+        f"assistant_id: {assistant_id}",
+        f"Rolle: {str(assistant.get('title') or assistant_id)}",
+        f"Kontext: {str(assistant.get('description') or '').strip()}",
+        f"Nutze nur diese Tools, falls notwendig: {scope_text}",
+    ]
+    if assistant_id == "booking-assistant":
+        goal_lines.append(f"Booking-Profilname: {profile_name}")
+    goal_lines.append("Antworte als Assistent auf folgende Operator-Nachricht:")
+    goal_lines.append(message)
+    goal = "\n".join(goal_lines).strip()
+
+    history_payload = _build_history_payload(req.history)
+
+    try:
+        resp = requests.post(
+            ask_url,
+            headers=headers,
+            json={"goal": goal, "history": history_payload, "provider": provider},
+            timeout=180,
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"API request failed: {exc}") from exc
+
+    if resp.status_code >= 400:
+        snippet = resp.text[:500]
+        raise HTTPException(status_code=resp.status_code, detail=f"API error: {snippet}")
+
+    data: Dict[str, Any] = resp.json() if resp.content else {}
+    answer = data.get("answer")
+    if not isinstance(answer, str) or not answer.strip():
+        answer = json.dumps(data, ensure_ascii=False)
+    return JSONResponse(
+        {
+            "ok": True,
+            "assistant_id": assistant_id,
+            "answer": answer,
+            "raw": data,
+        }
+    )
 
 
 @app.get("/api/triggers")

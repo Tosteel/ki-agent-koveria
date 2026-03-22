@@ -18,6 +18,10 @@ from server.services.llm_ionos import IonosLLM
 from .models import (
     BookingAssistantApproveRequest,
     BookingAssistantCounterofferRequest,
+    BookingAssistantOperatorChatRequest,
+    BookingAssistantOperatorChatResponse,
+    BookingAssistantPendingApplyRequest,
+    BookingAssistantPendingNextResponse,
     BookingAssistantRejectRequest,
     BookingAssistantReviewActionResponse,
     BookingAssistantReviewItem,
@@ -25,8 +29,21 @@ from .models import (
     BookingAssistantRunItem,
     BookingAssistantRunRequest,
     BookingAssistantRunResponse,
+    BookingAssistantStatusMeetingResponse,
 )
-from .store import add_review, find_review, has_processed, list_reviews, load_state, mark_processed, save_state
+from .store import (
+    acquire_run_lock,
+    add_review,
+    append_activity,
+    append_run_history,
+    find_review,
+    has_processed,
+    list_reviews,
+    load_state,
+    mark_processed,
+    release_run_lock,
+    save_state,
+)
 
 _TRACE_ENABLED: ContextVar[bool] = ContextVar("booking_assistant_trace_enabled", default=False)
 _TRACE_STEP: ContextVar[int] = ContextVar("booking_assistant_trace_step", default=0)
@@ -34,6 +51,54 @@ _TRACE_STEP: ContextVar[int] = ContextVar("booking_assistant_trace_step", defaul
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _parse_iso_utc(value: str) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _normalize_since_alias(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    low = raw.lower()
+    now_utc = datetime.now(timezone.utc)
+    if low in {"now", "jetzt"}:
+        return now_utc.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    if low in {"today", "heute"}:
+        return now_utc.replace(hour=0, minute=0, second=0, microsecond=0).isoformat().replace("+00:00", "Z")
+    if low in {"yesterday", "gestern"}:
+        day = (now_utc - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        return day.isoformat().replace("+00:00", "Z")
+    return raw
+
+
+def _activity_record(
+    *,
+    mail_id: str,
+    thread_id: str,
+    decision: str,
+    booking_decision: str = "",
+    event_id: str = "",
+    review_id: str = "",
+    reason: str = "",
+) -> Dict[str, Any]:
+    return {
+        "timestamp": _now_iso(),
+        "mail_id": str(mail_id or "").strip(),
+        "thread_id": str(thread_id or "").strip(),
+        "decision": str(decision or "").strip(),
+        "booking_decision": str(booking_decision or "").strip(),
+        "event_id": str(event_id or "").strip(),
+        "review_id": str(review_id or "").strip(),
+        "reason": str(reason or "").strip(),
+    }
 
 
 def _trace_log(title: str, lines: List[str] | None = None) -> None:
@@ -365,18 +430,45 @@ def _retrieve_web_context(
     return {"context_text": merged, "sources": _dedupe_str_list(sources)}
 
 
-def _score_reply(*, registry: ToolRegistry, ctx: ToolContext, user_message: str, draft: str, sources: List[str]) -> Dict[str, Any]:
+def _score_reply(
+    *,
+    registry: ToolRegistry,
+    ctx: ToolContext,
+    user_message: str,
+    draft: str,
+    sources: List[str],
+    booking_decision: str,
+    facts: Dict[str, Any] | None = None,
+    required_fields: List[str] | None = None,
+    missing_fields: List[str] | None = None,
+) -> Dict[str, Any]:
     out = _safe_tool_call(
         registry=registry,
         ctx=ctx,
-        tool="customer_support_reply_score",
+        tool="booking_reply_score",
         args={
             "user_message": user_message,
             "draft_reply": draft,
+            "booking_decision": booking_decision,
+            "facts": dict(facts or {}),
+            "required_fields": [str(x).strip() for x in (required_fields or []) if str(x).strip()],
+            "missing_fields": [str(x).strip() for x in (missing_fields or []) if str(x).strip()],
             "knowledge_evidence": sources[:20],
             "require_actionable": True,
         },
     )
+    if out and out.get("_error"):
+        out = _safe_tool_call(
+            registry=registry,
+            ctx=ctx,
+            tool="customer_support_reply_score",
+            args={
+                "user_message": user_message,
+                "draft_reply": draft,
+                "knowledge_evidence": sources[:20],
+                "require_actionable": True,
+            },
+        )
     if out and not out.get("_error"):
         total = max(0.0, min(1.0, float(out.get("total_score") or 0.0)))
         return {
@@ -1136,6 +1228,8 @@ def _precheck_calendar(
 def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssistantRunRequest) -> BookingAssistantRunResponse:
     trace_token = _TRACE_ENABLED.set(bool(req.trace_steps))
     step_token = _TRACE_STEP.set(0)
+    run_id = f"run_{uuid4().hex[:12]}"
+    started_at = _now_iso()
 
     _trace_log(
         "BOOKING ASSISTANT RUN",
@@ -1150,8 +1244,46 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
     registry = build_registry(settings=settings, user_id=user_id)
     ctx = ToolContext(user_id=user_id, settings=settings, api_key=api_key, goal="booking_assistant_run_once")
     state = load_state(settings, user_id)
+    lock = acquire_run_lock(state, run_id=run_id, ttl_seconds=7200)
+    if not bool(lock.get("acquired")):
+        finished_at = _now_iso()
+        append_run_history(
+            state,
+            {
+                "run_id": run_id,
+                "started_at": started_at,
+                "finished_at": finished_at,
+                "lock_blocked": True,
+                "lock_reason": str(lock.get("reason") or "run_already_active"),
+                "processed_count": 0,
+                "sent_count": 0,
+                "review_count": 0,
+                "skipped_count": 0,
+            },
+        )
+        save_state(settings, user_id, state)
+        _TRACE_ENABLED.reset(trace_token)
+        _TRACE_STEP.reset(step_token)
+        return BookingAssistantRunResponse(
+            ok=True,
+            run_id=run_id,
+            started_at=started_at,
+            finished_at=finished_at,
+            lock_blocked=True,
+            lock_reason=str(lock.get("reason") or "run_already_active"),
+            processed_count=0,
+            sent_count=0,
+            review_count=0,
+            skipped_count=0,
+            items=[],
+        )
 
     profile = _ensure_profile(registry=registry, ctx=ctx, req=req)
+    profile_instructions = (
+        [str(x).strip() for x in (profile.get("instructions") or []) if str(x).strip()]
+        if isinstance(profile.get("instructions"), list)
+        else []
+    )
     rules = profile.get("rules") if isinstance(profile.get("rules"), dict) else {}
     booking_rules = rules.get("booking") if isinstance(rules.get("booking"), dict) else {}
     pricing_rules = rules.get("pricing") if isinstance(rules.get("pricing"), dict) else {}
@@ -1199,6 +1331,16 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
                     reason="already_processed",
                 )
             )
+            append_activity(
+                state,
+                _activity_record(
+                    mail_id=mail_id,
+                    thread_id="",
+                    decision="skipped",
+                    booking_decision="",
+                    reason="already_processed",
+                ),
+            )
             continue
 
         eligible_seen += 1
@@ -1223,6 +1365,16 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
                     decision="failed",
                     reason=f"read_mail_failed:{exc}",
                 )
+            )
+            append_activity(
+                state,
+                _activity_record(
+                    mail_id=mail_id,
+                    thread_id="",
+                    decision="failed",
+                    booking_decision="",
+                    reason=f"read_mail_failed:{exc}",
+                ),
             )
             continue
 
@@ -1251,6 +1403,16 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
                     reason="intent=newsletter",
                 )
             )
+            append_activity(
+                state,
+                _activity_record(
+                    mail_id=mail_id,
+                    thread_id=mail_thread_id,
+                    decision="skipped",
+                    booking_decision="",
+                    reason="intent=newsletter",
+                ),
+            )
             continue
 
         query = "\n".join(
@@ -1269,6 +1431,12 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
         action_templates: Dict[str, str] = {}
         quote_text = ""
         facts_for_review: Dict[str, Any] = {}
+        missing: List[str] = []
+        calendar_event_id = ""
+        instruction_allowed = True
+        instruction_reason = ""
+        instruction_violations: List[str] = []
+        instruction_risk = "low"
         repeated_weekend_rule = False
         priced_offer_in_thread = False
 
@@ -1566,6 +1734,7 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
                                             "location": str(facts.get("location") or ""),
                                         },
                                     )
+                                    calendar_event_id = str(updated.get("event_id") or existing_event_id).strip()
                                     hold_link = str(updated.get("html_link") or "").strip() or str(existing_hold.get("html_link") or "").strip()
                                     _remember_hold(
                                         state=state,
@@ -1573,11 +1742,13 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
                                         mail_id=mail_id,
                                         start_iso=start_iso,
                                         end_iso=end_iso,
-                                        event_id=str(updated.get("event_id") or existing_event_id).strip(),
+                                        event_id=calendar_event_id,
                                         html_link=hold_link,
                                     )
                                 else:
                                     hold_link = str(existing_hold.get("html_link") or "").strip()
+                                if not calendar_event_id:
+                                    calendar_event_id = existing_event_id
                             else:
                                 avail = _safe_tool_call(
                                     registry=registry,
@@ -1600,6 +1771,7 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
                                             "calendar_id": "primary",
                                         },
                                     )
+                                    calendar_event_id = str(created.get("event_id") or "").strip()
                                     hold_link = str(created.get("html_link") or "").strip()
                                     _remember_hold(
                                         state=state,
@@ -1607,7 +1779,7 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
                                         mail_id=mail_id,
                                         start_iso=start_iso,
                                         end_iso=end_iso,
-                                        event_id=str(created.get("event_id") or "").strip(),
+                                        event_id=calendar_event_id,
                                         html_link=hold_link,
                                     )
                                 else:
@@ -1683,15 +1855,52 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
                 user_message=str(mail_payload.get("text") or "").strip(),
                 draft=draft,
                 sources=sources,
+                booking_decision=booking_decision,
+                facts=facts_for_review,
+                required_fields=required_fields,
+                missing_fields=missing if isinstance(missing, list) else [],
             )
         score_total = float(score.get("score_total") or 0.0)
         verdict = str(score.get("verdict") or "needs_review").strip().lower()
+
+        if draft and profile_instructions:
+            instr = _safe_tool_call(
+                registry=registry,
+                ctx=ctx,
+                tool="booking_instruction_check",
+                args={
+                    "instructions": profile_instructions,
+                    "user_message": str(mail_payload.get("text") or "").strip(),
+                    "draft_reply": draft,
+                    "booking_decision": booking_decision,
+                    "facts": facts_for_review,
+                },
+            )
+            if not instr.get("_error"):
+                instruction_allowed = bool(instr.get("allowed"))
+                instruction_reason = str(instr.get("reason") or "").strip()
+                instruction_risk = str(instr.get("risk_level") or "low").strip().lower()
+                instruction_violations = [
+                    str(x).strip()
+                    for x in (instr.get("violations") or [])
+                    if str(x).strip()
+                ]
+                _trace_log(
+                    "INSTRUCTION CHECK",
+                    [
+                        f"mail_id={mail_id}",
+                        f"allowed={instruction_allowed}",
+                        f"risk={instruction_risk}",
+                        f"reason={instruction_reason}",
+                        f"violations={'; '.join(instruction_violations) if instruction_violations else '-'}",
+                    ],
+                )
 
         policy = _policy_check(registry=registry, ctx=ctx, text=draft, strict_mode=req.strict_policy)
         policy_allowed = bool(policy.get("allowed"))
         policy_risk = str(policy.get("risk_level") or "").strip().lower()
 
-        force_human = booking_decision == "human_review"
+        force_human = booking_decision == "human_review" or not instruction_allowed
         if booking_decision in {"", "info_reply"}:
             # info-branch decision based on quality gates.
             can_auto_send = bool(
@@ -1732,6 +1941,18 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
                 )
             )
             _trace_log("MAIL SENT", [f"mail_id={mail_id}", f"booking_decision={booking_decision or 'info_reply'}"])
+            append_activity(
+                state,
+                _activity_record(
+                    mail_id=mail_id,
+                    thread_id=mail_thread_id,
+                    decision="auto_sent",
+                    booking_decision=booking_decision or "info_reply",
+                    event_id=calendar_event_id,
+                    review_id="",
+                    reason=str(score.get("reason") or "auto_sent"),
+                ),
+            )
             continue
 
         if force_human:
@@ -1742,6 +1963,12 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
             reason_parts.append(f"booking_decision={booking_decision}")
         if booking_decision == "human_review" and reasons:
             reason_parts.append("booking_reasons=" + "; ".join(reasons))
+        if not instruction_allowed:
+            reason_parts.append("instruction_blocked")
+            if instruction_reason:
+                reason_parts.append(f"instruction_reason={instruction_reason}")
+            if instruction_violations:
+                reason_parts.append("instruction_violations=" + "; ".join(instruction_violations))
         if not policy_allowed:
             reason_parts.append("policy_blocked")
         reason_text = " | ".join(x for x in reason_parts if x)
@@ -1794,6 +2021,19 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
         mark_processed(state, mail_id)
         processed_count += 1
         review_count += 1
+        review_id = str(review.get("id") or "")
+        append_activity(
+            state,
+            _activity_record(
+                mail_id=mail_id,
+                thread_id=mail_thread_id,
+                decision="needs_human",
+                booking_decision=booking_decision,
+                event_id=calendar_event_id,
+                review_id=review_id,
+                reason=reason_text,
+            ),
+        )
         run_items.append(
             BookingAssistantRunItem(
                 mail_id=mail_id,
@@ -1801,16 +2041,37 @@ def run_once(*, user_id: str, settings: Settings, api_key: str, req: BookingAssi
                 from_email=from_email,
                 decision="needs_human",
                 booking_decision=booking_decision,
-                review_id=str(review.get("id") or ""),
+                review_id=review_id,
                 sent=False,
                 score_total=score_total,
                 reason=reason_text,
             )
         )
 
+    finished_at = _now_iso()
+    release_run_lock(state, run_id=run_id)
+    append_run_history(
+        state,
+        {
+            "run_id": run_id,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "lock_blocked": False,
+            "lock_reason": "",
+            "processed_count": processed_count,
+            "sent_count": sent_count,
+            "review_count": review_count,
+            "skipped_count": skipped_count,
+        },
+    )
     save_state(settings, user_id, state)
     result = BookingAssistantRunResponse(
         ok=True,
+        run_id=run_id,
+        started_at=started_at,
+        finished_at=finished_at,
+        lock_blocked=False,
+        lock_reason="",
         processed_count=processed_count,
         sent_count=sent_count,
         review_count=review_count,
@@ -1920,6 +2181,18 @@ def approve_review(
     review["send_result"] = send_result
     review["draft_body"] = body
     review["selected_action"] = "approve"
+    append_activity(
+        state,
+        _activity_record(
+            mail_id=str(review.get("mail_id") or ""),
+            thread_id=str(send_result.get("thread_id") or ""),
+            decision="operator_approve",
+            booking_decision=str(review.get("booking_decision") or ""),
+            event_id="",
+            review_id=str(review.get("id") or review_id),
+            reason="review_approved",
+        ),
+    )
     save_state(settings, user_id, state)
 
     return BookingAssistantReviewActionResponse(
@@ -1978,6 +2251,18 @@ def reject_review(
     review["send_result"] = send_result
     review["selected_action"] = "reject"
     review["draft_body"] = body
+    append_activity(
+        state,
+        _activity_record(
+            mail_id=str(review.get("mail_id") or ""),
+            thread_id=str(send_result.get("thread_id") or ""),
+            decision="operator_reject",
+            booking_decision=str(review.get("booking_decision") or ""),
+            event_id="",
+            review_id=str(review.get("id") or review_id),
+            reason=reason or "review_rejected",
+        ),
+    )
     save_state(settings, user_id, state)
 
     return BookingAssistantReviewActionResponse(
@@ -2035,6 +2320,18 @@ def counteroffer_review(
     review["send_result"] = send_result
     review["draft_body"] = body
     review["selected_action"] = "counteroffer"
+    append_activity(
+        state,
+        _activity_record(
+            mail_id=str(review.get("mail_id") or ""),
+            thread_id=str(send_result.get("thread_id") or ""),
+            decision="operator_counteroffer",
+            booking_decision=str(review.get("booking_decision") or ""),
+            event_id="",
+            review_id=str(review.get("id") or review_id),
+            reason="review_counteroffered",
+        ),
+    )
     save_state(settings, user_id, state)
 
     return BookingAssistantReviewActionResponse(
@@ -2043,4 +2340,542 @@ def counteroffer_review(
         status=str(review.get("status") or "counteroffered"),
         sent=bool(review.get("sent")),
         reason=str(review.get("reason") or ""),
+    )
+
+
+def _review_summary_item(review: Dict[str, Any]) -> Dict[str, Any]:
+    templates = review.get("action_templates") if isinstance(review.get("action_templates"), dict) else {}
+    return {
+        "id": str(review.get("id") or "").strip(),
+        "mail_id": str(review.get("mail_id") or "").strip(),
+        "mailbox": str(review.get("mailbox") or "INBOX").strip(),
+        "from_email": str(review.get("from_email") or "").strip(),
+        "subject": str(review.get("subject") or "").strip(),
+        "status": str(review.get("status") or "").strip(),
+        "booking_decision": str(review.get("booking_decision") or "").strip(),
+        "reason": str(review.get("reason") or "").strip(),
+        "created_at": str(review.get("created_at") or "").strip(),
+        "score_total": float(review.get("score_total") or 0.0),
+        "ticket_id": str(review.get("ticket_id") or "").strip(),
+        "options": {
+            "approve": str(templates.get("approve") or "").strip(),
+            "reject": str(templates.get("reject") or "").strip(),
+            "counteroffer": str(templates.get("counteroffer") or "").strip(),
+        },
+    }
+
+
+def _normalize_blocker_reason(reason: str) -> str:
+    raw = str(reason or "").strip()
+    if not raw:
+        return "Unbekannter Blocker"
+    low = raw.lower()
+    if "maximaldauer" in low or "dauer" in low and ">" in low:
+        return "Dauer ueber Maximum"
+    if "wochenende" in low:
+        return "Wochenendregel verletzt"
+    if "angebot" in low and "best" in low:
+        return "Angebot noch nicht bestaetigt"
+    if "instruction_blocked" in low:
+        return "Profil-Instruktionen blockieren Auto-Versand"
+    if "policy_blocked" in low:
+        return "Policy-Check blockiert Versand"
+    if "kalender" in low and "belegt" in low:
+        return "Kalenderfenster belegt"
+    if "distance" in low or "distanz" in low:
+        return "Distanzregel verletzt"
+    return raw[:120]
+
+
+def _build_status_recommendations(*, top_labels: List[str], pending_count: int) -> List[str]:
+    recommendations: List[str] = []
+    labels = {x for x in top_labels if x}
+    if "Dauer ueber Maximum" in labels:
+        recommendations.append("Bei langen Anfragen aktiv Counteroffer mit maximal erlaubter Dauer senden.")
+    if "Wochenendregel verletzt" in labels:
+        recommendations.append("Direkt naechste Wochenend-Termine als Alternativen vorschlagen.")
+    if "Angebot noch nicht bestaetigt" in labels:
+        recommendations.append("Angebot klar ausweisen und explizite Angebotsbestaetigung anfordern.")
+    if "Kalenderfenster belegt" in labels:
+        recommendations.append("Bei belegten Slots sofort 2-3 alternative Zeitfenster anbieten.")
+    if pending_count > 0:
+        recommendations.append("Offene Pendings mit /pending/next nacheinander triagieren.")
+    if not recommendations:
+        recommendations.append("Aktueller Ablauf ist stabil; keine akuten Prozess-Blocker erkannt.")
+    return recommendations[:5]
+
+
+def get_status_meeting(
+    *,
+    user_id: str,
+    settings: Settings,
+    since: str = "",
+) -> BookingAssistantStatusMeetingResponse:
+    state = load_state(settings, user_id)
+    since_input = str(since or "").strip()
+    since_raw = _normalize_since_alias(since_input)
+    since_dt = _parse_iso_utc(since_raw) if since_raw else None
+    if since_raw and since_dt is None:
+        raise HTTPException(status_code=422, detail="Invalid 'since' timestamp. Use ISO-8601.")
+
+    activity = state.get("activity_log") if isinstance(state.get("activity_log"), list) else []
+    filtered_activity: List[Dict[str, Any]] = []
+    for item in activity:
+        if not isinstance(item, dict):
+            continue
+        ts = _parse_iso_utc(str(item.get("timestamp") or "").strip())
+        if since_dt and (ts is None or ts < since_dt):
+            continue
+        filtered_activity.append(dict(item))
+
+    filtered_activity.sort(key=lambda x: str(x.get("timestamp") or ""))
+    recent_activity = filtered_activity[-20:]
+
+    confirmed_items: List[Dict[str, Any]] = []
+    rejected_items: List[Dict[str, Any]] = []
+    blocker_reasons: List[str] = []
+    for item in filtered_activity:
+        decision = str(item.get("decision") or "").strip().lower()
+        booking_decision = str(item.get("booking_decision") or "").strip().lower()
+        if decision == "operator_approve" or (decision == "auto_sent" and booking_decision == "auto_accept"):
+            confirmed_items.append(
+                {
+                    "timestamp": str(item.get("timestamp") or "").strip(),
+                    "mail_id": str(item.get("mail_id") or "").strip(),
+                    "thread_id": str(item.get("thread_id") or "").strip(),
+                    "event_id": str(item.get("event_id") or "").strip(),
+                    "reason": str(item.get("reason") or "").strip(),
+                }
+            )
+        if decision == "operator_reject" or (decision == "auto_sent" and booking_decision == "auto_decline"):
+            rejected_items.append(
+                {
+                    "timestamp": str(item.get("timestamp") or "").strip(),
+                    "mail_id": str(item.get("mail_id") or "").strip(),
+                    "thread_id": str(item.get("thread_id") or "").strip(),
+                    "reason": str(item.get("reason") or "").strip(),
+                }
+            )
+        if decision in {"needs_human", "failed"}:
+            blocker_reasons.append(str(item.get("reason") or "").strip())
+
+    pending_reviews = list_reviews(state, status="pending")
+    pending_items = [_review_summary_item(r) for r in pending_reviews if isinstance(r, dict)]
+    for rv in pending_reviews:
+        if isinstance(rv, dict):
+            blocker_reasons.append(str(rv.get("reason") or "").strip())
+
+    reason_counts: Dict[str, int] = {}
+    for reason in blocker_reasons:
+        label = _normalize_blocker_reason(reason)
+        reason_counts[label] = int(reason_counts.get(label) or 0) + 1
+    top_blockers = sorted(
+        ({"reason": k, "count": v} for k, v in reason_counts.items()),
+        key=lambda x: x["count"],
+        reverse=True,
+    )[:5]
+    top_labels = [str(x.get("reason") or "") for x in top_blockers]
+    recommendations = _build_status_recommendations(top_labels=top_labels, pending_count=len(pending_items))
+
+    since_text = since_raw or ""
+    generated_at = _now_iso()
+    text = (
+        f"Status seit {since_text or 'Beginn'}: "
+        f"{len(confirmed_items)} bestaetigt, "
+        f"{len(rejected_items)} abgelehnt, "
+        f"{len(pending_items)} pending."
+    )
+
+    return BookingAssistantStatusMeetingResponse(
+        ok=True,
+        since=since_text,
+        generated_at=generated_at,
+        total_processed=len(filtered_activity),
+        confirmed_count=len(confirmed_items),
+        rejected_count=len(rejected_items),
+        pending_count=len(pending_items),
+        confirmed_items=confirmed_items[:20],
+        rejected_items=rejected_items[:20],
+        pending_items=pending_items[:20],
+        top_blockers=top_blockers,
+        recommendations=recommendations,
+        recent_activity=recent_activity,
+        text=text,
+    )
+
+
+def get_pending_next(*, user_id: str, settings: Settings) -> BookingAssistantPendingNextResponse:
+    state = load_state(settings, user_id)
+    pending = [r for r in list_reviews(state, status="pending") if isinstance(r, dict)]
+    pending.sort(key=lambda x: str(x.get("created_at") or ""))
+    if not pending:
+        return BookingAssistantPendingNextResponse(
+            ok=True,
+            has_pending=False,
+            review={},
+            options={},
+            text="Keine offenen Pending-Faelle vorhanden.",
+        )
+
+    review = pending[0]
+    summary = _review_summary_item(review)
+    options = dict(summary.get("options") or {})
+    summary["options"] = options
+    return BookingAssistantPendingNextResponse(
+        ok=True,
+        has_pending=True,
+        review=summary,
+        options=options,
+        text=f"Naechster Pending-Fall: {summary.get('id')} ({summary.get('subject') or 'ohne Betreff'}).",
+    )
+
+
+def apply_pending_action(
+    *,
+    user_id: str,
+    settings: Settings,
+    api_key: str,
+    review_id: str,
+    req: BookingAssistantPendingApplyRequest,
+) -> BookingAssistantReviewActionResponse:
+    action = str(req.action or "").strip().lower()
+    if action == "approve":
+        return approve_review(
+            user_id=user_id,
+            settings=settings,
+            api_key=api_key,
+            review_id=review_id,
+            req=BookingAssistantApproveRequest(
+                provider=req.provider,
+                edited_body=req.edited_body,
+                subject=req.subject,
+            ),
+        )
+    if action == "reject":
+        return reject_review(
+            user_id=user_id,
+            settings=settings,
+            api_key=api_key,
+            review_id=review_id,
+            req=BookingAssistantRejectRequest(
+                provider=req.provider,
+                edited_body=req.edited_body,
+                subject=req.subject,
+                reason=req.reason,
+                send_to_customer=req.send_to_customer,
+            ),
+        )
+    if action == "counteroffer":
+        return counteroffer_review(
+            user_id=user_id,
+            settings=settings,
+            api_key=api_key,
+            review_id=review_id,
+            req=BookingAssistantCounterofferRequest(
+                provider=req.provider,
+                edited_body=req.edited_body,
+                subject=req.subject,
+            ),
+        )
+    raise HTTPException(status_code=422, detail=f"Unsupported action: {action}")
+
+
+def _heuristic_operator_parse(message: str, pending_ids: List[str]) -> Dict[str, Any]:
+    text = str(message or "").strip()
+    low = text.lower()
+    review_match = re.search(r"\b[a-f0-9]{32}\b", low)
+    review_id = review_match.group(0) if review_match else ""
+
+    action = "none"
+    if "counteroffer" in low or "gegenangebot" in low:
+        action = "counteroffer"
+    elif "approve" in low or "freig" in low or re.search(r"best[aä]tig", low):
+        action = "approve"
+    elif "reject" in low or "ablehn" in low:
+        action = "reject"
+
+    intent = "status_meeting"
+    if action != "none":
+        intent = "apply_action"
+    elif "pending" in low and ("next" in low or "naechst" in low or re.search(r"n[aä]chst", low)):
+        intent = "triage_pending"
+    elif "pending" in low:
+        intent = "list_pending"
+    elif "profil" in low or "profile" in low or "regel" in low or "instruction" in low:
+        intent = "profile_update"
+    elif "status" in low or "meeting" in low or "zusammenfassung" in low:
+        intent = "status_meeting"
+
+    since = ""
+    date_match = re.search(r"\b\d{4}-\d{2}-\d{2}\b", text)
+    if date_match:
+        since = f"{date_match.group(0)}T00:00:00Z"
+
+    if not review_id and len(pending_ids) == 1 and action != "none":
+        review_id = pending_ids[0]
+
+    return {
+        "intent": intent,
+        "action": action,
+        "review_id": review_id,
+        "since": since,
+        "instructions_add": [],
+        "rules_patch": {},
+        "reply_body": "",
+        "reason": "heuristic_fallback",
+    }
+
+
+def _llm_operator_parse(*, message: str, pending_ids: List[str]) -> Dict[str, Any]:
+    client = IonosLLM()
+    if not client.enabled():
+        return _heuristic_operator_parse(message, pending_ids)
+
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "booking_operator_chat_intent",
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "intent": {
+                        "type": "string",
+                        "enum": [
+                            "status_meeting",
+                            "profile_update",
+                            "list_pending",
+                            "triage_pending",
+                            "apply_action",
+                        ],
+                    },
+                    "action": {"type": "string", "enum": ["approve", "reject", "counteroffer", "none"]},
+                    "review_id": {"type": "string"},
+                    "since": {"type": "string"},
+                    "instructions_add": {"type": "array", "items": {"type": "string"}},
+                    "rules_patch": {"type": "object", "additionalProperties": True},
+                    "reply_body": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+                "required": [
+                    "intent",
+                    "action",
+                    "review_id",
+                    "since",
+                    "instructions_add",
+                    "rules_patch",
+                    "reply_body",
+                    "reason",
+                ],
+            },
+            "strict": True,
+        },
+    }
+    pending_hint = ", ".join(pending_ids[:15]) if pending_ids else "-"
+    prompt = (
+        "Mappe die Operator-Nachricht auf eine der Intent-Klassen:\n"
+        "- status_meeting: Statusbericht anfordern\n"
+        "- profile_update: Profilregeln/-instruktionen anpassen\n"
+        "- list_pending: nur Pending-Liste sehen\n"
+        "- triage_pending: naechsten Pending-Fall aufrufen\n"
+        "- apply_action: konkrete Aktion auf Pending anwenden\n\n"
+        "Bei apply_action falls vorhanden action/review_id extrahieren.\n"
+        "Bei profile_update relevante instructions_add und rules_patch extrahieren.\n"
+        "since nur als ISO setzen, falls klar erkennbar, sonst leer.\n"
+        "reply_body nur setzen, wenn ein expliziter Entwurfstext gewuenscht ist.\n\n"
+        f"Bekannte Pending IDs: {pending_hint}\n\n"
+        f"Operator-Nachricht:\n{message.strip()}"
+    )
+    try:
+        completion = client.chat_completions(
+            messages=[
+                {"role": "system", "content": "Du bist ein Intent-Parser. Antworte strikt im JSON-Schema."},
+                {"role": "user", "content": prompt},
+            ],
+            response_format=response_format,
+            max_tokens=260,
+            temperature=0.0,
+            top_p=0.1,
+        )
+        raw = IonosLLM.extract_text(completion)
+        parsed = json.loads(raw) if raw else {}
+        out = {
+            "intent": str(parsed.get("intent") or "").strip(),
+            "action": str(parsed.get("action") or "none").strip(),
+            "review_id": str(parsed.get("review_id") or "").strip(),
+            "since": str(parsed.get("since") or "").strip(),
+            "instructions_add": [
+                str(x).strip()
+                for x in (parsed.get("instructions_add") or [])
+                if str(x).strip()
+            ],
+            "rules_patch": parsed.get("rules_patch") if isinstance(parsed.get("rules_patch"), dict) else {},
+            "reply_body": str(parsed.get("reply_body") or "").strip(),
+            "reason": str(parsed.get("reason") or "").strip(),
+        }
+        if out["intent"] not in {"status_meeting", "profile_update", "list_pending", "triage_pending", "apply_action"}:
+            return _heuristic_operator_parse(message, pending_ids)
+        if out["action"] not in {"approve", "reject", "counteroffer", "none"}:
+            out["action"] = "none"
+        return out
+    except Exception:
+        return _heuristic_operator_parse(message, pending_ids)
+
+
+def operator_chat(
+    *,
+    user_id: str,
+    settings: Settings,
+    api_key: str,
+    req: BookingAssistantOperatorChatRequest,
+) -> BookingAssistantOperatorChatResponse:
+    state = load_state(settings, user_id)
+    pending_reviews = [r for r in list_reviews(state, status="pending") if isinstance(r, dict)]
+    pending_reviews.sort(key=lambda x: str(x.get("created_at") or ""))
+    pending_ids = [str(r.get("id") or "").strip() for r in pending_reviews if str(r.get("id") or "").strip()]
+    parsed = _llm_operator_parse(message=req.message, pending_ids=pending_ids)
+    intent = str(parsed.get("intent") or "status_meeting").strip()
+
+    if intent == "status_meeting":
+        since = str(parsed.get("since") or "").strip()
+        status = get_status_meeting(user_id=user_id, settings=settings, since=since)
+        return BookingAssistantOperatorChatResponse(
+            ok=True,
+            intent=intent,
+            action_taken="status_meeting",
+            data=status.model_dump(),
+            text=status.text,
+        )
+
+    if intent == "list_pending":
+        items = [_review_summary_item(r) for r in pending_reviews[:20]]
+        return BookingAssistantOperatorChatResponse(
+            ok=True,
+            intent=intent,
+            action_taken="list_pending",
+            data={"pending_count": len(pending_reviews), "pending": items},
+            text=f"Offene Pendings: {len(pending_reviews)}",
+        )
+
+    if intent == "triage_pending":
+        nxt = get_pending_next(user_id=user_id, settings=settings)
+        return BookingAssistantOperatorChatResponse(
+            ok=True,
+            intent=intent,
+            action_taken="triage_pending",
+            data=nxt.model_dump(),
+            text=nxt.text,
+        )
+
+    if intent == "apply_action":
+        action = str(parsed.get("action") or "none").strip().lower()
+        review_id = str(parsed.get("review_id") or "").strip()
+        if not review_id and len(pending_ids) == 1:
+            review_id = pending_ids[0]
+        if not review_id:
+            return BookingAssistantOperatorChatResponse(
+                ok=True,
+                intent=intent,
+                action_taken="apply_action_missing_review_id",
+                data={"pending_ids": pending_ids[:10]},
+                text="Bitte geben Sie eine review_id an oder lassen Sie sich den naechsten Pending-Fall zeigen.",
+            )
+        if action not in {"approve", "reject", "counteroffer"}:
+            return BookingAssistantOperatorChatResponse(
+                ok=True,
+                intent=intent,
+                action_taken="apply_action_missing_action",
+                data={"review_id": review_id},
+                text="Bitte Aktion angeben: approve, reject oder counteroffer.",
+            )
+        apply_result = apply_pending_action(
+            user_id=user_id,
+            settings=settings,
+            api_key=api_key,
+            review_id=review_id,
+            req=BookingAssistantPendingApplyRequest(
+                provider=req.provider,
+                action=action,
+                edited_body=str(parsed.get("reply_body") or "").strip(),
+                subject="",
+                reason="",
+                send_to_customer=True,
+            ),
+        )
+        next_pending = get_pending_next(user_id=user_id, settings=settings)
+        return BookingAssistantOperatorChatResponse(
+            ok=True,
+            intent=intent,
+            action_taken=f"apply_action:{action}",
+            data={"result": apply_result.model_dump(), "next_pending": next_pending.model_dump()},
+            text=f"Aktion {action} fuer Review {review_id} ausgefuehrt.",
+        )
+
+    if intent == "profile_update":
+        instructions_add = [str(x).strip() for x in (parsed.get("instructions_add") or []) if str(x).strip()]
+        rules_patch = parsed.get("rules_patch") if isinstance(parsed.get("rules_patch"), dict) else {}
+        if not instructions_add and not rules_patch:
+            instructions_add = [str(req.message or "").strip()]
+
+        registry = build_registry(settings=settings, user_id=user_id)
+        ctx = ToolContext(user_id=user_id, settings=settings, api_key=api_key, goal="booking_assistant_operator_chat")
+        profile_name = str(req.assistant_profile_name or "booking_default").strip() or "booking_default"
+
+        get_out = _safe_tool_call(
+            registry=registry,
+            ctx=ctx,
+            tool="assistent_profile_get",
+            args={"assistent_profile_name": profile_name},
+        )
+        if get_out.get("_error"):
+            base = _default_profile(profile_name)
+            _tool_call(
+                registry=registry,
+                ctx=ctx,
+                tool="assistent_profile_create",
+                args={
+                    "assistent_profile_name": profile_name,
+                    "codename": str(base.get("codename") or ""),
+                    "instructions": list(base.get("instructions") or []),
+                    "rules": dict(base.get("rules") or {}),
+                },
+            )
+
+        update_out = _tool_call(
+            registry=registry,
+            ctx=ctx,
+            tool="assistent_profile_update",
+            args={
+                "assistent_profile_name": profile_name,
+                "instructions_add": instructions_add,
+                "rules_patch": rules_patch,
+            },
+        )
+        current = _tool_call(
+            registry=registry,
+            ctx=ctx,
+            tool="assistent_profile_get",
+            args={"assistent_profile_name": profile_name},
+        )
+        return BookingAssistantOperatorChatResponse(
+            ok=True,
+            intent=intent,
+            action_taken="profile_update",
+            data={
+                "profile_name": profile_name,
+                "instructions_add": instructions_add,
+                "rules_patch": rules_patch,
+                "update": update_out,
+                "profile": current.get("profile") if isinstance(current, dict) else {},
+            },
+            text=f"Profil {profile_name} wurde aktualisiert.",
+        )
+
+    status = get_status_meeting(user_id=user_id, settings=settings, since="")
+    return BookingAssistantOperatorChatResponse(
+        ok=True,
+        intent="status_meeting",
+        action_taken="fallback_status_meeting",
+        data=status.model_dump(),
+        text=status.text,
     )

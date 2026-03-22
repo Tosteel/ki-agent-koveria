@@ -39,6 +39,11 @@ class BookingAssistantRunItem(BaseModel):
 
 class BookingAssistantRunResponse(BaseModel):
     ok: bool = True
+    run_id: str = ""
+    started_at: str = ""
+    finished_at: str = ""
+    lock_blocked: bool = False
+    lock_reason: str = ""
     processed_count: int = 0
     sent_count: int = 0
     review_count: int = 0
@@ -100,3 +105,52 @@ class BookingAssistantReviewActionResponse(BaseModel):
     status: str
     sent: bool = False
     reason: str = ""
+
+
+class BookingAssistantStatusMeetingResponse(BaseModel):
+    ok: bool = True
+    since: str = ""
+    generated_at: str = ""
+    total_processed: int = 0
+    confirmed_count: int = 0
+    rejected_count: int = 0
+    pending_count: int = 0
+    confirmed_items: List[Dict[str, Any]] = Field(default_factory=list)
+    rejected_items: List[Dict[str, Any]] = Field(default_factory=list)
+    pending_items: List[Dict[str, Any]] = Field(default_factory=list)
+    top_blockers: List[Dict[str, Any]] = Field(default_factory=list)
+    recommendations: List[str] = Field(default_factory=list)
+    recent_activity: List[Dict[str, Any]] = Field(default_factory=list)
+    text: str = ""
+
+
+class BookingAssistantPendingNextResponse(BaseModel):
+    ok: bool = True
+    has_pending: bool = False
+    review: Dict[str, Any] = Field(default_factory=dict)
+    options: Dict[str, str] = Field(default_factory=dict)
+    text: str = ""
+
+
+class BookingAssistantPendingApplyRequest(BaseModel):
+    provider: str = Field(default="ionos")
+    action: Literal["approve", "reject", "counteroffer"]
+    edited_body: str = ""
+    subject: str = ""
+    reason: str = ""
+    send_to_customer: bool = True
+
+
+class BookingAssistantOperatorChatRequest(BaseModel):
+    provider: str = Field(default="ionos")
+    assistant_profile_name: str = Field(default="booking_default")
+    message: str = Field(..., min_length=1)
+    trace_steps: bool = Field(default=False)
+
+
+class BookingAssistantOperatorChatResponse(BaseModel):
+    ok: bool = True
+    intent: str = ""
+    action_taken: str = ""
+    data: Dict[str, Any] = Field(default_factory=dict)
+    text: str = ""

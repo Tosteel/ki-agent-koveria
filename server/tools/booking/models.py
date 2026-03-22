@@ -47,3 +47,49 @@ class BookingDecisionEngineResponse(BaseModel):
     reasons: List[str] = Field(default_factory=list)
     flags: Dict[str, Any] = Field(default_factory=dict)
     text: str = ""
+
+
+class BookingReplyScoreRequest(BaseModel):
+    user_message: str = Field(default="", description="Originale Kundenanfrage inkl. optionalem Thread.")
+    draft_reply: str = Field(..., min_length=1, description="Geplanter Antwortentwurf.")
+    booking_decision: str = Field(default="", description="Aktuelle Booking-Entscheidung (z. B. auto_accept).")
+    facts: Dict[str, Any] = Field(default_factory=dict, description="Extrahierte Booking-Fakten.")
+    required_fields: List[str] = Field(default_factory=list, description="Pflichtfelder aus dem Profil.")
+    missing_fields: List[str] = Field(default_factory=list, description="Aktuell fehlende Pflichtfelder.")
+    knowledge_evidence: List[str] = Field(default_factory=list, description="Optionale Evidenzquellen (RAG/Web).")
+    require_actionable: bool = Field(
+        default=True,
+        description="Wenn true, soll die Antwort einen klaren naechsten Prozessschritt enthalten.",
+    )
+
+
+class BookingReplyScoreResponse(BaseModel):
+    total_score: float = 0.0
+    verdict: str = "needs_review"
+    dimensions: Dict[str, float] = Field(default_factory=dict)
+    reasons: List[str] = Field(default_factory=list)
+    improvements: List[str] = Field(default_factory=list)
+    next_step: str = ""
+    text: str = ""
+    model: str = ""
+    fallback_used: bool = False
+
+
+class BookingInstructionCheckRequest(BaseModel):
+    instructions: List[str] = Field(default_factory=list, description="Freitext-Instruktionen aus dem Assistant-Profil.")
+    user_message: str = Field(default="", description="Originale Kundenanfrage inkl. optionalem Thread.")
+    draft_reply: str = Field(..., min_length=1, description="Geplante Antwort, die geprueft werden soll.")
+    booking_decision: str = Field(default="", description="Aktuelle Booking-Entscheidung.")
+    facts: Dict[str, Any] = Field(default_factory=dict, description="Extrahierte Buchungsfakten.")
+
+
+class BookingInstructionCheckResponse(BaseModel):
+    allowed: bool = True
+    confidence: float = 0.0
+    risk_level: str = "low"
+    violations: List[str] = Field(default_factory=list)
+    suggestions: List[str] = Field(default_factory=list)
+    reason: str = ""
+    text: str = ""
+    model: str = ""
+    fallback_used: bool = False

@@ -291,6 +291,389 @@ def _parse_json_obj(text: str) -> Dict[str, object]:
     return {}
 
 
+def _clamp01(value: Any) -> float:
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except Exception:
+        return 0.0
+
+
+def _fallback_booking_reply_score(
+    *,
+    user_message: str,
+    draft_reply: str,
+    booking_decision: str,
+    missing_fields: List[str] | None,
+    require_actionable: bool,
+) -> Dict[str, Any]:
+    user_l = str(user_message or "").lower()
+    draft_l = str(draft_reply or "").lower()
+    overlaps = 0
+    for tok in re.findall(r"[A-Za-z0-9_]{4,}", user_l):
+        if tok in draft_l:
+            overlaps += 1
+    booking_fit = min(1.0, 0.4 + overlaps * 0.06)
+
+    process_progress = 0.6
+    md = [str(x).strip().lower() for x in (missing_fields or []) if str(x).strip()]
+    decision_l = str(booking_decision or "").strip().lower()
+    if decision_l == "need_clarification":
+        asks_question = "?" in draft_reply or "bitte" in draft_l
+        process_progress = 0.8 if asks_question else 0.45
+        if md and any(x in draft_l for x in md):
+            process_progress = min(1.0, process_progress + 0.1)
+    elif decision_l == "auto_accept":
+        has_confirm = any(x in draft_l for x in ("bestaetigt", "reserviert", "zugesagt", "verbindlich"))
+        process_progress = 0.85 if has_confirm else 0.55
+    elif decision_l == "auto_decline":
+        has_reason = any(x in draft_l for x in ("grund", "leider", "nicht zusagen", "nicht moeglich"))
+        process_progress = 0.8 if has_reason else 0.5
+    elif decision_l == "human_review":
+        process_progress = 0.75 if "pruefung" in draft_l or "persoenlich" in draft_l else 0.5
+
+    wc = len(re.findall(r"[A-Za-z0-9_]+", draft_reply or ""))
+    clarity = 0.9 if wc >= 30 else 0.7 if wc >= 15 else 0.45
+    groundedness = 0.7
+    tone = 0.8
+    if any(bad in draft_l for bad in ("idiot", "dumm", "stupid", "nonsense")):
+        tone = 0.2
+    actionable = 0.65
+    if require_actionable:
+        actionable_terms = ("naechste", "schritt", "bitte", "bestaetigen", "alternativ", "rueckmeldung", "vorschlag")
+        actionable = 0.85 if any(t in draft_l for t in actionable_terms) else 0.35
+
+    dimensions = {
+        "booking_fit": round(_clamp01(booking_fit), 3),
+        "process_progress": round(_clamp01(process_progress), 3),
+        "groundedness": round(_clamp01(groundedness), 3),
+        "clarity": round(_clamp01(clarity), 3),
+        "tone": round(_clamp01(tone), 3),
+        "actionable": round(_clamp01(actionable), 3),
+    }
+    total = round(
+        dimensions["booking_fit"] * 0.25
+        + dimensions["process_progress"] * 0.25
+        + dimensions["groundedness"] * 0.15
+        + dimensions["clarity"] * 0.15
+        + dimensions["tone"] * 0.10
+        + dimensions["actionable"] * 0.10,
+        3,
+    )
+    if total >= 0.8:
+        verdict = "send"
+    elif total >= 0.6:
+        verdict = "needs_review"
+    else:
+        verdict = "reject"
+
+    reasons: List[str] = []
+    improvements: List[str] = []
+    if dimensions["process_progress"] < 0.6:
+        reasons.append("Antwort bringt den Booking-Prozess nicht klar voran.")
+        improvements.append("Naechsten Prozessschritt explizit formulieren.")
+    if dimensions["actionable"] < 0.6:
+        reasons.append("Antwort enthaelt zu wenig konkrete Handlungsaufforderung.")
+        improvements.append("Klar um eine bestimmte Rueckmeldung bitten.")
+    if dimensions["booking_fit"] < 0.6:
+        reasons.append("Antwort passt nicht praezise zur Buchungsanfrage.")
+        improvements.append("Direkt auf Anfragekontext und Regeln eingehen.")
+
+    return {
+        "total_score": total,
+        "verdict": verdict,
+        "dimensions": dimensions,
+        "reasons": reasons,
+        "improvements": improvements,
+        "next_step": "Manuelle Pruefung empfohlen." if verdict != "send" else "Kann versendet werden.",
+        "text": f"Score={total:.2f}, verdict={verdict}",
+        "model": "",
+        "fallback_used": True,
+    }
+
+
+def booking_reply_score(
+    *,
+    user_message: str,
+    draft_reply: str,
+    booking_decision: str = "",
+    facts: Dict[str, Any] | None = None,
+    required_fields: List[str] | None = None,
+    missing_fields: List[str] | None = None,
+    knowledge_evidence: List[str] | None = None,
+    require_actionable: bool = True,
+) -> Dict[str, Any]:
+    draft = str(draft_reply or "").strip()
+    if not draft:
+        raise HTTPException(status_code=422, detail="draft_reply is required")
+
+    msg = str(user_message or "").strip()
+    decision = str(booking_decision or "").strip().lower()
+    ff = dict(facts or {})
+    req_fields = [str(x).strip() for x in (required_fields or []) if str(x).strip()]
+    miss_fields = [str(x).strip() for x in (missing_fields or []) if str(x).strip()]
+    evidence = [str(x).strip() for x in (knowledge_evidence or []) if str(x).strip()]
+
+    client = IonosLLM()
+    if not client.enabled():
+        return _fallback_booking_reply_score(
+            user_message=msg,
+            draft_reply=draft,
+            booking_decision=decision,
+            missing_fields=miss_fields,
+            require_actionable=bool(require_actionable),
+        )
+
+    schema = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "booking_reply_score",
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "total_score": {"type": "number", "minimum": 0, "maximum": 1},
+                    "verdict": {"type": "string", "enum": ["send", "needs_review", "reject"]},
+                    "dimensions": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "booking_fit": {"type": "number", "minimum": 0, "maximum": 1},
+                            "process_progress": {"type": "number", "minimum": 0, "maximum": 1},
+                            "groundedness": {"type": "number", "minimum": 0, "maximum": 1},
+                            "clarity": {"type": "number", "minimum": 0, "maximum": 1},
+                            "tone": {"type": "number", "minimum": 0, "maximum": 1},
+                            "actionable": {"type": "number", "minimum": 0, "maximum": 1},
+                        },
+                        "required": [
+                            "booking_fit",
+                            "process_progress",
+                            "groundedness",
+                            "clarity",
+                            "tone",
+                            "actionable",
+                        ],
+                    },
+                    "reasons": {"type": "array", "items": {"type": "string"}},
+                    "improvements": {"type": "array", "items": {"type": "string"}},
+                    "next_step": {"type": "string"},
+                    "text": {"type": "string"},
+                },
+                "required": [
+                    "total_score",
+                    "verdict",
+                    "dimensions",
+                    "reasons",
+                    "improvements",
+                    "next_step",
+                    "text",
+                ],
+            },
+            "strict": True,
+        },
+    }
+
+    completion = client.chat_completions(
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Du bist ein strenger QA-Reviewer fuer Booking-E-Mail-Antworten.\n"
+                    "Bewerte, ob der Draft zur Anfrage passt UND den Prozess sinnvoll voranbringt.\n"
+                    "Prozessfortschritt bedeutet z. B.:\n"
+                    "- fehlende Pflichtdaten gezielt abfragen,\n"
+                    "- ein konkretes Angebot kommunizieren,\n"
+                    "- Angebotsbestaetigung einholen,\n"
+                    "- verbindlich bestaetigen oder sauber ablehnen.\n"
+                    "Keine Halluzinationen. Nutze nur den gegebenen Kontext.\n"
+                    "Wenn unklar: konservativ bewerten.\n"
+                    "Antworte ausschliesslich als JSON laut Schema."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"booking_decision={decision or '(none)'}\n"
+                    f"require_actionable={bool(require_actionable)}\n"
+                    f"required_fields={json.dumps(req_fields, ensure_ascii=False)}\n"
+                    f"missing_fields={json.dumps(miss_fields, ensure_ascii=False)}\n"
+                    f"facts={json.dumps(ff, ensure_ascii=False)}\n"
+                    f"knowledge_evidence={json.dumps(evidence[:20], ensure_ascii=False)}\n\n"
+                    f"User message:\n{msg}\n\n"
+                    f"Draft reply:\n{draft}"
+                ),
+            },
+        ],
+        response_format=schema,
+        temperature=0.0,
+        top_p=0.1,
+        max_tokens=420,
+    )
+
+    parsed = _parse_json_obj(client.extract_text(completion))
+    if not parsed:
+        return _fallback_booking_reply_score(
+            user_message=msg,
+            draft_reply=draft,
+            booking_decision=decision,
+            missing_fields=miss_fields,
+            require_actionable=bool(require_actionable),
+        ) | {"model": getattr(client.cfg, "model", "")}
+
+    dims_raw = parsed.get("dimensions") if isinstance(parsed.get("dimensions"), dict) else {}
+    dimensions = {
+        "booking_fit": round(_clamp01(dims_raw.get("booking_fit")), 3),
+        "process_progress": round(_clamp01(dims_raw.get("process_progress")), 3),
+        "groundedness": round(_clamp01(dims_raw.get("groundedness")), 3),
+        "clarity": round(_clamp01(dims_raw.get("clarity")), 3),
+        "tone": round(_clamp01(dims_raw.get("tone")), 3),
+        "actionable": round(_clamp01(dims_raw.get("actionable")), 3),
+    }
+    total = round(_clamp01(parsed.get("total_score")), 3)
+    verdict = str(parsed.get("verdict") or "").strip().lower()
+    if verdict not in {"send", "needs_review", "reject"}:
+        verdict = "send" if total >= 0.8 else "needs_review" if total >= 0.6 else "reject"
+
+    reasons = [str(x).strip() for x in (parsed.get("reasons") or []) if str(x).strip()][:5]
+    improvements = [str(x).strip() for x in (parsed.get("improvements") or []) if str(x).strip()][:5]
+    next_step = str(parsed.get("next_step") or "").strip()
+    text = str(parsed.get("text") or "").strip() or f"Score={total:.2f}, verdict={verdict}"
+
+    return {
+        "total_score": total,
+        "verdict": verdict,
+        "dimensions": dimensions,
+        "reasons": reasons,
+        "improvements": improvements,
+        "next_step": next_step,
+        "text": text,
+        "model": getattr(client.cfg, "model", ""),
+        "fallback_used": False,
+    }
+
+
+def booking_instruction_check(
+    *,
+    instructions: List[str] | None,
+    user_message: str,
+    draft_reply: str,
+    booking_decision: str = "",
+    facts: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    draft = str(draft_reply or "").strip()
+    if not draft:
+        raise HTTPException(status_code=422, detail="draft_reply is required")
+
+    ins = [str(x).strip() for x in (instructions or []) if str(x).strip()]
+    if not ins:
+        return {
+            "allowed": True,
+            "confidence": 1.0,
+            "risk_level": "low",
+            "violations": [],
+            "suggestions": [],
+            "reason": "no_instructions",
+            "text": "Keine Instruktionen hinterlegt.",
+            "model": "",
+            "fallback_used": True,
+        }
+
+    client = IonosLLM()
+    if not client.enabled():
+        return {
+            "allowed": True,
+            "confidence": 0.4,
+            "risk_level": "medium",
+            "violations": [],
+            "suggestions": ["LLM nicht verfügbar: Instruktionsprüfung konnte nicht verlässlich durchgeführt werden."],
+            "reason": "llm_unavailable",
+            "text": "Instruktionsprüfung übersprungen (LLM nicht verfügbar).",
+            "model": "",
+            "fallback_used": True,
+        }
+
+    schema = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "booking_instruction_check",
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "allowed": {"type": "boolean"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "risk_level": {"type": "string", "enum": ["low", "medium", "high"]},
+                    "violations": {"type": "array", "items": {"type": "string"}},
+                    "suggestions": {"type": "array", "items": {"type": "string"}},
+                    "reason": {"type": "string"},
+                    "text": {"type": "string"},
+                },
+                "required": ["allowed", "confidence", "risk_level", "violations", "suggestions", "reason", "text"],
+            },
+            "strict": True,
+        },
+    }
+
+    completion = client.chat_completions(
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Du prüfst, ob eine geplante Booking-Antwort mit Freitext-Instruktionen vereinbar ist.\n"
+                    "Bewerte NUR klare, operative Regeln aus den Instruktionen.\n"
+                    "Beispiele für operative Regeln: keine Termine nach 16 Uhr, keine Montage, Öffnungszeiten nie automatisch beantworten.\n"
+                    "Wenn ein klarer Widerspruch vorliegt, setze allowed=false und risk_level=high.\n"
+                    "Wenn unklar oder mehrdeutig, setze allowed=true, aber risk_level=medium und gib Verbesserungsvorschläge.\n"
+                    "Antworte ausschließlich als JSON laut Schema."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Instructions:\n{json.dumps(ins, ensure_ascii=False)}\n\n"
+                    f"booking_decision={str(booking_decision or '').strip().lower()}\n"
+                    f"facts={json.dumps(dict(facts or {}), ensure_ascii=False)}\n\n"
+                    f"User message:\n{str(user_message or '').strip()}\n\n"
+                    f"Draft reply:\n{draft}"
+                ),
+            },
+        ],
+        response_format=schema,
+        temperature=0.0,
+        top_p=0.1,
+        max_tokens=300,
+    )
+
+    parsed = _parse_json_obj(client.extract_text(completion))
+    if not parsed:
+        return {
+            "allowed": True,
+            "confidence": 0.4,
+            "risk_level": "medium",
+            "violations": [],
+            "suggestions": ["LLM-Antwort konnte nicht geparst werden; bitte manuell prüfen."],
+            "reason": "llm_parse_failed",
+            "text": "Instruktionsprüfung unvollständig (Parse-Fehler).",
+            "model": getattr(client.cfg, "model", ""),
+            "fallback_used": True,
+        }
+
+    risk_level = str(parsed.get("risk_level") or "medium").strip().lower()
+    if risk_level not in {"low", "medium", "high"}:
+        risk_level = "medium"
+
+    return {
+        "allowed": bool(parsed.get("allowed")),
+        "confidence": _clamp01(parsed.get("confidence")),
+        "risk_level": risk_level,
+        "violations": [str(x).strip() for x in (parsed.get("violations") or []) if str(x).strip()][:8],
+        "suggestions": [str(x).strip() for x in (parsed.get("suggestions") or []) if str(x).strip()][:8],
+        "reason": str(parsed.get("reason") or "").strip(),
+        "text": str(parsed.get("text") or "").strip(),
+        "model": getattr(client.cfg, "model", ""),
+        "fallback_used": False,
+    }
+
+
 def _extract_price_confirmation(text: str) -> Dict[str, object]:
     client = IonosLLM()
     if not client.enabled():

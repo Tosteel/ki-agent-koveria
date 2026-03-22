@@ -350,7 +350,7 @@ class Orchestrator:
         expected = self.registry.expected_input(tool)
         self._log_step_input(step_no, tool, args, expected)
 
-        if not tools_allowed(tool):
+        if not tools_allowed(tool, goal=goal):
             entry = {
                 "step": step_no,
                 "tool": tool,

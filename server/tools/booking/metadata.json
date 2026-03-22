@@ -39,6 +39,22 @@
       "side_effect_level": "none",
       "allows_goal_injection": false
     },
+    "booking_reply_score": {
+      "name": "Booking-Antwortscore",
+      "input": "user_message, draft_reply, optional booking_decision, facts, required_fields, missing_fields, knowledge_evidence",
+      "output": "total_score, verdict send|needs_review|reject, dimensions, reasons, improvements, next_step",
+      "capabilities": ["booking_quality_scoring"],
+      "side_effect_level": "none",
+      "allows_goal_injection": false
+    },
+    "booking_instruction_check": {
+      "name": "Booking-Instruktionsprüfung",
+      "input": "instructions, user_message, draft_reply, optional booking_decision, facts",
+      "output": "allowed, confidence, risk_level, violations, suggestions, reason",
+      "capabilities": ["booking_instruction_compliance"],
+      "side_effect_level": "none",
+      "allows_goal_injection": false
+    },
     "booking_descision_enginge": {
       "name": "Booking-Entscheidung (Alias)",
       "input": "facts, profile_rules, completeness, distance, quote, optional require_price_confirmation",

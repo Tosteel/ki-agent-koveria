@@ -30,6 +30,8 @@ _TOOL_DESCRIPTIONS: Dict[str, str] = {
     "booking_extract_facts": "Buchungsangaben aus Anfrage-Text extrahieren.",
     "booking_validate_completeness": "Pflichtfelder einer Buchungsanfrage prüfen.",
     "booking_decision_engine": "Booking-Entscheidung treffen (accept/decline/review/clarify).",
+    "booking_reply_score": "Booking-Antwortqualität und Prozessfortschritt LLM-basiert bewerten.",
+    "booking_instruction_check": "Prüft LLM-basiert, ob Draft/Entscheidung mit Freitext-Instruktionen übereinstimmen.",
     "mail_send": "E-Mails versenden (optional mit Anhang).",
     "mail_compose_clarification": "Gezielte Rückfragen für unvollständige Anfragen formulieren.",
     "calendar_hold_event": "Vorläufigen Kalender-Hold anlegen.",

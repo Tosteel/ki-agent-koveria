@@ -1,0 +1,64 @@
+{
+  "name": "Booking Assistant Control Tools",
+  "version": "1.0",
+  "description": "Operator- und Review-Steuerung des Booking-Assistants als direkt aufrufbare Tools fuer agent/ask.",
+  "owner": "team",
+  "tools": {
+    "booking_assistant_status_meeting": {
+      "name": "Booking-Statusmeeting",
+      "input": "optional since (ISO-8601)",
+      "output": "zusammenfassung von bestaetigt/abgelehnt/pending + blocker + empfehlungen",
+      "capabilities": ["booking_status_reporting"],
+      "side_effect_level": "none",
+      "allows_goal_injection": false
+    },
+    "booking_assistant_reviews": {
+      "name": "Booking-Reviews listen",
+      "input": "optional status (pending|approved|rejected|counteroffered|all)",
+      "output": "review-liste",
+      "capabilities": ["booking_review_listing"],
+      "side_effect_level": "none",
+      "allows_goal_injection": false
+    },
+    "booking_assistant_pending_next": {
+      "name": "Naechsten Pending-Fall holen",
+      "input": "keine",
+      "output": "ein pending-fall + optionen approve/reject/counteroffer",
+      "capabilities": ["booking_pending_triage"],
+      "side_effect_level": "none",
+      "allows_goal_injection": false
+    },
+    "booking_assistant_pending_apply": {
+      "name": "Pending-Aktion ausfuehren",
+      "input": "review_id, action, optionale body/subject/reason",
+      "output": "aktionsresultat fuer review",
+      "capabilities": ["booking_pending_action"],
+      "side_effect_level": "external_write",
+      "allows_goal_injection": false
+    },
+    "booking_assistant_review_approve": {
+      "name": "Review freigeben",
+      "input": "review_id, optional edited_body/subject",
+      "output": "review-action-result",
+      "capabilities": ["booking_review_approve"],
+      "side_effect_level": "external_write",
+      "allows_goal_injection": false
+    },
+    "booking_assistant_review_reject": {
+      "name": "Review ablehnen",
+      "input": "review_id, optional edited_body/subject/reason",
+      "output": "review-action-result",
+      "capabilities": ["booking_review_reject"],
+      "side_effect_level": "external_write",
+      "allows_goal_injection": false
+    },
+    "booking_assistant_review_counteroffer": {
+      "name": "Review Gegenangebot",
+      "input": "review_id, optional edited_body/subject",
+      "output": "review-action-result",
+      "capabilities": ["booking_review_counteroffer"],
+      "side_effect_level": "external_write",
+      "allows_goal_injection": false
+    }
+  }
+}

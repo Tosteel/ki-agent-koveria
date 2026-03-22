@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -26,6 +26,9 @@ def _default_state() -> Dict[str, Any]:
         "reviews": [],
         "holds": [],
         "thread_booking_contexts": [],
+        "activity_log": [],
+        "run_history": [],
+        "run_lock": {},
         "updated_at": _now_iso(),
     }
 
@@ -46,6 +49,9 @@ def load_state(settings: Settings, user_id: str) -> Dict[str, Any]:
     reviews = raw.get("reviews")
     holds = raw.get("holds")
     thread_booking_contexts = raw.get("thread_booking_contexts")
+    activity_log = raw.get("activity_log")
+    run_history = raw.get("run_history")
+    run_lock = raw.get("run_lock")
     if isinstance(processed, list):
         out["processed_mail_ids"] = [str(x).strip() for x in processed if str(x).strip()]
     if isinstance(reviews, list):
@@ -54,6 +60,12 @@ def load_state(settings: Settings, user_id: str) -> Dict[str, Any]:
         out["holds"] = [x for x in holds if isinstance(x, dict)]
     if isinstance(thread_booking_contexts, list):
         out["thread_booking_contexts"] = [x for x in thread_booking_contexts if isinstance(x, dict)]
+    if isinstance(activity_log, list):
+        out["activity_log"] = [x for x in activity_log if isinstance(x, dict)]
+    if isinstance(run_history, list):
+        out["run_history"] = [x for x in run_history if isinstance(x, dict)]
+    if isinstance(run_lock, dict):
+        out["run_lock"] = dict(run_lock)
     out["updated_at"] = str(raw.get("updated_at") or out["updated_at"])
     return out
 
@@ -105,6 +117,77 @@ def add_review(state: Dict[str, Any], review: Dict[str, Any]) -> None:
         reviews = []
     reviews.append(dict(review))
     state["reviews"] = reviews
+
+
+def append_activity(state: Dict[str, Any], item: Dict[str, Any], *, max_items: int = 10000) -> None:
+    log = state.get("activity_log")
+    if not isinstance(log, list):
+        log = []
+    entry = dict(item or {})
+    if not entry.get("timestamp"):
+        entry["timestamp"] = _now_iso()
+    log.append(entry)
+    if len(log) > max_items:
+        log = log[-max_items:]
+    state["activity_log"] = log
+
+
+def append_run_history(state: Dict[str, Any], item: Dict[str, Any], *, max_items: int = 2000) -> None:
+    history = state.get("run_history")
+    if not isinstance(history, list):
+        history = []
+    entry = dict(item or {})
+    if not entry.get("timestamp"):
+        entry["timestamp"] = _now_iso()
+    history.append(entry)
+    if len(history) > max_items:
+        history = history[-max_items:]
+    state["run_history"] = history
+
+
+def _parse_iso(value: str) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def acquire_run_lock(
+    state: Dict[str, Any],
+    *,
+    run_id: str,
+    ttl_seconds: int = 7200,
+) -> Dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    lock = state.get("run_lock") if isinstance(state.get("run_lock"), dict) else {}
+    active_run_id = str(lock.get("run_id") or "").strip()
+    expires_at = _parse_iso(str(lock.get("expires_at") or ""))
+    if active_run_id and expires_at and expires_at > now:
+        return {
+            "acquired": False,
+            "run_id": active_run_id,
+            "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
+            "reason": "run_already_active",
+        }
+
+    started_at = now.isoformat().replace("+00:00", "Z")
+    expires = (now + timedelta(seconds=max(60, int(ttl_seconds or 7200)))).isoformat().replace("+00:00", "Z")
+    new_lock = {"run_id": str(run_id or "").strip(), "started_at": started_at, "expires_at": expires}
+    state["run_lock"] = new_lock
+    return {"acquired": True, **new_lock, "reason": "lock_acquired"}
+
+
+def release_run_lock(state: Dict[str, Any], *, run_id: str) -> None:
+    lock = state.get("run_lock")
+    if not isinstance(lock, dict):
+        return
+    current = str(lock.get("run_id") or "").strip()
+    if current and current != str(run_id or "").strip():
+        return
+    state["run_lock"] = {}
 
 
 def find_review(state: Dict[str, Any], review_id: str) -> Dict[str, Any] | None:

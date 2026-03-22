@@ -16,7 +16,7 @@ class Planner:
         if not self.llm.enabled():
             return []
 
-        schema = self.registry.planner_schema()
+        schema = self.registry.planner_schema(goal=goal)
         plan = run_planner_chain(llm=self.llm, goal=goal, tool_schema=schema)
         try:
             parsed = AgentToolPlan.model_validate(plan)

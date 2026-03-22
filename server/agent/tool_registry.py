@@ -252,11 +252,11 @@ class ToolRegistry:
             "fields": fields,
         }
 
-    def planner_schema(self) -> dict:
+    def planner_schema(self, goal: str = "") -> dict:
         one_of = []
 
         for tool in self._tools.values():
-            if not tools_allowed(tool.name):
+            if not tools_allowed(tool.name, goal=goal):
                 continue
             args_schema = _inline_local_refs(tool.request_model.model_json_schema())
             if isinstance(args_schema, dict) and "additionalProperties" not in args_schema:

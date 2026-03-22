@@ -4,12 +4,22 @@ from typing import Any, Dict
 
 from server.agent.tool_registry import ToolContext, ToolRegistry
 
-from .booking import booking_decision_engine, booking_extract_facts, booking_validate_completeness
+from .booking import (
+    booking_decision_engine,
+    booking_extract_facts,
+    booking_instruction_check,
+    booking_reply_score,
+    booking_validate_completeness,
+)
 from .models import (
     BookingDecisionEngineRequest,
     BookingDecisionEngineResponse,
     BookingExtractFactsRequest,
     BookingExtractFactsResponse,
+    BookingInstructionCheckRequest,
+    BookingInstructionCheckResponse,
+    BookingReplyScoreRequest,
+    BookingReplyScoreResponse,
     BookingValidateCompletenessRequest,
     BookingValidateCompletenessResponse,
 )
@@ -38,6 +48,31 @@ def register(registry: ToolRegistry) -> None:
         )
         return BookingDecisionEngineResponse(**result).model_dump()
 
+    def tool_booking_reply_score(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+        req = BookingReplyScoreRequest(**args)
+        result = booking_reply_score(
+            user_message=req.user_message,
+            draft_reply=req.draft_reply,
+            booking_decision=req.booking_decision,
+            facts=req.facts,
+            required_fields=req.required_fields,
+            missing_fields=req.missing_fields,
+            knowledge_evidence=req.knowledge_evidence,
+            require_actionable=req.require_actionable,
+        )
+        return BookingReplyScoreResponse(**result).model_dump()
+
+    def tool_booking_instruction_check(_ctx: ToolContext, args: Dict[str, Any]) -> Dict[str, Any]:
+        req = BookingInstructionCheckRequest(**args)
+        result = booking_instruction_check(
+            instructions=req.instructions,
+            user_message=req.user_message,
+            draft_reply=req.draft_reply,
+            booking_decision=req.booking_decision,
+            facts=req.facts,
+        )
+        return BookingInstructionCheckResponse(**result).model_dump()
+
     registry.register(
         "booking_extract_facts",
         tool_booking_extract_facts,
@@ -62,6 +97,18 @@ def register(registry: ToolRegistry) -> None:
         tool_booking_decision_engine,
         request_model=BookingDecisionEngineRequest,
         response_model=BookingDecisionEngineResponse,
+    )
+    registry.register(
+        "booking_reply_score",
+        tool_booking_reply_score,
+        request_model=BookingReplyScoreRequest,
+        response_model=BookingReplyScoreResponse,
+    )
+    registry.register(
+        "booking_instruction_check",
+        tool_booking_instruction_check,
+        request_model=BookingInstructionCheckRequest,
+        response_model=BookingInstructionCheckResponse,
     )
     # Alias with legacy typo requested by user.
     registry.register(
