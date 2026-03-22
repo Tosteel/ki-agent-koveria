@@ -6,56 +6,63 @@
   "tools": {
     "booking_assistant_status_meeting": {
       "name": "Booking-Statusmeeting",
-      "input": "optional since (ISO-8601)",
-      "output": "zusammenfassung von bestaetigt/abgelehnt/pending + blocker + empfehlungen",
+      "description": "Erstellt eine Status-Zusammenfassung zum Buchungsprozess. Trigger-Phrasen: status-meeting, status, zusammenfassung, wo stehen wir, tagesreport.",
+      "input": "optional since (ISO-8601 oder Aliase wie now/heute/gestern)",
+      "output": "zusammenfassung von bestaetigt/abgelehnt/pending + blocker + empfehlungen + aktivitaetslog",
       "capabilities": ["booking_status_reporting"],
       "side_effect_level": "none",
       "allows_goal_injection": false
     },
     "booking_assistant_reviews": {
       "name": "Booking-Reviews listen",
-      "input": "optional status (pending|approved|rejected|counteroffered|all)",
-      "output": "review-liste",
+      "description": "Listet Review-Faelle. Fuer Fragen wie: gibt es offene Buchungen, offene Faelle, offene Anfragen, pending, wartende Buchungen. Fuer offene Buchungen status=pending verwenden.",
+      "input": "optional status (pending|approved|rejected|counteroffered|all). Bei offener Nachfrage standardmaessig pending.",
+      "output": "review-liste mit offenen/geschlossenen Buchungsfaellen",
       "capabilities": ["booking_review_listing"],
       "side_effect_level": "none",
       "allows_goal_injection": false
     },
     "booking_assistant_pending_next": {
       "name": "Naechsten Pending-Fall holen",
+      "description": "Holt genau den naechsten offenen Pending-Fall fuer die Operator-Triage. Trigger: naechster Fall, next pending, was ist als naechstes offen.",
       "input": "keine",
-      "output": "ein pending-fall + optionen approve/reject/counteroffer",
+      "output": "ein pending-fall + optionen approve/reject/counteroffer fuer die naechste Entscheidung",
       "capabilities": ["booking_pending_triage"],
       "side_effect_level": "none",
       "allows_goal_injection": false
     },
     "booking_assistant_pending_apply": {
       "name": "Pending-Aktion ausfuehren",
-      "input": "review_id, action, optionale body/subject/reason",
-      "output": "aktionsresultat fuer review",
+      "description": "Fuehrt eine Entscheidung auf einem konkreten Pending-Fall aus (approve, reject, counteroffer). Trigger: freigeben, ablehnen, gegenangebot senden.",
+      "input": "review_id, action (approve|reject|counteroffer), optionale body/subject/reason",
+      "output": "aktionsresultat fuer review inkl. Versandstatus",
       "capabilities": ["booking_pending_action"],
       "side_effect_level": "external_write",
       "allows_goal_injection": false
     },
     "booking_assistant_review_approve": {
       "name": "Review freigeben",
+      "description": "Direkte Freigabe eines Review-Falls (legacy route). Bevorzugt ist booking_assistant_pending_apply mit action=approve.",
       "input": "review_id, optional edited_body/subject",
-      "output": "review-action-result",
+      "output": "review-action-result mit Status approved",
       "capabilities": ["booking_review_approve"],
       "side_effect_level": "external_write",
       "allows_goal_injection": false
     },
     "booking_assistant_review_reject": {
       "name": "Review ablehnen",
+      "description": "Direkte Ablehnung eines Review-Falls (legacy route). Bevorzugt ist booking_assistant_pending_apply mit action=reject.",
       "input": "review_id, optional edited_body/subject/reason",
-      "output": "review-action-result",
+      "output": "review-action-result mit Status rejected",
       "capabilities": ["booking_review_reject"],
       "side_effect_level": "external_write",
       "allows_goal_injection": false
     },
     "booking_assistant_review_counteroffer": {
       "name": "Review Gegenangebot",
+      "description": "Direktes Gegenangebot fuer einen Review-Fall (legacy route). Bevorzugt ist booking_assistant_pending_apply mit action=counteroffer.",
       "input": "review_id, optional edited_body/subject",
-      "output": "review-action-result",
+      "output": "review-action-result mit Status counteroffered",
       "capabilities": ["booking_review_counteroffer"],
       "side_effect_level": "external_write",
       "allows_goal_injection": false

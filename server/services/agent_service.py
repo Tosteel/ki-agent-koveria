@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Tuple
 from pydantic import BaseModel, Field, create_model
 
 from server.core.settings import Settings
+from server.agent.policies import tools_allowed
 from server.tools.loader import register_all_tools
 from server.agent.tool_registry import ToolRegistry, ToolContext
 from server.agent.orchestrator import Orchestrator
@@ -677,6 +678,8 @@ def _llm_planner_guard(
     goal: str,
     steps: List[Dict[str, Any]],
     *,
+    registry: ToolRegistry | None = None,
+    goal_for_policy: str = "",
     goal_context: str = "",
 ) -> Dict[str, Any]:
     if not hasattr(llm, "enabled") or not llm.enabled():
@@ -706,12 +709,29 @@ def _llm_planner_guard(
         )
 
     system = get_planner_guard_system_prompt(provider)
+    allowed_tools_hint = ""
+    if registry is not None:
+        scoped_goal = str(goal_for_policy or goal or "").strip()
+        allowed_tools = [
+            name for name in registry.tool_names()
+            if tools_allowed(name, goal=scoped_goal)
+        ]
+        if len(allowed_tools) > 40:
+            allowed_tools = allowed_tools[:40]
+        allowed_tools_hint = (
+            "Erlaubte Tools im aktuellen Scope:\n"
+            f"{', '.join(allowed_tools) if allowed_tools else '-'}\n\n"
+        )
+
     user = (
         f"Aktuelles Ziel (primaer):\n{goal}\n\n"
         + (f"Zusatzkontext (nur Hintergrund):\n{goal_context}\n\n" if str(goal_context).strip() else "")
+        + allowed_tools_hint
         + f"Geplante Schritte:\n{json.dumps(compact_steps, ensure_ascii=False)}\n\n"
         "Prüfkriterien:\n"
         "- Beurteile Zielerfüllung PRIMÄR anhand des aktuellen Ziels; nutze Zusatzkontext nur zur Referenzauflösung.\n"
+        "- Melde missing_tool NUR fuer Tools, die im aktuellen Scope erlaubt sind.\n"
+        "- Bei assistant_id-Zielen missing_tool nur fuer zwingende technische Abhängigkeiten melden.\n"
         "- Wenn Ziel E-Mail-Versand verlangt, muss mail_send oder mail_answer enthalten sein.\n"
         "- Wenn Ziel eine PDF lesen/analysieren/zusammenfassen will, muss read_pdf enthalten sein (nicht file_read).\n"
         "- Wenn Ziel eine neue PDF erstellen/exportieren will, muss pdf_export enthalten sein.\n"
@@ -799,6 +819,7 @@ def _filter_llm_guard_with_registry(
     steps: List[Dict[str, Any]],
     missing: List[str],
     reasons: List[str],
+    goal: str = "",
 ) -> tuple[List[str], List[str]]:
     allowed_prefixes = (
         "missing_tool:",
@@ -860,7 +881,12 @@ def _filter_llm_guard_with_registry(
 
         if tok.startswith("missing_tool:"):
             tool = tok.split(":", 1)[1].strip()
-            if tool and registry.get_tool(tool) is not None and tool not in step_tools:
+            if (
+                tool
+                and registry.get_tool(tool) is not None
+                and tools_allowed(tool, goal=goal)
+                and tool not in step_tools
+            ):
                 kept_missing.append(tok)
             else:
                 dropped_refs.append(tool)
@@ -924,6 +950,42 @@ def _registry_guard_checks(registry: ToolRegistry, steps: List[Dict[str, Any]]) 
     return missing, reasons
 
 
+def _is_assistant_scoped_goal(goal: str) -> bool:
+    low = str(goal or "").strip().lower()
+    if not low:
+        return False
+    return "assistant_id:" in low
+
+
+def _drop_missing_tool_tokens(
+    missing: List[str],
+    reasons: List[str],
+) -> tuple[List[str], List[str]]:
+    dropped_tools: List[str] = []
+    kept_missing: List[str] = []
+    for token in missing:
+        tok = str(token or "").strip()
+        if tok.startswith("missing_tool:"):
+            tool_name = tok.split(":", 1)[1].strip()
+            if tool_name:
+                dropped_tools.append(tool_name)
+            continue
+        kept_missing.append(tok)
+
+    if not dropped_tools:
+        return missing, reasons
+
+    kept_reasons: List[str] = []
+    for reason in reasons:
+        txt = str(reason or "").strip()
+        if not txt:
+            continue
+        if any(tool in txt for tool in dropped_tools):
+            continue
+        kept_reasons.append(txt)
+    return kept_missing, kept_reasons
+
+
 def run_planner_guard(
     llm: Any,
     provider: str,
@@ -933,7 +995,15 @@ def run_planner_guard(
 ) -> Dict[str, Any]:
     goal_primary, goal_context = _split_goal_and_context_for_guard(goal)
     goal_for_eval = goal_primary or str(goal or "").strip()
-    llm_gate = _llm_planner_guard(llm, provider, goal_for_eval, steps, goal_context=goal_context)
+    llm_gate = _llm_planner_guard(
+        llm,
+        provider,
+        goal_for_eval,
+        steps,
+        registry=registry,
+        goal_for_policy=str(goal or "").strip(),
+        goal_context=goal_context,
+    )
     if not llm_gate:
         return {
             "status": "replan",
@@ -945,6 +1015,15 @@ def run_planner_guard(
     status = str(llm_gate.get("status") or "replan").strip().lower()
     missing = [str(x).strip() for x in (llm_gate.get("missing") or []) if str(x).strip()]
     reasons = [str(x).strip() for x in (llm_gate.get("reasons") or []) if str(x).strip()]
+
+    # For assistant-scoped chat goals, keep guard focused on technical plan validity
+    # (schema/required args/known tools). Do not block solely due to LLM-proposed
+    # additional "missing_tool:*" suggestions, which can cause ping-pong between
+    # equivalent assistant tools.
+    if _is_assistant_scoped_goal(str(goal or "")):
+        missing, reasons = _drop_missing_tool_tokens(missing, reasons)
+        if status == "replan" and not missing:
+            status = "ready"
 
     # If the guard answer is too generic, ask once for concrete, machine-readable gaps.
     generic_tokens = {"plan_mismatch", "unknown", "insufficient_info", "not_enough_info"}
@@ -980,12 +1059,29 @@ def run_planner_guard(
             args = step.get("args") if isinstance(step.get("args"), dict) else {}
             compact_steps.append({"step": i, "tool": str(step.get("tool") or "").strip(), "args": args})
         system_refine = get_planner_guard_refine_system_prompt(provider)
+        allowed_tools_hint = ""
+        if registry is not None:
+            scoped_goal = str(goal or "").strip()
+            allowed_tools = [
+                name for name in registry.tool_names()
+                if tools_allowed(name, goal=scoped_goal)
+            ]
+            if len(allowed_tools) > 40:
+                allowed_tools = allowed_tools[:40]
+            allowed_tools_hint = (
+                "Erlaubte Tools im aktuellen Scope:\n"
+                f"{', '.join(allowed_tools) if allowed_tools else '-'}\n\n"
+            )
+
         user_refine = (
             f"Aktuelles Ziel (primaer):\n{goal_for_eval}\n\n"
             + (f"Zusatzkontext (nur Hintergrund):\n{goal_context}\n\n" if str(goal_context).strip() else "")
+            + allowed_tools_hint
             + f"Schritte:\n{json.dumps(compact_steps, ensure_ascii=False)}\n\n"
             "Liefere KONKRETE missing/reasons.\n"
             "Beurteile Zielerfüllung PRIMÄR anhand des aktuellen Ziels; nutze Zusatzkontext nur zur Referenzauflösung.\n"
+            "Melde missing_tool nur fuer Tools, die im aktuellen Scope erlaubt sind.\n"
+            "Wenn es sich um assistant_id-Ziele handelt, erzwinge missing_tool nur bei zwingenden technischen Abhängigkeiten.\n"
             "missing MUSS nur diese Formen nutzen:\n"
             "- missing_tool:<tool>\n"
             "- missing_arg:<tool>.<arg>\n"
@@ -1027,7 +1123,10 @@ def run_planner_guard(
             steps=steps,
             missing=missing,
             reasons=reasons,
+            goal=str(goal or "").strip(),
         )
+        if _is_assistant_scoped_goal(str(goal or "")):
+            missing, reasons = _drop_missing_tool_tokens(missing, reasons)
         reg_missing, reg_reasons = _registry_guard_checks(registry, steps)
         if reg_missing:
             status = "replan"
@@ -1081,6 +1180,8 @@ def run_planner_guard(
             reasons = ["Der Plan passt laut Guard nicht vollständig zum Ziel."]
         if not missing:
             missing = ["missing_step:goal_alignment"]
+    elif not missing:
+        reasons = []
     instructions = ""
     if status == "replan":
         instructions = "WICHTIGE PLANUNGSREGELN (müssen erfüllt sein):\n- " + "\n- ".join(reasons)
