@@ -1,0 +1,13 @@
+{
+  "name": "Booking Assistant v3",
+  "version": "3.0",
+  "description": "Neu aufgesetzter Booking-Assistant mit klarer Mail- und HITL-Prozesslogik (rule_review + final_confirmation).",
+  "endpoints": {
+    "run_once": "/assistants/booking-assistant-v3/run-once",
+    "status": "/assistants/booking-assistant-v3/status",
+    "reviews": "/assistants/booking-assistant-v3/reviews",
+    "pending_next": "/assistants/booking-assistant-v3/pending/next",
+    "pending_apply": "/assistants/booking-assistant-v3/pending/{review_id}/apply"
+  },
+  "preferred_dialog_endpoint": "/agent/ask"
+}

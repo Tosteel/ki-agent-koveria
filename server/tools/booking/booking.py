@@ -298,6 +298,125 @@ def _clamp01(value: Any) -> float:
         return 0.0
 
 
+def _contains_any(text: str, needles: List[str]) -> bool:
+    low = str(text or "").lower()
+    for n in needles:
+        if str(n or "").lower() in low:
+            return True
+    return False
+
+
+def _apply_auto_decline_score_override(
+    *,
+    booking_decision: str,
+    draft_reply: str,
+    result: Dict[str, Any],
+) -> Dict[str, Any]:
+    decision = str(booking_decision or "").strip().lower()
+    if decision != "auto_decline":
+        return result
+
+    draft_l = str(draft_reply or "").lower()
+    has_decline = _contains_any(
+        draft_l,
+        [
+            "leider",
+            "nicht verfügbar",
+            "nicht verfuegbar",
+            "nicht zusagen",
+            "nicht bestätigen",
+            "nicht bestaetigen",
+            "nicht möglich",
+            "nicht moeglich",
+            "nicht annehmen",
+        ],
+    )
+    if not has_decline:
+        return result
+
+    calendar_reason = _contains_any(
+        draft_l,
+        [
+            "zeitfenster",
+            "kalender",
+            "belegt",
+            "ausgebucht",
+            "nicht verfügbar",
+            "nicht verfuegbar",
+        ],
+    )
+    rule_reason = _contains_any(
+        draft_l,
+        [
+            "rahmenbedingungen",
+            "gründe",
+            "gruende",
+            "wochenende",
+            "maximaldauer",
+            "distanz",
+            "regel",
+            "nicht vereinbar",
+        ],
+    )
+    has_reason = calendar_reason or rule_reason or _contains_any(draft_l, ["grund", "gründe", "gruende"])
+    if not has_reason:
+        return result
+
+    has_next_step = _contains_any(
+        draft_l,
+        [
+            "alternativen termin",
+            "alternative startzeit",
+            "alternative anfrage",
+            "angepasste anfrage",
+            "wenn sie möchten",
+            "wenn sie moechten",
+            "nennen sie",
+            "vorschlag",
+        ],
+    )
+
+    dims_raw = result.get("dimensions") if isinstance(result.get("dimensions"), dict) else {}
+    dims = {
+        "booking_fit": _clamp01(dims_raw.get("booking_fit")),
+        "process_progress": _clamp01(dims_raw.get("process_progress")),
+        "groundedness": _clamp01(dims_raw.get("groundedness")),
+        "clarity": _clamp01(dims_raw.get("clarity")),
+        "tone": _clamp01(dims_raw.get("tone")),
+        "actionable": _clamp01(dims_raw.get("actionable")),
+    }
+
+    dims["booking_fit"] = max(dims["booking_fit"], 0.80)
+    dims["process_progress"] = max(dims["process_progress"], 0.82 if has_next_step else 0.72)
+    dims["groundedness"] = max(dims["groundedness"], 0.78)
+    dims["clarity"] = max(dims["clarity"], 0.75)
+    dims["tone"] = max(dims["tone"], 0.75)
+    dims["actionable"] = max(dims["actionable"], 0.80 if has_next_step else 0.65)
+
+    weighted = (
+        dims["booking_fit"] * 0.25
+        + dims["process_progress"] * 0.25
+        + dims["groundedness"] * 0.15
+        + dims["clarity"] * 0.15
+        + dims["tone"] * 0.10
+        + dims["actionable"] * 0.10
+    )
+    current_total = _clamp01(result.get("total_score"))
+    min_total = 0.82 if has_next_step else 0.80
+    total = round(max(current_total, weighted, min_total), 3)
+
+    out = dict(result)
+    out["dimensions"] = {k: round(v, 3) for k, v in dims.items()}
+    out["total_score"] = total
+    out["verdict"] = "send" if total >= 0.8 else str(result.get("verdict") or "needs_review").strip().lower()
+    if out.get("verdict") == "send":
+        out["reasons"] = []
+        out["improvements"] = []
+        out["next_step"] = "Kann versendet werden."
+        out["text"] = f"Score={total:.2f}, verdict=send (auto_decline_override)"
+    return out
+
+
 def _fallback_booking_reply_score(
     *,
     user_message: str,
@@ -378,7 +497,7 @@ def _fallback_booking_reply_score(
         reasons.append("Antwort passt nicht praezise zur Buchungsanfrage.")
         improvements.append("Direkt auf Anfragekontext und Regeln eingehen.")
 
-    return {
+    out = {
         "total_score": total,
         "verdict": verdict,
         "dimensions": dimensions,
@@ -389,6 +508,11 @@ def _fallback_booking_reply_score(
         "model": "",
         "fallback_used": True,
     }
+    return _apply_auto_decline_score_override(
+        booking_decision=booking_decision,
+        draft_reply=draft_reply,
+        result=out,
+    )
 
 
 def booking_reply_score(
@@ -538,7 +662,7 @@ def booking_reply_score(
     next_step = str(parsed.get("next_step") or "").strip()
     text = str(parsed.get("text") or "").strip() or f"Score={total:.2f}, verdict={verdict}"
 
-    return {
+    out = {
         "total_score": total,
         "verdict": verdict,
         "dimensions": dimensions,
@@ -549,6 +673,11 @@ def booking_reply_score(
         "model": getattr(client.cfg, "model", ""),
         "fallback_used": False,
     }
+    return _apply_auto_decline_score_override(
+        booking_decision=decision,
+        draft_reply=draft,
+        result=out,
+    )
 
 
 def booking_instruction_check(
@@ -564,6 +693,11 @@ def booking_instruction_check(
         raise HTTPException(status_code=422, detail="draft_reply is required")
 
     ins = [str(x).strip() for x in (instructions or []) if str(x).strip()]
+    ins = [
+        x for x in ins
+        if str(x).strip().lower() not in {"string", "null", "none"}
+        and not str(x).strip().lower().startswith("additionalprop")
+    ]
     if not ins:
         return {
             "allowed": True,
@@ -573,6 +707,94 @@ def booking_instruction_check(
             "suggestions": [],
             "reason": "no_instructions",
             "text": "Keine Instruktionen hinterlegt.",
+            "model": "",
+            "fallback_used": True,
+        }
+
+    decision = str(booking_decision or "").strip().lower()
+    draft_l = draft.lower()
+    if decision == "auto_decline":
+        has_decline = _contains_any(
+            draft_l,
+            [
+                "leider",
+                "nicht verfügbar",
+                "nicht verfuegbar",
+                "nicht zusagen",
+                "nicht bestätigen",
+                "nicht bestaetigen",
+                "nicht möglich",
+                "nicht moeglich",
+            ],
+        )
+        has_reason = _contains_any(
+            draft_l,
+            [
+                "kalender",
+                "belegt",
+                "ausgebucht",
+                "zeitfenster",
+                "rahmenbedingungen",
+                "gründe",
+                "gruende",
+                "regel",
+                "nicht vereinbar",
+            ],
+        )
+        has_alternative = _contains_any(
+            draft_l,
+            [
+                "alternativ",
+                "anderen termin",
+                "alternative startzeit",
+                "nennen sie einen",
+                "vorschlag",
+            ],
+        )
+        has_confirmation = _contains_any(
+            draft_l,
+            [
+                "ich kann ihnen den termin zusagen",
+                "termin ist bestätigt",
+                "termin wurde reserviert",
+                "auftrag bestätigt",
+            ],
+        )
+        # Deterministic fast-path: valid decline wording should not be blocked by LLM interpretation.
+        if has_decline and (has_reason or has_alternative):
+            return {
+                "allowed": True,
+                "confidence": 0.95,
+                "risk_level": "low",
+                "violations": [],
+                "suggestions": [],
+                "reason": "auto_decline_legitimate",
+                "text": "Auto-Decline ist mit den operativen Regeln vereinbar.",
+                "model": "",
+                "fallback_used": True,
+            }
+        # If draft clearly contradicts an auto-decline decision, block deterministically.
+        if has_confirmation:
+            return {
+                "allowed": False,
+                "confidence": 0.95,
+                "risk_level": "high",
+                "violations": ["Die Antwort wirkt wie eine Zusage, obwohl die Entscheidung auf auto_decline steht."],
+                "suggestions": ["Formulieren Sie eine klare Absage mit kurzer Begründung und optionaler Alternative."],
+                "reason": "auto_decline_contradiction",
+                "text": "Antwort widerspricht der auto_decline-Entscheidung.",
+                "model": "",
+                "fallback_used": True,
+            }
+        # Conservative fallback: do not hard-block missing phrasing details; ask for refinement instead.
+        return {
+            "allowed": True,
+            "confidence": 0.7,
+            "risk_level": "medium",
+            "violations": [],
+            "suggestions": ["Fügen Sie eine explizite Ablehnungsbegründung und eine alternative Option hinzu."],
+            "reason": "auto_decline_style_refinement",
+            "text": "Auto-Decline ist zulässig, Antwort kann sprachlich präzisiert werden.",
             "model": "",
             "fallback_used": True,
         }

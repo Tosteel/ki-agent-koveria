@@ -12,6 +12,76 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _is_placeholder_text(value: str) -> bool:
+    low = str(value or "").strip().lower()
+    if not low:
+        return True
+    if low in {"string", "null", "none", "n/a"}:
+        return True
+    if low.startswith("additionalprop"):
+        return True
+    return False
+
+
+def _sanitize_instructions(values: List[str] | None) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for raw in (values or []):
+        v = str(raw or "").strip()
+        if not v or _is_placeholder_text(v):
+            continue
+        if v in seen:
+            continue
+        seen.add(v)
+        out.append(v)
+    return out
+
+
+def _sanitize_patch_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        cleaned: Dict[str, Any] = {}
+        for k, v in value.items():
+            key = str(k or "").strip()
+            if not key or _is_placeholder_text(key):
+                continue
+            nested = _sanitize_patch_value(v)
+            if nested is None:
+                continue
+            if isinstance(nested, dict) and not nested:
+                continue
+            if isinstance(nested, list) and not nested:
+                continue
+            cleaned[key] = nested
+        return cleaned
+    if isinstance(value, list):
+        cleaned_list: List[Any] = []
+        for item in value:
+            nested = _sanitize_patch_value(item)
+            if nested is None:
+                continue
+            if isinstance(nested, dict) and not nested:
+                continue
+            if isinstance(nested, list) and not nested:
+                continue
+            cleaned_list.append(nested)
+        return cleaned_list
+    if isinstance(value, str):
+        v = value.strip()
+        if not v or _is_placeholder_text(v):
+            return None
+        return v
+    return value
+
+
+def _sanitize_patch(patch: Dict[str, Any] | None) -> Dict[str, Any]:
+    if not isinstance(patch, dict):
+        return {}
+    cleaned = _sanitize_patch_value(patch)
+    if isinstance(cleaned, dict):
+        return cleaned
+    return {}
+
+
 def _safe_name(value: str) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -34,8 +104,8 @@ def _default_profile(name: str, codename: str = "", instructions: List[str] | No
     return {
         "assistent_profile_name": name,
         "codename": str(codename or "").strip(),
-        "instructions": [str(x).strip() for x in (instructions or []) if str(x).strip()],
-        "rules": dict(rules or {}),
+        "instructions": _sanitize_instructions(instructions or []),
+        "rules": _sanitize_patch(rules or {}),
         "created_at": now,
         "updated_at": now,
     }
@@ -124,7 +194,7 @@ def assistent_profile_update(
     if str(codename or "").strip():
         profile["codename"] = str(codename).strip()
 
-    add = [str(x).strip() for x in (instructions_add or []) if str(x).strip()]
+    add = _sanitize_instructions(instructions_add or [])
     if add:
         existing = profile.get("instructions")
         if not isinstance(existing, list):
@@ -136,14 +206,16 @@ def assistent_profile_update(
                 seen.add(item)
         profile["instructions"] = existing
 
-    if isinstance(rules_patch, dict) and rules_patch:
+    clean_rules_patch = _sanitize_patch(rules_patch or {})
+    if clean_rules_patch:
         rules = profile.get("rules")
         if not isinstance(rules, dict):
             rules = {}
-        profile["rules"] = _deep_merge(rules, rules_patch)
+        profile["rules"] = _deep_merge(rules, clean_rules_patch)
 
-    if isinstance(raw_patch, dict) and raw_patch:
-        profile = _deep_merge(profile, raw_patch)
+    clean_raw_patch = _sanitize_patch(raw_patch or {})
+    if clean_raw_patch:
+        profile = _deep_merge(profile, clean_raw_patch)
 
     _save_profile(path, profile)
     return {
@@ -211,7 +283,6 @@ def assistent_profile_check(
     if isinstance(cal_rules, dict) and action_name in {
         "calendar_create_event",
         "calendar_hold_event",
-        "calender_hold_event",
         "calendar_check_availability",
         "calendar_propose_slots",
     }:

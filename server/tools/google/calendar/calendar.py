@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
+from zoneinfo import ZoneInfo
 
 import requests
 from fastapi import HTTPException
@@ -24,6 +25,15 @@ def _to_iso(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.isoformat()
+
+
+def _apply_timezone(dt: datetime, timezone_name: str) -> datetime:
+    if dt.tzinfo is not None:
+        return dt
+    try:
+        return dt.replace(tzinfo=ZoneInfo(str(timezone_name or "Europe/Berlin")))
+    except Exception:
+        return dt.replace(tzinfo=timezone.utc)
 
 
 def _google_cfg() -> Dict[str, str]:
@@ -143,6 +153,8 @@ def calendar_check_availability(
 ) -> Dict[str, Any]:
     start = _parse_iso(start_iso)
     end = _parse_iso(end_iso)
+    start = _apply_timezone(start, timezone_name)
+    end = _apply_timezone(end, timezone_name)
     if end <= start:
         raise HTTPException(status_code=422, detail="end_iso must be after start_iso")
 
@@ -193,6 +205,8 @@ def calendar_create_event(
 ) -> Dict[str, Any]:
     start = _parse_iso(start_iso)
     end = _parse_iso(end_iso)
+    start = _apply_timezone(start, timezone_name)
+    end = _apply_timezone(end, timezone_name)
     if end <= start:
         raise HTTPException(status_code=422, detail="end_iso must be after start_iso")
     send_updates_clean = str(send_updates or "none").strip()
@@ -300,6 +314,8 @@ def calendar_hold_event(
 ) -> Dict[str, Any]:
     start = _parse_iso(start_iso)
     end = _parse_iso(end_iso)
+    start = _apply_timezone(start, timezone_name)
+    end = _apply_timezone(end, timezone_name)
     if end <= start:
         raise HTTPException(status_code=422, detail="end_iso must be after start_iso")
 

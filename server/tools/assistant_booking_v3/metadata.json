@@ -1,0 +1,44 @@
+{
+  "name": "Booking Assistant v3 Control Tools",
+  "version": "3.0",
+  "description": "HITL-Steuerung für booking-assistant-v3.",
+  "owner": "team",
+  "tools": {
+    "booking_assistant_v3_status": {
+      "name": "Booking-v3 Status",
+      "description": "Statuszusammenfassung seit letztem Status oder angegebenem Zeitpunkt.",
+      "input": "optional since",
+      "output": "Statuszahlen + Empfehlungen",
+      "capabilities": ["booking_v3_status"],
+      "side_effect_level": "none",
+      "allows_goal_injection": false
+    },
+    "booking_assistant_v3_reviews": {
+      "name": "Booking-v3 Reviews",
+      "description": "Listet offene/geschlossene Reviews (rule_review/final_confirmation).",
+      "input": "status, kind",
+      "output": "Reviewliste",
+      "capabilities": ["booking_v3_review_list"],
+      "side_effect_level": "none",
+      "allows_goal_injection": false
+    },
+    "booking_assistant_v3_pending_next": {
+      "name": "Booking-v3 Next Pending",
+      "description": "Nächsten offenen Fall laden.",
+      "input": "queue=any|rule_review|final_confirmation",
+      "output": "ein Fall + Optionen",
+      "capabilities": ["booking_v3_pending_next"],
+      "side_effect_level": "none",
+      "allows_goal_injection": false
+    },
+    "booking_assistant_v3_pending_apply": {
+      "name": "Booking-v3 Pending Apply",
+      "description": "Aktion auf offenen Fall anwenden.",
+      "input": "review_id + action",
+      "output": "Aktionsergebnis",
+      "capabilities": ["booking_v3_pending_apply"],
+      "side_effect_level": "external_write",
+      "allows_goal_injection": false
+    }
+  }
+}

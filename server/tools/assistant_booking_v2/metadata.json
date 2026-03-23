@@ -1,0 +1,71 @@
+{
+  "name": "Booking Assistant v2 Control Tools",
+  "version": "2.0",
+  "description": "Operator- und Review-Steuerung für booking-assistant-v2 als direkt aufrufbare Tools für agent/ask.",
+  "owner": "team",
+  "tools": {
+    "booking_assistant_v2_status_meeting": {
+      "name": "Booking-v2 Statusmeeting",
+      "description": "Erstellt eine Status-Zusammenfassung zum Buchungsprozess (v2).",
+      "input": "optional since (ISO-8601 oder now/heute/gestern)",
+      "output": "bestaetigt/abgelehnt/pending + blocker + empfehlungen",
+      "capabilities": ["booking_v2_status_reporting"],
+      "side_effect_level": "none",
+      "allows_goal_injection": false
+    },
+    "booking_assistant_v2_reviews": {
+      "name": "Booking-v2 Reviews listen",
+      "description": "Listet Review-Fälle (z. B. offene Buchungen mit status=pending).",
+      "input": "optional status (pending|approved|rejected|counteroffered|all)",
+      "output": "review-liste",
+      "capabilities": ["booking_v2_review_listing"],
+      "side_effect_level": "none",
+      "allows_goal_injection": false
+    },
+    "booking_assistant_v2_pending_next": {
+      "name": "Booking-v2 nächster Pending-Fall",
+      "description": "Holt den nächsten offenen Pending-Fall inklusive Optionen.",
+      "input": "keine",
+      "output": "ein pending-fall + optionen",
+      "capabilities": ["booking_v2_pending_triage"],
+      "side_effect_level": "none",
+      "allows_goal_injection": false
+    },
+    "booking_assistant_v2_pending_apply": {
+      "name": "Booking-v2 Pending-Aktion",
+      "description": "Wendet approve/reject/counteroffer auf einen Pending-Fall an.",
+      "input": "review_id, action, optional body/subject/reason",
+      "output": "aktionsresultat inkl. versandstatus",
+      "capabilities": ["booking_v2_pending_action"],
+      "side_effect_level": "external_write",
+      "allows_goal_injection": false
+    },
+    "booking_assistant_v2_review_approve": {
+      "name": "Booking-v2 Review approve",
+      "description": "Direkte Freigabe eines Review-Falls (legacy).",
+      "input": "review_id, optional edited_body/subject",
+      "output": "review-action-result",
+      "capabilities": ["booking_v2_review_approve"],
+      "side_effect_level": "external_write",
+      "allows_goal_injection": false
+    },
+    "booking_assistant_v2_review_reject": {
+      "name": "Booking-v2 Review reject",
+      "description": "Direkte Ablehnung eines Review-Falls (legacy).",
+      "input": "review_id, optional edited_body/subject/reason",
+      "output": "review-action-result",
+      "capabilities": ["booking_v2_review_reject"],
+      "side_effect_level": "external_write",
+      "allows_goal_injection": false
+    },
+    "booking_assistant_v2_review_counteroffer": {
+      "name": "Booking-v2 Review counteroffer",
+      "description": "Direktes Gegenangebot für einen Review-Fall (legacy).",
+      "input": "review_id, optional edited_body/subject",
+      "output": "review-action-result",
+      "capabilities": ["booking_v2_review_counteroffer"],
+      "side_effect_level": "external_write",
+      "allows_goal_injection": false
+    }
+  }
+}
