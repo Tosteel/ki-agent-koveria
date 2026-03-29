@@ -48,7 +48,6 @@ GLOBAL_BASIC_TOOLS = {
     "calendar_update_event",
     "calendar_propose_slots",
     "calendar_hold_event",
-    "calender_hold_event",
     "customer_support_reply_score",
     "customer_support_review_ticket_create",
     "customer_support_review_ticket_update",
@@ -58,6 +57,16 @@ GLOBAL_BASIC_TOOLS = {
     "assistent_profile_update",
     "assistent_profile_check",
     "skills_list",
+    "startup_matchup_step_1_workshop_analysis",
+    "startup_matchup_step_2_company_profile",
+    "startup_matchup_step_3_gap_analysis",
+    "startup_matchup_step_4_startup_search",
+    "startup_matchup_step_4_1_startup_structuring",
+    "startup_matchup_step_5_startup_ranking",
+    "startup_matchup_step_6_startup_deep_research",
+    "startup_matchup_step_7_startup_profiles",
+    "startup_matchup_step_8_final_report",
+    "startup_matchup_step_9_pdf_report",
 }
 
 GLOBAL_COMPETITIVE_ANALYSIS_TOOLS = {
@@ -71,6 +80,8 @@ OFFER_FLOW: Set[str] = set()
 
 ASSISTANT_POLICY_MODULES = {
     "booking-assistant": "server.assistants.booking_assistant.policies",
+    "booking-assistant-v2": "server.assistants.booking_assistant_v2.policies",
+    "booking-assistant-v3": "server.assistants.booking_assistant_v3.policies",
     "mail-assistant": "server.assistants.mail_assistant.policies",
 }
 
